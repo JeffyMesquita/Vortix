@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <title>Vortix</title>
+  <path d="M7 8h10l7 31 7-31h10" stroke="#82d9bd" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="7" cy="8" r="3" fill="#82d9bd"/>
+  <circle cx="41" cy="8" r="3" fill="#ffad66"/>
+  <circle cx="24" cy="39" r="3" fill="#82d9bd"/>
+</svg>

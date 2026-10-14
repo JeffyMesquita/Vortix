@@ -1,0 +1,38 @@
+# .NET build and test output
+bin/
+obj/
+publish/
+artifacts/
+TestResults/
+.vs/
+
+# Local databases and runtime key rings
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+**/DataProtection-Keys/
+
+# Machine-specific settings and secrets
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+appsettings.*.Local.json
+secrets.json
+*.publishsettings
+
+# IDE and operating-system files
+.idea/
+.vscode/
+*.user
+*.suo
+*.userprefs
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log

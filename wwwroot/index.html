@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15191f">
+  <title>Vortix — API Client</title>
+  <link rel="icon" type="image/svg+xml" href="/vortix-mark.svg">
+  <link rel="preload" href="/fonts/fira-code-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/fonts/fonts.css">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/runner-logic.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="toast-region" id="toast-region" role="region" aria-label="Notificações"></div>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Vortix, início">
+        <span class="brand-icon" aria-hidden="true"><img src="/vortix-mark.svg" alt=""></span>
+        <span><strong>Vortix</strong><small>API CLIENT</small></span>
+      </a>
+      <div class="sidebar-tools">
+        <button class="new-request-button" id="new-request" type="button"><span aria-hidden="true">＋</span> Nova requisição</button>
+        <button class="icon-button" id="add-collection" type="button" aria-label="Nova coleção" title="Nova coleção">＋</button>
+      </div>
+
+      <section class="side-section collections-section" aria-labelledby="collections-heading">
+        <div class="side-section-heading">
+          <h2 id="collections-heading">Coleções</h2>
+          <div class="collection-tools">
+            <button class="icon-button small-icon quick-open-trigger" id="quick-open-button" type="button" aria-label="Buscar requisição" title="Buscar requisição (Ctrl+K)">
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
+            </button>
+            <button class="icon-button small-icon" id="import-collection" type="button" aria-label="Importar coleção" title="Vortix JSON, Insomnia v4, Postman v2.1 ou ambiente Postman">⇩</button>
+            <button class="icon-button small-icon" id="export-collection" type="button" aria-label="Exportar coleção selecionada" title="Exportar coleção selecionada">⇧</button>
+            <button class="icon-button small-icon" id="run-collection" type="button" aria-label="Executar coleção ou pasta selecionada" title="Runner da seleção">▶</button>
+            <button class="icon-button small-icon" id="add-collection-heading" type="button" aria-label="Adicionar coleção" title="Adicionar coleção">＋</button>
+          </div>
+          <input id="import-collection-file" type="file" accept=".json,application/json" hidden>
+        </div>
+        <div id="collections-tree" class="collections-tree"></div>
+        <p id="collections-empty" class="sidebar-empty" hidden>Organize requests em coleções e pastas.</p>
+      </section>
+
+      <details class="history-panel side-section" id="history-panel">
+        <summary><span>Histórico</span><span class="history-count" id="history-count">0</span></summary>
+        <p class="history-hint">Requests anteriores salvas neste computador.</p>
+        <div class="history-list" id="request-history"></div>
+        <button class="text-button history-clear" id="clear-history" type="button" disabled>Limpar histórico</button>
+      </details>
+
+      <div class="sidebar-bottom">
+        <span class="local-dot"></span>
+        <div><strong>Somente neste computador</strong><small id="sidebar-storage-note">SQLite local · proteção de dados</small></div>
+      </div>
+    </aside>
+
+    <section class="main-column">
+      <header class="workspace-bar">
+        <div class="breadcrumb"><span>Workspace</span><span class="breadcrumb-separator">/</span><strong id="request-title">Nova requisição</strong></div>
+        <div class="workspace-actions">
+          <label class="environment-picker" for="environment-select"><span>AMBIENTE</span><select id="environment-select" aria-label="Ambiente ativo"></select></label>
+          <button class="icon-button environment-settings" id="manage-environments" type="button" title="Configurações" aria-label="Configurações">⚙</button>
+          <button class="button secondary save-request" id="save-collection-request" type="button">Salvar</button>
+        </div>
+      </header>
+
+      <div class="workspace-tabs-bar">
+        <nav class="workspace-tabs" id="workspace-tabs" role="tablist" aria-label="Requests abertas"></nav>
+        <button class="workspace-tab-add" id="add-workspace-tab" type="button" aria-label="Nova aba de requisição" title="Nova aba de requisição">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+        </button>
+      </div>
+
+      <div class="workspace-grid" id="request-workspace-panel" role="tabpanel">
+        <section class="editor-column" aria-label="Editor da requisição">
+          <div class="request-line">
+            <label class="visually-hidden" for="method">Método</label>
+            <select id="method" class="method-select method-get" aria-label="Método HTTP">
+              <option>GET</option><option>HEAD</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>OPTIONS</option>
+            </select>
+            <label class="visually-hidden" for="route">Rota</label>
+            <input id="route" class="route-input" type="text" autocomplete="off" spellcheck="false" aria-label="Rota da API" placeholder="/v1/resource">
+            <button class="button primary send-button" id="send-request" type="button"><span aria-hidden="true">▶</span> Enviar</button>
+          </div>
+          <label class="base-url-label" for="base-url">URL base</label>
+          <div class="base-url-wrap"><span class="base-url-icon" aria-hidden="true">↗</span><input id="base-url" type="url" autocomplete="off" placeholder="https://api.example.com/" spellcheck="false"></div>
+          <p class="hint base-url-hint">Use URL base por ambiente. HTTPS é recomendado; HTTP em localhost funciona sem configuração adicional.</p>
+          <label class="check-row insecure-http-option" for="allow-insecure-http"><input id="allow-insecure-http" type="checkbox"><span>Permitir HTTP sem TLS para esta request fora de localhost. A opção fica salva com a request.</span></label>
+
+          <nav class="editor-tabs" aria-label="Seções da requisição" role="tablist">
+            <button class="editor-tab active" type="button" role="tab" aria-selected="true" data-editor-tab="params">Params <span class="tab-count" id="params-count">0</span></button>
+            <button class="editor-tab" type="button" role="tab" aria-selected="false" data-editor-tab="headers">Headers</button>
+            <button class="editor-tab" type="button" role="tab" aria-selected="false" data-editor-tab="body">Body</button>
+            <button class="editor-tab" type="button" role="tab" aria-selected="false" data-editor-tab="auth">Auth</button>
+            <button class="editor-tab" type="button" role="tab" aria-selected="false" data-editor-tab="scripts">Scripts</button>
+            <button class="editor-tab" type="button" role="tab" aria-selected="false" data-editor-tab="tests">Testes</button>
+          </nav>
+
+          <div class="tab-panel" data-editor-panel="params">
+            <div class="panel-heading"><div><h2>Query Params</h2><p>Parâmetros são adicionados à URL ao enviar.</p></div><button class="button secondary compact-button" id="add-query-param" type="button">＋ Adicionar</button></div>
+            <div class="params-header"><span>CHAVE</span><span>VALOR</span><span></span></div>
+            <div id="query-params" class="query-params"></div>
+            <p class="hint">Nomes repetidos e valores vazios são aceitos. Valores sensíveis são mascarados nos campos.</p>
+          </div>
+
+          <div class="tab-panel" data-editor-panel="headers" hidden>
+            <div class="panel-heading"><div><h2>Headers</h2><p>Um cabeçalho por linha no formato <code>Nome: valor</code>.</p></div></div>
+            <label class="visually-hidden" for="headers">Cabeçalhos adicionais</label>
+            <textarea id="headers" class="compact code-input" rows="8" autocomplete="off" spellcheck="false">Accept: application/json</textarea>
+            <p class="hint">Authorization é preenchido pelo campo Bearer na aba Auth.</p>
+          </div>
+
+          <div class="tab-panel" data-editor-panel="body" hidden>
+            <div class="panel-heading"><div><h2>Request Body</h2><p>JSON ou texto para POST, PUT, PATCH ou DELETE. Ajuste Content-Type em Headers.</p></div><div class="code-tools"><span class="language-badge">JSON / RAW</span><button class="text-button format-button" id="format-json" type="button" title="Formatar JSON">Identar</button><button class="text-button format-button" id="minify-json" type="button" title="Remover espaços do JSON">Compactar</button></div></div>
+            <div class="code-editor">
+              <pre id="body-highlight" class="code-highlight" aria-hidden="true"></pre>
+              <label class="visually-hidden" for="body">JSON da requisição</label>
+              <textarea id="body" class="code-input" rows="15" autocomplete="off" spellcheck="false" placeholder="{\n  \"exemplo\": true\n}" aria-label="JSON da requisição"></textarea>
+            </div>
+          </div>
+
+          <div class="tab-panel auth-panel" data-editor-panel="auth" hidden>
+            <div class="panel-heading"><div><h2>Bearer Token</h2><p>Use o token de acesso emitido pela API.</p></div><span class="auth-badge">Bearer</span></div>
+            <div class="token-row">
+              <label class="visually-hidden" for="bearer-token">Token Bearer</label>
+              <input id="bearer-token" type="password" autocomplete="new-password" placeholder="Cole o token sem o prefixo Bearer" spellcheck="false">
+              <button class="button secondary compact-button" id="clear-token" type="button">Limpar</button>
+            </div>
+            <label class="check-row history-token-option" for="save-token-history">
+              <input id="save-token-history" type="checkbox" checked>
+              <span>Salvar Bearer nas requisições locais</span>
+            </label>
+            <p class="hint token-history-warning">Valores sensíveis novos usam proteção de dados. Migre os antigos em Configurações; desmarque para não salvar Bearer.</p>
+            <details class="token-helper" id="token-helper">
+              <summary>Solicitar token</summary>
+              <p class="hint">Configure a rota e os nomes dos campos conforme a API. Essas preferências ficam salvas localmente; valores de credencial são pedidos a cada envio e nunca entram no histórico.</p>
+              <label for="token-route">Rota do endpoint de token</label>
+              <input id="token-route" type="text" autocomplete="off" spellcheck="false" placeholder="/oauth/token">
+              <div class="token-config-fields">
+                <div><label for="token-client-id-field">Campo do identificador</label><input id="token-client-id-field" type="text" value="client_id" autocomplete="off" spellcheck="false"></div>
+                <div><label for="token-client-secret-field">Campo do segredo</label><input id="token-client-secret-field" type="text" value="client_secret" autocomplete="off" spellcheck="false"></div>
+              </div>
+              <div class="token-credentials">
+                <div><label for="token-client-id">Valor do identificador</label><input id="token-client-id" type="text" autocomplete="off" spellcheck="false"></div>
+                <div><label for="token-client-secret">Valor do segredo</label><input id="token-client-secret" type="password" autocomplete="new-password" spellcheck="false"></div>
+              </div>
+              <label for="token-credential-mode">Enviar credenciais em</label>
+              <select id="token-credential-mode"><option value="body">JSON no corpo (recomendado)</option><option value="query">Params da URL (se o endpoint exigir; pode aparecer em logs)</option></select>
+              <p class="warning-text">HTTP não cifra credenciais. Confirme o destino antes de solicitar token.</p>
+              <label class="check-row token-environment-option" for="save-token-environment"><input id="save-token-environment" type="checkbox" checked><span>Salvar o token obtido como <code>{{token}}</code> no ambiente ativo.</span></label>
+              <p class="hint">Depois, use <code>{{token}}</code> em Params, body ou URL base. Novos tokens usam proteção local; migre registros antigos em Configurações.</p>
+              <button class="button secondary" id="request-token" type="button" disabled>Obter token</button>
+            </details>
+          </div>
+
+          <div class="tab-panel scripts-panel" data-editor-panel="scripts" hidden>
+            <div class="panel-heading">
+              <div><h2>Resposta → variável</h2><p>Guarda um valor da resposta no ambiente ativo.</p></div>
+              <button class="button secondary compact-button" id="insert-token-script" type="button">Exemplo: guardar token</button>
+            </div>
+            <label class="check-row script-enable" for="capture-response-variable">
+              <input id="capture-response-variable" type="checkbox">
+              <span>Salvar valor depois da resposta</span>
+            </label>
+            <div class="response-variable-fields">
+              <div><label for="response-value-source">Valor da resposta</label><select id="response-value-source"><option value="json">Campo JSON</option><option value="text">Texto inteiro</option></select></div>
+              <div><label for="response-variable-name">Salvar como variável</label><input id="response-variable-name" type="text" value="token" autocomplete="off" placeholder="token"></div>
+              <div class="response-json-path-wrap" id="response-json-path-wrap"><label for="response-json-path">Caminho JSON</label><input id="response-json-path" type="text" value="access_token" autocomplete="off" placeholder="data.access_token"></div>
+            </div>
+            <label class="check-row script-success-only" for="response-success-only">
+              <input id="response-success-only" type="checkbox" checked>
+              <span>Salvar somente quando o status for 2xx</span>
+            </label>
+            <p class="hint">A variável fica no ambiente ativo e pode ser usada como <code>{{token}}</code>. Valores sensíveis novos usam proteção local; a resposta completa não é salva.</p>
+            <details class="script-help">
+              <summary>Como isso funciona no Insomnia</summary>
+              <p>Depois de receber a resposta, o Insomnia usa <code>insomnia.response.json()</code> e <code>insomnia.environment.set()</code>. O código equivalente abaixo pode ser copiado para Scripts → After-response.</p>
+              <pre><code id="insomnia-script-preview">const body = insomnia.response.json();
+insomnia.environment.set("token", body.access_token);</code></pre>
+              <button class="button secondary compact-button" id="copy-insomnia-script" type="button">Copiar exemplo Insomnia</button>
+              <p>Exemplos de caminho: <code>access_token</code>, <code>data.token</code> ou <code>result.jwt</code>. Para uma resposta sem JSON, escolha “Texto inteiro”.</p>
+            </details>
+            <section class="script-result" id="response-variable-result" role="status" aria-live="polite" hidden>
+              <strong id="response-variable-result-title"></strong>
+            </section>
+          </div>
+
+          <div class="tab-panel response-tests-panel" data-editor-panel="tests" hidden>
+            <div class="response-tests-heading">
+              <div><h2 id="response-tests-title">Testes da resposta</h2><p>Valide status HTTP e campos JSON ao enviar ou rodar a coleção.</p></div>
+              <button class="button secondary compact-button" id="add-response-test" type="button">＋ Adicionar teste</button>
+            </div>
+            <p class="hint response-tests-help">Ex.: status HTTP igual a 201, <code>data.id</code> existe ou <code>items[0].id</code> igual a 42.</p>
+            <div id="response-tests-list" class="response-tests-list"></div>
+            <details class="script-help response-tests-format-help">
+              <summary>Compatibilidade com Insomnia e Postman</summary>
+              <p>As regras são convertidas em scripts After-response do Insomnia e Post-response do Postman ao exportar nesses formatos. Scripts são código executável; revise antes de usar.</p>
+            </details>
+          </div>
+
+          <fieldset class="write-guard" id="write-guard" hidden>
+            <legend>Proteção para escrita</legend>
+            <p>POST, PUT, PATCH e DELETE podem alterar dados. Use somente ambiente e dados descartáveis de teste.</p>
+            <label for="test-data-phrase">Digite TESTE para habilitar</label>
+            <input id="test-data-phrase" type="text" autocomplete="off" spellcheck="false" placeholder="TESTE">
+            <label class="check-row" for="confirm-test-data"><input id="confirm-test-data" type="checkbox"><span>Confirmo que URL e dados são de teste e podem ser alterados.</span></label>
+            <p class="warning-text">Uma confirmação visual aparecerá antes de cada envio.</p>
+          </fieldset>
+          <div class="editor-foot"><span id="request-note" class="hint">GET, HEAD e OPTIONS consultam a API. POST, PUT, PATCH e DELETE exigem confirmação manual.</span></div>
+        </section>
+
+        <section class="response-column" aria-labelledby="response-title">
+          <div class="response-topline">
+            <div><p class="eyebrow">RESPOSTA</p><h1 id="response-title">Resultado</h1></div>
+            <span id="response-status" class="status idle">Aguardando envio</span>
+          </div>
+          <div class="response-section">
+            <div class="output-heading"><h2>Cabeçalhos</h2><button class="copy-button" id="copy-headers" type="button" disabled>Copiar</button></div>
+            <pre id="response-headers" class="output empty">A resposta aparecerá aqui.</pre>
+          </div>
+          <div class="response-section response-body-section">
+            <div class="output-heading response-body-heading">
+              <h2>Body</h2>
+              <div class="response-body-actions">
+                <div class="response-view-modes" id="response-view-modes" aria-label="Visualização do body">
+                  <button class="response-view-mode" type="button" data-response-view="pretty" aria-pressed="true" disabled>Pretty</button>
+                  <button class="response-view-mode" type="button" data-response-view="tree" aria-pressed="false" disabled>Árvore</button>
+                  <button class="response-view-mode" type="button" data-response-view="raw" aria-pressed="false" disabled>Raw</button>
+                </div>
+                <button class="copy-button" id="copy-body" type="button" disabled>Copiar</button>
+              </div>
+            </div>
+            <div class="response-search-row">
+              <label class="visually-hidden" for="response-search">Buscar no body</label>
+              <input id="response-search" type="search" placeholder="Buscar no body" autocomplete="off" disabled>
+              <span id="response-search-count" role="status" aria-live="polite"></span>
+            </div>
+            <div id="response-body" class="output body-output empty">
+              <pre id="response-body-pre" class="response-body-pre" tabindex="0" aria-label="Body da resposta">A resposta aparecerá aqui.</pre>
+              <div id="response-tree" class="response-json-tree" hidden></div>
+            </div>
+          </div>
+          <section class="response-tests-output" id="response-tests-output" aria-labelledby="response-tests-output-title" hidden>
+            <div class="output-heading"><h2 id="response-tests-output-title">Testes da resposta</h2><strong id="response-tests-summary"></strong></div>
+            <ul id="response-tests-results" class="response-tests-results" aria-live="polite"></ul>
+          </section>
+          <div class="response-footer"><span class="response-indicator"></span>Resposta temporária · não armazenada</div>
+        </section>
+      </div>
+      <footer class="app-footer">Dados ficam num SQLite local. Novos segredos usam proteção de dados; baixe backup e migre os antigos em Configurações. Backup simples gera JSON sem criptografia; use a opção protegida para transportar o workspace.</footer>
+    </section>
+  </main>
+
+  <dialog class="app-dialog quick-open-dialog" id="quick-open-dialog" aria-label="Buscar requisição">
+    <div class="quick-open-shell">
+      <div class="quick-open-field">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
+        <input id="quick-open-query" type="search" role="combobox" aria-label="Buscar por nome, método, rota ou coleção" aria-autocomplete="list" aria-controls="quick-open-results" aria-expanded="false" autocomplete="off" placeholder="Buscar requisição...">
+        <kbd>Esc</kbd>
+      </div>
+      <div class="quick-open-results" id="quick-open-results" role="listbox" aria-label="Requisições salvas"></div>
+      <div class="quick-open-footer"><span>Digite para filtrar. Use as setas e Enter para abrir.</span><span class="quick-open-shortcut"><kbd>Ctrl</kbd><kbd>K</kbd></span></div>
+    </div>
+  </dialog>
+  <dialog class="app-dialog" id="save-request-dialog">
+    <form method="dialog" id="save-request-form">
+      <div class="dialog-heading"><div><p class="eyebrow">COLEÇÃO</p><h2>Salvar requisição</h2><p class="dialog-description">Guarde a chamada para reutilizar depois.</p></div><button class="icon-button dialog-close" id="close-save-request" type="button" aria-label="Fechar">×</button></div>
+      <label for="saved-request-name">Nome</label><input id="saved-request-name" maxlength="100" required placeholder="Ex.: Listar grupos">
+      <label for="saved-request-folder">Salvar em</label><select id="saved-request-folder" required></select>
+      <p class="hint">Params, headers e body são preservados. client_secret não é salvo. Bearer segue a opção da aba Auth.</p>
+      <div class="dialog-actions"><button class="button secondary" id="cancel-save-request" type="button">Cancelar</button><button class="button primary" id="confirm-save-request" type="submit">Salvar requisição</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="app-dialog settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
+    <form method="dialog">
+      <div class="dialog-heading"><div><h2 id="settings-title">Configurações</h2><p class="dialog-description">Ajuste aparência e legibilidade do workspace.</p></div><button class="icon-button dialog-close" id="close-settings" type="button" aria-label="Fechar configurações">×</button></div>
+      <section class="settings-section" aria-labelledby="settings-appearance-title">
+        <h3 id="settings-appearance-title">Aparência</h3>
+        <div class="settings-grid">
+          <label for="theme-select">Tema<select id="theme-select" aria-label="Tema"><option value="dracula">Dracula</option><option value="monokai">Monokai</option><option value="one-dark">One Dark</option><option value="nord">Nord</option><option value="solarized-dark">Solarized Dark</option><option value="github-dark">GitHub Dark</option></select></label>
+          <label for="font-select">Fonte global<select id="font-select" aria-label="Fonte global"><option value="fira-code">Fira Code</option><option value="jetbrains-mono">JetBrains Mono</option><option value="cascadia-code">Cascadia Code</option><option value="cascadia-mono">Cascadia Mono</option><option value="ibm-plex-mono">IBM Plex Mono</option></select></label>
+        </div>
+        <div class="settings-scale">
+          <span>Escala global</span>
+          <div class="font-scale" role="group" aria-label="Escala global da interface">
+            <button class="icon-button font-scale-button" id="decrease-font" type="button" title="Diminuir fonte (Ctrl+-)" aria-label="Diminuir fonte">A−</button>
+            <output id="font-scale-value" aria-live="polite" aria-atomic="true">120%</output>
+            <button class="icon-button font-scale-button" id="increase-font" type="button" title="Aumentar fonte (Ctrl++)" aria-label="Aumentar fonte">A+</button>
+          </div>
+          <p class="hint">Atalhos: Ctrl++ aumenta, Ctrl+- diminui e Ctrl+0 restaura.</p>
+        </div>
+      </section>
+      <section class="settings-section settings-environment-section" aria-labelledby="settings-environments-title">
+        <div><h3 id="settings-environments-title">Ambientes</h3><p class="hint">Separe variáveis de desenvolvimento, homologação e produção.</p></div>
+        <button class="button secondary" id="settings-environments" type="button">Gerenciar ambientes</button>
+      </section>
+      <section class="settings-section settings-backup-section" aria-labelledby="settings-backup-title">
+        <div><h3 id="settings-backup-title">Backup do workspace</h3><p class="hint">Inclui histórico, coleções, pastas, ambientes e configurações. Você pode baixar JSON simples ou protegido por senha.</p></div>
+        <div class="settings-backup-actions">
+          <button class="button secondary" id="export-workspace" type="button">Backup simples</button>
+          <button class="button secondary" id="export-encrypted-workspace" type="button">Backup com senha</button>
+          <button class="button secondary" id="restore-workspace" type="button">Restaurar backup</button>
+          <input id="restore-workspace-file" type="file" accept=".json,.apistudio-backup,application/json" hidden>
+        </div>
+      </section>
+      <section class="settings-section settings-security-section" aria-labelledby="settings-security-title">
+        <div><h3 id="settings-security-title">Proteção dos dados</h3><p class="hint">Novos tokens, Headers, Params sensíveis e Bodies usam ASP.NET Core Data Protection. Registros antigos migram após backup; cópias legadas do navegador não são apagadas.</p></div>
+        <button class="button secondary" id="protect-existing-secrets" type="button">Proteger dados existentes</button>
+      </section>
+      <div class="dialog-actions"><button class="button primary" id="close-settings-done" type="button">Concluído</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="app-dialog runner-dialog" id="runner-dialog" aria-labelledby="runner-title">
+    <form id="runner-form">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">EXECUÇÃO EM SEQUÊNCIA</p><h2 id="runner-title">Runner de coleção</h2><p class="dialog-description" id="runner-target-title"></p></div>
+        <button class="icon-button dialog-close" id="close-runner" type="button" aria-label="Fechar Runner">×</button>
+      </div>
+      <div class="runner-content">
+        <section class="runner-plan-section" aria-labelledby="runner-plan-heading">
+          <div class="runner-section-heading"><h3 id="runner-plan-heading">Sequência</h3><span id="runner-plan-count"></span></div>
+          <div class="runner-plan-list" id="runner-plan-list"></div>
+        </section>
+        <fieldset class="runner-options" id="runner-options">
+          <legend>Opções da execução</legend>
+          <label for="runner-datasets">Conjuntos de dados (JSON opcional)</label>
+          <textarea id="runner-datasets" rows="3" maxlength="100000" spellcheck="false" placeholder='[{"id":1},{"id":2}]'></textarea>
+          <p class="hint">Vazio executa uma vez com o ambiente ativo. Cada objeto fornece variáveis, como <code>{{id}}</code>, para todas as requests.</p>
+          <div class="runner-option-grid">
+            <div><label for="runner-delay">Intervalo entre requests (ms)</label><input id="runner-delay" type="number" min="0" max="5000" step="100" value="0"></div>
+            <label class="check-row" for="runner-stop-on-error"><input id="runner-stop-on-error" type="checkbox" checked><span>Parar na primeira falha</span></label>
+          </div>
+          <fieldset class="runner-write-guard" id="runner-write-guard" hidden>
+            <legend>Confirmação para chamadas de gravação</legend>
+            <p id="runner-write-description"></p>
+            <label class="check-row" for="runner-confirm-writes"><input id="runner-confirm-writes" type="checkbox"><span>Confirmo que URL e dados são exclusivos para teste.</span></label>
+            <label for="runner-write-phrase">Digite TESTE para habilitar gravações</label>
+            <input id="runner-write-phrase" type="text" autocomplete="off" spellcheck="false" placeholder="TESTE">
+          </fieldset>
+        </fieldset>
+        <p class="runner-error" id="runner-error" role="alert" hidden></p>
+        <section class="runner-run-section" aria-labelledby="runner-run-heading">
+          <div class="runner-section-heading"><h3 id="runner-run-heading">Resultado</h3><output id="runner-progress-label"></output></div>
+          <p class="hint runner-retention">O relatório desta rodada é temporário; requests e variáveis capturadas continuam salvas.</p>
+          <progress id="runner-progress" max="1" value="0" hidden></progress>
+          <p class="runner-summary" id="runner-summary" role="status" aria-live="polite" hidden></p>
+          <div class="runner-results" id="runner-results" aria-live="polite"></div>
+        </section>
+      </div>
+      <div class="dialog-actions runner-actions">
+        <button class="button secondary" id="cancel-runner" type="button">Fechar</button>
+        <button class="button secondary" id="stop-runner" type="button" hidden>Parar após esta request</button>
+        <button class="button secondary" id="rerun-failed" type="button" hidden>Reexecutar falhas</button>
+        <button class="button primary" id="start-runner" type="submit">Executar sequência</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="app-dialog environment-dialog" id="environment-dialog">
+    <form method="dialog" id="environment-form">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">CONFIGURAÇÃO DO WORKSPACE</p>
+          <h2>Ambientes</h2>
+          <p class="dialog-description">Separe configurações por grupo. Cada ambiente mantém suas próprias variáveis.</p>
+        </div>
+        <button class="icon-button dialog-close" id="close-environment" type="button" aria-label="Fechar">×</button>
+      </div>
+      <div class="dialog-scroll">
+        <div id="environment-list" class="environment-list"></div>
+        <button class="button secondary add-environment" id="add-environment" type="button"><span aria-hidden="true">＋</span> Novo ambiente</button>
+        <aside class="dialog-note">
+          <span class="dialog-note-icon" aria-hidden="true">i</span>
+          <div><strong>Armazenamento local</strong><p>Use <code>{{variavel}}</code> em URL, rota, Params, Headers e Body. Novos valores sensíveis usam proteção de dados; baixe backup e migre os antigos em Configurações.</p></div>
+        </aside>
+      </div>
+      <div class="dialog-actions">
+        <button class="button secondary" id="cancel-environment" type="button">Cancelar</button>
+        <button class="button primary" id="save-environments" type="submit">Salvar alterações</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog class="app-dialog" id="export-dialog">
+    <form method="dialog" id="export-form">
+      <div class="dialog-heading"><div><p class="eyebrow">INTERCÂMBIO</p><h2>Exportar coleção</h2><p class="dialog-description">Leve esta coleção para outro workspace.</p></div><button class="icon-button dialog-close" id="close-export-dialog" type="button" aria-label="Fechar">×</button></div>
+      <label for="export-collection-select">Coleção</label><select id="export-collection-select" required></select>
+      <label for="export-format">Formato</label><select id="export-format"><option value="api-studio">Vortix JSON</option><option value="insomnia-v4">Insomnia JSON (v4)</option><option value="postman-v21">Postman Collection v2.1</option></select>
+      <label class="check-row export-token-option" for="export-include-bearer"><input id="export-include-bearer" type="checkbox"><span>Incluir Bearer e variáveis de token</span></label>
+      <p class="hint">O export inclui requests, pastas, scripts e o ambiente ativo. Bearer é omitido por padrão; <code>client_secret</code> e campos sensíveis são removidos. No Insomnia, scripts exportados podem executar ao enviar.</p>
+      <div class="dialog-actions"><button class="button secondary" id="cancel-export-dialog" type="button">Cancelar</button><button class="button primary" id="confirm-export-collection" type="submit">Baixar JSON</button></div>
+    </form>
+  </dialog>
+  <dialog class="app-dialog action-dialog" id="action-dialog" aria-labelledby="action-dialog-title" aria-describedby="action-dialog-description">
+    <form method="dialog" id="action-dialog-form">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow" id="action-dialog-eyebrow">CONFIRMAÇÃO</p>
+          <h2 id="action-dialog-title">Confirmar ação</h2>
+          <p class="dialog-description" id="action-dialog-description"></p>
+        </div>
+        <button class="icon-button dialog-close" id="action-dialog-close" type="button" aria-label="Cancelar e fechar">×</button>
+      </div>
+      <pre class="action-dialog-detail" id="action-dialog-detail" hidden></pre>
+      <aside class="action-dialog-warning" id="action-dialog-warning" role="note" hidden></aside>
+      <div class="action-dialog-field" id="action-dialog-input-wrap" hidden>
+        <label id="action-dialog-input-label" for="action-dialog-input">Nome</label>
+        <input id="action-dialog-input" type="text" autocomplete="off">
+      </div>
+      <div class="action-dialog-field" id="action-dialog-select-wrap" hidden>
+        <label id="action-dialog-select-label" for="action-dialog-select">Ação</label>
+        <select id="action-dialog-select"></select>
+      </div>
+      <div class="dialog-actions">
+        <button class="button secondary" id="action-dialog-cancel" type="button">Cancelar</button>
+        <button class="button primary" id="action-dialog-confirm" type="submit">Confirmar</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>
