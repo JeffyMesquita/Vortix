@@ -23,7 +23,6 @@
 - [Segurança](#segurança)
 - [Configuração](#configuração)
 - [Desenvolvimento e validação](#desenvolvimento-e-validação)
-- [Publicação no IIS](#publicação-no-iis)
 - [Estrutura do projeto](#estrutura-do-projeto)
 - [Solução de problemas](#solução-de-problemas)
 - [Licenças das fontes](#licenças-das-fontes)
@@ -59,7 +58,6 @@ Requests novas começam vazias. A URL base e os demais valores vêm do ambiente 
 - Navegador moderno com suporte a IndexedDB e Web Crypto.
 - **Node.js 18 ou superior** para os testes de lógica JavaScript.
 - **PowerShell e Python 3** para o teste integrado de proteção do SQLite.
-- **ASP.NET Core Hosting Bundle 8** para hospedar no IIS.
 
 A interface não exige npm nem framework JavaScript.
 
@@ -191,7 +189,7 @@ Na primeira execução, o Vortix tenta importar os dados antigos do IndexedDB do
 
 ### Proteção de dados
 
-O SQLite inteiro não é criptografado. ASP.NET Core Data Protection protege campos reconhecidos como sensíveis e bodies não vazios. A proteção depende do key ring e da identidade que executa o aplicativo. Ao mover o banco, mantenha também o acesso às chaves; trocar a identidade do pool do IIS pode impedir a leitura de valores protegidos.
+O SQLite inteiro não é criptografado. ASP.NET Core Data Protection protege campos reconhecidos como sensíveis e bodies não vazios. A proteção depende do key ring e da identidade que executa o aplicativo. Mantenha acesso às chaves ao mover o banco ou trocar a identidade do processo.
 
 O Bearer só é salvo conforme a opção escolhida no histórico ou na request. No helper **Solicitar token**, as credenciais são pedidas a cada envio, não são salvas no request nem no histórico e são limpas depois do uso.
 
@@ -231,7 +229,7 @@ $env:ApiStudio__DatabasePath = 'D:/VortixData/api-studio.sqlite'
 dotnet run --project ./ApiPublicacaoTester.csproj --no-launch-profile
 ~~~
 
-As variáveis valem para o processo iniciado nesse terminal. Para IIS, configure-as no ambiente do site ou do pool e reinicie o aplicativo.
+As variáveis valem para o processo iniciado nesse terminal.
 
 ## Desenvolvimento e validação
 
@@ -249,22 +247,6 @@ Com o Vortix já em execução, valide a página e os endpoints locais:
 ~~~powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File ./Validar-Testador.ps1
 ~~~
-
-## Publicação no IIS
-
-1. Instale o Hosting Bundle do .NET 8.
-2. Publique o projeto:
-
-   ~~~powershell
-   dotnet publish ./ApiPublicacaoTester.csproj -c Release -o ./publish
-   ~~~
-
-3. Configure o IIS para servir a pasta publicada e use a configuração <code>web.config</code> gerada.
-4. Configure o binding para loopback e mantenha o serviço acessível somente no próprio computador.
-5. Defina <code>ApiStudio__DatabasePath</code> para uma pasta persistente fora da pasta de publicação.
-6. Garanta que a identidade do pool possa gravar no SQLite e acessar o key ring do ASP.NET Core Data Protection.
-
-Não inclua banco SQLite, key rings, arquivos de backup ou configurações locais na pasta distribuída junto com o código.
 
 ## Estrutura do projeto
 
