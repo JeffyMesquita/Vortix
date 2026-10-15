@@ -32,6 +32,8 @@ try {
             }
             $captured = $headerText + 'BODY' + [Environment]::NewLine + [System.Text.Encoding]::UTF8.GetString($bodyBytes)
             [System.IO.File]::WriteAllText((Join-Path $OutputRoot ('body-request-' + $index + '.txt')), $captured, [System.Text.UTF8Encoding]::new($false))
+            [System.IO.File]::WriteAllBytes((Join-Path $OutputRoot ('body-request-' + $index + '.bin')), $bodyBytes)
+            [System.IO.File]::WriteAllText((Join-Path $OutputRoot ('body-request-' + $index + '.headers.txt')), $headerText, [System.Text.UTF8Encoding]::new($false))
             $body = [System.Text.Encoding]::UTF8.GetBytes('{"status":"ok"}')
             $crlf = [char]13 + [char]10
             $response = 'HTTP/1.1 200 OK' + $crlf + 'Content-Type: application/json' + $crlf + 'Content-Length: ' + $body.Length + $crlf + 'Connection: close' + $crlf + $crlf

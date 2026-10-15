@@ -61,19 +61,20 @@ Evoluímos em fatias pequenas. Cada feature deve resolver um fluxo completo ante
 - [x] Testar bytes e Content-Type no proxy local, incluindo override manual.
 - [x] Documentar exemplos e limitações no README.
 
-### 4. Multipart/form-data — próxima feature
+### 4. Multipart/form-data
 
-Enviar campos de texto e arquivos sem persistir o conteúdo dos arquivos por padrão.
+**Status: concluída com suporte a arquivos efêmeros.**
 
-- [ ] Escrever testes para campos repetidos/vazios, bytes de arquivo e Content-Type com boundary.
-- [ ] Criar editor de campos de texto e arquivos com remoção clara de cada item.
-- [ ] Gerar boundary automaticamente; impedir Content-Type manual incompatível.
-- [ ] Manter os bytes do arquivo somente em memória durante o envio.
-- [ ] Persistir metadados e campos de texto; ao reabrir, pedir nova seleção dos arquivos.
-- [ ] Preservar o formato no Runner e nos intercâmbios Vortix, Insomnia e Postman.
-- [ ] Documentar tamanho, persistência e um exemplo visual no README.
+- [x] Testar campos repetidos/vazios, bytes binários, boundary automático e rejeição de Content-Type manual em mock local.
+- [x] Criar editor de campos de texto e arquivos, com remoção individual.
+- [x] Gerar boundary automaticamente e rejeitar Content-Type manual para multipart.
+- [x] Manter os bytes do arquivo em memória; limitar a 10 MB por envio.
+- [x] Salvar texto e metadados; ao reabrir, pedir nova seleção do arquivo.
+- [x] Preservar campos e metadados em Vortix, Insomnia v4 e Postman v2.1 sem exportar bytes.
+- [x] Runner executa multipart de texto; requests com arquivos pedem envio manual.
+- [x] Documentar limites, persistência e fluxo visual no README.
 
-### 5. GraphQL
+### 5. GraphQL — próxima feature
 
 Adicionar um editor próprio para query e variables, sem confundir o fluxo com body raw.
 
@@ -122,4 +123,4 @@ Só entram depois das features anteriores e dos testes de uso:
 
 ## Regra de sequência
 
-Fechamos uma feature — testes, documentação e revisão — antes de iniciar a seguinte. A próxima execução começa por multipart/form-data. GraphQL será uma feature separada, com seus próprios testes e documentação.
+Fechamos uma feature — testes, documentação e revisão — antes de iniciar a seguinte. A próxima execução começa por GraphQL, com testes próprios antes da implementação e atualização do README ao concluir.

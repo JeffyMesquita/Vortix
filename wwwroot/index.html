@@ -114,11 +114,17 @@
 
           <div class="tab-panel" data-editor-panel="body" hidden>
             <div class="panel-heading"><div><h2>Request Body</h2><p>Escolha o formato do conteúdo; o Content-Type padrão é aplicado ao enviar.</p></div><div class="code-tools"><span class="language-badge" id="body-mode-badge">JSON</span><button class="text-button format-button" id="format-json" type="button" title="Formatar JSON">Identar</button><button class="text-button format-button" id="minify-json" type="button" title="Remover espaços do JSON">Compactar</button></div></div>
-            <div class="body-mode-row"><label for="body-mode">Formato</label><select id="body-mode"><option value="json">JSON</option><option value="text">Texto</option><option value="xml">XML</option><option value="urlencoded">Form URL-encoded</option></select><span class="hint" id="body-mode-hint">Content-Type: application/json</span></div>
-            <div class="code-editor">
+            <div class="body-mode-row"><label for="body-mode">Formato</label><select id="body-mode"><option value="json">JSON</option><option value="text">Texto</option><option value="xml">XML</option><option value="urlencoded">Form URL-encoded</option><option value="multipart">Multipart form-data</option></select><span class="hint" id="body-mode-hint">Content-Type: application/json</span></div>
+            <div class="code-editor" id="raw-body-editor">
               <pre id="body-highlight" class="code-highlight" aria-hidden="true"></pre>
               <label class="visually-hidden" for="body">Conteúdo do body</label>
               <textarea id="body" class="code-input" rows="15" autocomplete="off" spellcheck="false" placeholder="{\n  \"exemplo\": true\n}" aria-label="Conteúdo do body"></textarea>
+            </div>
+            <div id="multipart-editor" class="multipart-editor" hidden>
+              <div class="multipart-field-columns" aria-hidden="true"><span>Nome do campo</span><span>Tipo</span><span>Valor ou arquivo</span><span></span></div>
+              <div id="multipart-fields-list" class="multipart-fields-list"></div>
+              <div class="multipart-actions"><button class="button secondary" id="multipart-add-text" type="button">+ Campo de texto</button><button class="button secondary" id="multipart-add-file" type="button">+ Arquivo</button></div>
+              <p class="hint">Arquivos não são persistidos. Ao reabrir a request, selecione-os novamente. Limite total por envio: 10 MB.</p>
             </div>
           </div>
 

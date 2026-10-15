@@ -7,8 +7,24 @@
 
   const methods = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
   const writeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-  const bodyModes = new Set(['json', 'text', 'xml', 'urlencoded']);
+  const bodyModes = new Set(['json', 'text', 'xml', 'urlencoded', 'multipart']);
   function normalizeBodyMode(value,strict=false){const mode=String(value||'json').trim().toLowerCase();if(bodyModes.has(mode))return mode;if(strict)throw Error('Modo de body não suportado: '+mode);return 'json';}
+  function normalizeMultipartFields(fields){
+    if(fields==null)return[];
+    if(!Array.isArray(fields)||fields.length>100)throw Error('Multipart aceita até 100 campos.');
+    return fields.map(source=>{
+      if(!source||typeof source!=='object'||Array.isArray(source))throw Error('Campo multipart inválido.');
+      const name=String(source.name??'').trim(),type=source.type==='file'?'file':source.type==null||source.type==='text'?'text':'';
+      if(!name||name.length>256||/[\r\n]/.test(name))throw Error('Informe um nome válido para cada campo multipart.');
+      if(!type)throw Error('Tipo de campo multipart não suportado.');
+      const value=type==='text'?String(source.value??''):'';
+      if(value.length>262144)throw Error('Campo multipart de texto ultrapassa 256 KB.');
+      const fileName=type==='file'?String(source.fileName??'').replaceAll('\\','/').split('/').pop().trim().slice(0,255):'';
+      const contentType=type==='file'?String(source.contentType??'').trim().slice(0,200):'';
+      if(/[\r\n]/.test(fileName)||/[\r\n]/.test(contentType))throw Error('Metadados de arquivo multipart inválidos.');
+      return{name,type,value,fileName,contentType};
+    });
+  }
   const reservedNames = new Set(['__proto__', 'prototype', 'constructor']);
   const maxDataSets = 100;
 
@@ -77,6 +93,7 @@
       const request = {
         ...source.request,
         bodyMode: normalizeBodyMode(source.request.bodyMode),
+        multipartFields: normalizeMultipartFields(source.request.multipartFields),
         bearerToken: saveBearerToken ? String(source.request.bearerToken || '') : '',
         basicUsername: saveBearerToken ? String(source.request.basicUsername || '') : '',
         basicPassword: saveBearerToken ? String(source.request.basicPassword || '') : '',
@@ -593,6 +610,8 @@
     if (writeMethods.has(method) && !allowWrites) throw Error('Confirme as chamadas de escrita antes de executar.');
     const resolve = value => resolveTemplate(value, environment, dataset);
     const bodyMode = normalizeBodyMode(saved?.bodyMode,true);
+    const multipartFields = bodyMode === 'multipart' ? normalizeMultipartFields(saved?.multipartFields).map(field => ({ ...field, name: resolve(field.name), value: field.type === 'text' ? resolve(field.value) : '' })) : [];
+    if (multipartFields.some(field => field.type === 'file')) throw Error('O Runner não carrega arquivos salvos. Abra a request e selecione os arquivos novamente.');
     const requestedAuthType = String(saved?.authType || (saved?.bearerToken ? 'bearer' : 'none'));
     const authType = requestedAuthType === 'api-key' ? 'apiKey' : requestedAuthType;
     if (!['none', 'bearer', 'basic', 'apiKey'].includes(authType)) throw Error('Tipo de autenticacao nao suportado na colecao.');
@@ -610,6 +629,7 @@
       route: resolve(saved?.route || ''),
       method,
       bodyMode,
+      multipartFields,
       authType,
       bearerToken: authType === 'bearer' ? resolve(saved?.bearerToken || '') : '',
       basicUsername,
@@ -772,5 +792,5 @@
     catch { throw Error('O conteúdo descriptografado não é um backup válido do Vortix.'); }
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeTokenRequestConfig, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { parseOpenApiSpec, parseCurlCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeMultipartFields, normalizeTokenRequestConfig, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

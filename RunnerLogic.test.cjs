@@ -560,3 +560,41 @@ test('Body editor exposes JSON, text, XML, and URL-encoded formats', () => {
   assert.ok(html.includes('id="body-mode"'), 'Body mode selector should exist');
   for (const mode of ['json', 'text', 'xml', 'urlencoded']) assert.ok(html.includes('value="' + mode + '"'), 'missing mode: ' + mode);
 });
+
+test('Runner normalizes multipart fields, resolves text templates, and drops ephemeral file bytes', () => {
+  const { normalizeMultipartFields, normalizeWorkspaceTabs, prepareSavedRequest } = runnerLogic();
+  const fields = normalizeMultipartFields([
+    { name: 'tag', type: 'text', value: 'one' },
+    { name: 'tag', type: 'text', value: '' },
+    { name: 'upload', type: 'file', fileName: 'sample.bin', contentType: 'application/octet-stream', fileBase64: 'c2VjcmV0' }
+  ]);
+  assert.deepEqual(fields, [
+    { name: 'tag', type: 'text', value: 'one', fileName: '', contentType: '' },
+    { name: 'tag', type: 'text', value: '', fileName: '', contentType: '' },
+    { name: 'upload', type: 'file', value: '', fileName: 'sample.bin', contentType: 'application/octet-stream' }
+  ]);
+  assert.throws(() => normalizeMultipartFields([{ name: '', type: 'text', value: 'x' }]), /nome/i);
+  const request = prepareSavedRequest({ method: 'POST', route: '/upload', bodyMode: 'multipart', multipartFields: [{ name: 'tag', type: 'text', value: '{{tag}}' }] }, {}, { tag: 'blue' }, true);
+  assert.equal(request.bodyMode, 'multipart');
+  assert.equal(request.multipartFields[0].value, 'blue');
+  assert.throws(() => prepareSavedRequest({ method: 'POST', route: '/upload', bodyMode: 'multipart', multipartFields: [{ name: 'attachment', type: 'file', fileName: 'sample.bin' }] }, {}, {}, true), /Runner/);
+  const state = normalizeWorkspaceTabs({ tabs: [{ id: 'tab', request: { bodyMode: 'multipart', multipartFields: [{ name: 'attachment', type: 'file', fileName: 'sample.bin', fileBase64: 'ZXBoZW1lcmFs' }] } }] });
+  assert.equal(state.tabs[0].request.multipartFields[0].fileBase64, undefined);
+});
+
+test('Multipart editor exposes repeated text fields and ephemeral file selection', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  assert.ok(html.includes('value="multipart"'), 'Multipart body mode should exist');
+  assert.ok(html.includes('id="multipart-fields-list"'), 'Multipart field editor should exist');
+  assert.ok(html.includes('id="multipart-add-file"'), 'File selection should be available');
+  assert.ok(html.includes('Arquivos não são persistidos'), 'The UI should explain that file bytes are temporary');
+});
+
+
+test('Vortix, Insomnia, and Postman adapters keep multipart metadata without file bytes', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.ok(app.includes("mode:'formdata'"), 'Postman multipart export should use formdata');
+  assert.ok(app.includes("mimeType:'multipart/form-data'"), 'Insomnia multipart export should use its MIME type');
+  assert.ok(app.includes('importedMultipartFields'), 'multipart imports should restore text and file metadata');
+  assert.ok(app.includes('normalizePersistableMultipartFields'), 'persisted and exported multipart fields should strip file bytes');
+});

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="340" viewBox="0 0 1120 340" role="img" aria-labelledby="title desc">
+  <title id="title">Fluxo Multipart no Vortix</title>
+  <desc id="desc">Monte campos, deixe o Vortix criar o boundary e mantenha os bytes dos arquivos fora do armazenamento local.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#211c35"/><stop offset="1" stop-color="#151923"/></linearGradient>
+    <linearGradient id="purple" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c4b5fd"/><stop offset="1" stop-color="#7c3aed"/></linearGradient>
+    <linearGradient id="teal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6ee7b7"/><stop offset="1" stop-color="#0891b2"/></linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fcd34d"/><stop offset="1" stop-color="#f97316"/></linearGradient>
+  </defs>
+  <rect width="1120" height="340" rx="24" fill="url(#bg)"/>
+  <circle cx="1080" cy="22" r="128" fill="#8b5cf6" opacity=".08"/>
+  <text x="44" y="46" fill="#8ce5cf" font-family="Segoe UI,Arial,sans-serif" font-size="12" font-weight="700" letter-spacing="2">MULTIPART / FORM-DATA</text>
+  <text x="44" y="82" fill="#f7f4ff" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700">Campos flexíveis, arquivo em memória</text>
+  <g font-family="Segoe UI,Arial,sans-serif">
+    <rect x="44" y="110" width="322" height="184" rx="16" fill="#27233a" stroke="#5b4b83"/>
+    <rect x="44" y="110" width="322" height="6" rx="3" fill="url(#purple)"/>
+    <text x="66" y="148" fill="#c4b5fd" font-size="16" font-weight="700">1 · Monte os campos</text>
+    <rect x="66" y="166" width="278" height="42" rx="8" fill="#191a26"/>
+    <text x="80" y="192" fill="#c4b5fd" font-family="Consolas,monospace" font-size="12">title      Texto      Ana</text>
+    <rect x="66" y="220" width="278" height="48" rx="8" fill="#191a26"/>
+    <text x="80" y="249" fill="#a7f3d0" font-family="Consolas,monospace" font-size="12">photo      Arquivo    avatar.png</text>
+
+    <rect x="399" y="110" width="322" height="184" rx="16" fill="#1e302c" stroke="#326a56"/>
+    <rect x="399" y="110" width="322" height="6" rx="3" fill="url(#teal)"/>
+    <text x="421" y="148" fill="#6ee7b7" font-size="16" font-weight="700">2 · Boundary automático</text>
+    <rect x="421" y="166" width="278" height="102" rx="8" fill="#17231f"/>
+    <text x="437" y="194" fill="#a7f3d0" font-family="Consolas,monospace" font-size="11">Content-Type:</text>
+    <text x="437" y="215" fill="#d7e4dd" font-family="Consolas,monospace" font-size="11">multipart/form-data;</text>
+    <text x="437" y="237" fill="#d7e4dd" font-family="Consolas,monospace" font-size="11">boundary=gerado-pelo-Vortix</text>
+    <text x="437" y="256" fill="#9aa3b2" font-size="10">Sem header manual.</text>
+
+    <rect x="754" y="110" width="322" height="184" rx="16" fill="#33291e" stroke="#79572b"/>
+    <rect x="754" y="110" width="322" height="6" rx="3" fill="url(#amber)"/>
+    <text x="776" y="148" fill="#fcd34d" font-size="16" font-weight="700">3 · Dados locais</text>
+    <text x="776" y="183" fill="#e8edf2" font-size="13">✓ Campos e metadados salvos</text>
+    <text x="776" y="210" fill="#fdba74" font-size="13">× Bytes fora do SQLite e exports</text>
+    <text x="776" y="237" fill="#e8edf2" font-size="13">↻ Relecione ao reabrir</text>
+    <text x="776" y="264" fill="#9aa3b2" font-size="11">Limite total: 10 MB por envio</text>
+  </g>
+  <text x="44" y="320" fill="#9aa3b2" font-family="Segoe UI,Arial,sans-serif" font-size="11">Campos de texto repetidos e vazios são aceitos. O Runner pede envio manual quando há arquivo.</text>
+</svg>

@@ -182,6 +182,17 @@ textarea.compact { min-height: 165px; }
 .body-mode-row label { margin: 0; color: var(--muted); font-size: 12px; }
 .body-mode-row select { min-width: 0; }
 .body-mode-row .hint { margin: 0; font-size: 11px; }
+.multipart-editor { min-height: 300px; border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--surface); }
+.multipart-field-columns, .multipart-field-row { display: grid; grid-template-columns: minmax(100px, 1fr) 120px minmax(160px, 1.5fr) 36px; gap: 8px; align-items: center; }
+.multipart-field-columns { padding: 0 2px 8px; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.multipart-fields-list { display: grid; gap: 8px; }
+.multipart-field-row { border-top: 1px solid var(--border); padding-top: 8px; }
+.multipart-field-row input, .multipart-field-row select { min-width: 0; width: 100%; }
+.multipart-field-value { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.multipart-field-file-name { min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.multipart-actions { display: flex; gap: 8px; margin-top: 12px; }
+.multipart-editor > .hint { margin: 12px 0 0; }
+.multipart-editor[hidden] { display: none; }
 .code-highlight[hidden] { display: none; }
 .code-editor textarea.plain-body-input { color: var(--text); background: var(--input); -webkit-text-fill-color: var(--text); }
 .code-editor textarea.plain-body-input::selection { color: var(--text); background: color-mix(in srgb, var(--accent) 32%, transparent); }

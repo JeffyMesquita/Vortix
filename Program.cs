@@ -243,20 +243,26 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
 
     var body = call.Body ?? string.Empty;
     var bodyMode = string.IsNullOrWhiteSpace(call.BodyMode) ? "json" : call.BodyMode.Trim().ToLowerInvariant();
-    if (bodyMode is not ("json" or "text" or "xml" or "urlencoded"))
+    if (bodyMode is not ("json" or "text" or "xml" or "urlencoded" or "multipart"))
         return Error(StatusCodes.Status400BadRequest, "Modo de body não suportado.");
+    var contentTypeHeader = (call.Headers ?? string.Empty).Split('\n')
+        .Select(line => line.Trim().TrimEnd('\r'))
+        .FirstOrDefault(line => line.StartsWith("Content-Type:", StringComparison.OrdinalIgnoreCase));
+    if (bodyMode == "multipart" && contentTypeHeader is not null)
+        return Error(StatusCodes.Status400BadRequest, "Remova o Content-Type manual; o Vortix gera o boundary do multipart.");
     var tokenClientId = call.TokenClientId ?? string.Empty;
     var tokenClientSecret = call.TokenClientSecret ?? string.Empty;
-    if ((method is "GET" or "HEAD" or "OPTIONS") && !string.IsNullOrWhiteSpace(body))
+    if ((method is "GET" or "HEAD" or "OPTIONS") &&
+        (!string.IsNullOrWhiteSpace(body) || (bodyMode == "multipart" && call.MultipartFields is { Count: > 0 })))
     {
-        return Error(StatusCodes.Status400BadRequest, "GET não envia JSON; limpe o corpo da requisição.");
+        return Error(StatusCodes.Status400BadRequest, "GET, HEAD e OPTIONS não enviam body.");
     }
 
     var isTokenRequest = call.ConfirmTokenRequest;
 
     if (isTokenRequest)
     {
-        if (method != "POST" || !string.IsNullOrEmpty(body) ||
+        if (method != "POST" || bodyMode != "json" || !string.IsNullOrEmpty(body) ||
             call.TokenCredentialMode is not ("body" or "query") ||
             !IsValidTokenFieldName(call.TokenClientIdField) ||
             !IsValidTokenFieldName(call.TokenClientSecretField) ||
@@ -349,6 +355,12 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
             [call.TokenClientSecretField] = tokenClientSecret
         });
         request.Content = new ByteArrayContent(Encoding.UTF8.GetBytes(tokenCredentials));
+    }
+    else if (IsWriteMethod(method) && bodyMode == "multipart")
+    {
+        if (!TryCreateMultipartContent(call.MultipartFields ?? [], out var multipartContent, out var multipartError))
+            return Error(StatusCodes.Status400BadRequest, multipartError);
+        request.Content = multipartContent!;
     }
     else if (IsWriteMethod(method) && !string.IsNullOrWhiteSpace(body))
     {
@@ -626,8 +638,102 @@ static string DefaultBodyContentType(string bodyMode) => bodyMode switch
     "text" => "text/plain",
     "xml" => "application/xml",
     "urlencoded" => "application/x-www-form-urlencoded",
+    "multipart" => "multipart/form-data",
     _ => "application/json"
 };
+
+static bool TryCreateMultipartContent(List<MultipartField>? fields, out MultipartFormDataContent? content, out string error)
+{
+    content = null;
+    error = "Campo multipart inválido.";
+    fields ??= [];
+    if (fields.Count > 100)
+    {
+        error = "Multipart aceita até 100 campos.";
+        return false;
+    }
+    var multipart = new MultipartFormDataContent();
+    var totalTextBytes = 0;
+    var totalFileBytes = 0;
+    foreach (var field in fields)
+    {
+        if (field is null)
+        {
+            multipart.Dispose();
+            error = "Campo multipart inválido.";
+            return false;
+        }
+        var name = field.Name?.Trim() ?? string.Empty;
+        var type = field.Type?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (name.Length is 0 or > 256 || name.Contains('\r') || name.Contains('\n'))
+        {
+            multipart.Dispose();
+            error = "Informe um nome válido para cada campo multipart.";
+            return false;
+        }
+
+        if (type == "text")
+        {
+            var value = field.Value ?? string.Empty;
+            totalTextBytes += Encoding.UTF8.GetByteCount(value);
+            if (value.Length > 262_144 || totalTextBytes > 1_048_576)
+            {
+                multipart.Dispose();
+                error = "Campos multipart de texto ultrapassam o limite de 1 MB.";
+                return false;
+            }
+            multipart.Add(new StringContent(value, Encoding.UTF8), name);
+            continue;
+        }
+
+        if (type != "file")
+        {
+            multipart.Dispose();
+            error = "Tipo de campo multipart não suportado.";
+            return false;
+        }
+
+        var fileName = (field.FileName ?? string.Empty).Replace('\\', '/').Split('/').Last().Trim();
+        var encoded = field.FileBase64 ?? string.Empty;
+        if (fileName.Length is 0 or > 255 || fileName.Contains('\r') || fileName.Contains('\n') || encoded.Length > 13_981_016)
+        {
+            multipart.Dispose();
+            error = "Nome ou tamanho de arquivo multipart inválido.";
+            return false;
+        }
+
+        byte[] fileBytes;
+        try { fileBytes = Convert.FromBase64String(encoded); }
+        catch (FormatException)
+        {
+            multipart.Dispose();
+            error = "Conteúdo do arquivo multipart inválido.";
+            return false;
+        }
+        totalFileBytes += fileBytes.Length;
+        if (totalFileBytes > 10 * 1024 * 1024)
+        {
+            multipart.Dispose();
+            error = "Arquivos multipart ultrapassam o limite total de 10 MB.";
+            return false;
+        }
+
+        var mediaType = string.IsNullOrWhiteSpace(field.ContentType) ? "application/octet-stream" : field.ContentType.Trim();
+        if (mediaType.Length > 200 || mediaType.Contains('\r') || mediaType.Contains('\n') || !MediaTypeHeaderValue.TryParse(mediaType, out var parsedMediaType))
+        {
+            multipart.Dispose();
+            error = "Content-Type do arquivo multipart inválido.";
+            return false;
+        }
+        var fileContent = new ByteArrayContent(fileBytes);
+        fileContent.Headers.ContentType = parsedMediaType;
+        multipart.Add(fileContent, name, fileName);
+    }
+
+    content = multipart;
+    error = string.Empty;
+    return true;
+}
 
 static bool IsValidTokenFieldName(string? value) =>
     value is { Length: > 0 and <= 128 } && char.IsAsciiLetter(value[0]) &&
@@ -730,6 +836,15 @@ sealed record StoredCookie
     public string SameSite { get; init; } = string.Empty;
     public DateTimeOffset? ExpiresUtc { get; init; }
 }
+sealed class MultipartField
+{
+    public string Name { get; init; } = string.Empty;
+    public string Type { get; init; } = "text";
+    public string Value { get; init; } = string.Empty;
+    public string FileName { get; init; } = string.Empty;
+    public string ContentType { get; init; } = string.Empty;
+    public string FileBase64 { get; init; } = string.Empty;
+}
 sealed class ApiCall
 {
     /// <summary>Gets or sets the authentication type used for the outgoing API request.</summary>
@@ -759,9 +874,10 @@ sealed class ApiCall
     public string BearerToken { get; init; } = string.Empty;
     public string Headers { get; init; } = string.Empty;
     /// <summary>Gets or sets the request body format.</summary>
-    /// <value>One of <c>json</c>, <c>text</c>, <c>xml</c>, or <c>urlencoded</c>; empty preserves JSON defaults.</value>
+    /// <value>One of <c>json</c>, <c>text</c>, <c>xml</c>, <c>urlencoded</c>, or <c>multipart</c>; empty preserves JSON defaults.</value>
     public string BodyMode { get; init; } = "json";
     public string Body { get; init; } = string.Empty;
+    public List<MultipartField>? MultipartFields { get; init; } = [];
     public bool ConfirmTestData { get; init; }
     public string TestDataPhrase { get; init; } = string.Empty;
     public bool ConfirmTokenRequest { get; init; }

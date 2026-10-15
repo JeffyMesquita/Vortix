@@ -43,5 +43,5 @@
     <text x="868" y="222" fill="#a7f3d0" font-family="Consolas,monospace" font-size="12">name=Ana</text>
     <text x="868" y="244" fill="#a7f3d0" font-family="Consolas,monospace" font-size="12">tag=one&amp;tag=two</text>
   </g>
-  <text x="44" y="319" fill="#9aa3b2" font-family="Segoe UI,Arial,sans-serif" font-size="11">Content-Type pode ser ajustado em Headers. Multipart e GraphQL estão no roadmap.</text>
+  <text x="44" y="319" fill="#9aa3b2" font-family="Segoe UI,Arial,sans-serif" font-size="11">Content-Type pode ser ajustado em Headers. Veja também a seção Multipart no README.</text>
 </svg>

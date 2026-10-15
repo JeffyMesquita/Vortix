@@ -22,6 +22,7 @@
 - [Primeiro fluxo](#primeiro-fluxo)
 - [Autenticação](#autenticação)
 - [Modos de body](#modos-de-body)
+- [Multipart form-data](#multipart-form-data)
 - [Importar cURL](#importar-curl)
 - [Importar OpenAPI JSON](#importar-openapi-json)
 - [Ambientes e variáveis](#ambientes-e-variáveis)
@@ -46,7 +47,7 @@ A aplicação escuta somente em loopback e foi pensada para uso em computador de
 
 ## Recursos
 
-- **Editor de requests:** GET, HEAD, POST, PUT, PATCH, DELETE e OPTIONS; URL base, rota, Params, Headers, body JSON/texto/XML/form URL-encoded e Auth Bearer, Basic ou API Key.
+- **Editor de requests:** GET, HEAD, POST, PUT, PATCH, DELETE e OPTIONS; URL base, rota, Params, Headers, body JSON/texto/XML/form URL-encoded/Multipart e Auth Bearer, Basic ou API Key.
 - **Coleções:** coleções, pastas e subpastas para organizar requests.
 - **Ambientes:** variáveis próprias e Cookie jar isolado por ambiente, com substituição por templates como <code>{{baseUrl}}</code> e <code>{{token}}</code>.
 - **Abas e histórico:** até 12 requests abertas; abas, histórico, coleções, ambientes e preferências ficam salvos localmente.
@@ -137,6 +138,7 @@ O editor mantém o body como texto e oferece formatos prontos:
 | Texto | <code>text/plain</code> |
 | XML | <code>application/xml</code> |
 | Form URL-encoded | <code>application/x-www-form-urlencoded</code> |
+| Multipart | <code>multipart/form-data</code> com boundary automático |
 
 Exemplos:
 
@@ -160,7 +162,33 @@ O formato acompanha a request nas abas, histórico, coleções e Runner. Vortix 
 
 O JSON mantém destaque, indentação e compactação. Para texto, XML e form URL-encoded, o editor mostra o conteúdo sem destaque JSON. O header Content-Type manual pode substituir o padrão. GET, HEAD e OPTIONS continuam sem body.
 
-Multipart com arquivos e o editor GraphQL são próximas fatias; veja o [plano de ação](ROADMAP.md).
+GraphQL é a próxima feature; Multipart tem uma seção própria abaixo. Veja o [plano de ação](ROADMAP.md).
+
+## Multipart form-data
+
+<p align="center">
+  <img src="docs/images/vortix-multipart-flow.svg" alt="Fluxo multipart: montar campos, gerar boundary e preservar apenas metadados" width="100%">
+</p>
+
+Adicione campos de texto e arquivos à mesma request. Nomes repetidos e valores vazios são aceitos. O Vortix cria o <code>Content-Type</code> e o boundary; remova qualquer <code>Content-Type</code> manual em **Headers**, pois ele é rejeitado para evitar um boundary inválido.
+
+Exemplo do metadata que o workspace preserva:
+
+~~~json
+[
+  { "name": "title", "type": "text", "value": "Ana" },
+  { "name": "avatar", "type": "file", "fileName": "avatar.png", "contentType": "image/png" }
+]
+~~~
+
+| Parte | O que fica salvo | Ao reabrir |
+|---|---|---|
+| Texto | Nome e valor; valores com nomes sensíveis são omitidos conforme as regras do workspace. | Disponível para edição e envio. |
+| Arquivo | Nome do campo, nome do arquivo e tipo MIME. Os bytes não são gravados em SQLite, histórico, backup nem exportação. | Selecione o arquivo novamente. |
+
+O limite total por envio é **10 MB**. O arquivo fica em memória durante a chamada e segue pelo proxy local. A request é preservada em JSON Vortix, Insomnia v4 e Postman Collection v2.1 com os metadados; nenhum formato de exportação inclui os bytes do arquivo.
+
+O Runner executa campos de texto. Requests com arquivos precisam ser enviadas manualmente depois de selecionar os arquivos novamente.
 
 ### Métodos e proteção de gravação
 
