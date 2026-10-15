@@ -144,6 +144,7 @@ A importação converte método, URL, Params, headers e body. Também entende as
 A primeira versão aceita `-X`/`--request`, `-H`/`--header`, `--url`, `-d`/`--data`, `--data-raw`, `--data-binary`, `--json` e `-I`/`--head`. Body enviado sem método explícito vira POST; `--data` sem Content-Type recebe `application/x-www-form-urlencoded`.
 
 O Vortix rejeita comandos com credenciais na URL, parâmetros de query sensíveis, autenticação Basic, cookies, upload de arquivo e opções não reconhecidas. Isso evita importar uma chamada alterada silenciosamente. Configure esses campos manualmente e importe a request novamente quando terminar.
+
 ## Ambientes e variáveis
 
 Cada ambiente mantém suas próprias variáveis. Grupos ajudam a separar ambientes como Desenvolvimento, Homologação e Produção; os nomes e valores são definidos por você.
@@ -168,7 +169,6 @@ Ao capturar uma variável de resposta, escolha o nome, a origem (campo JSON ou t
   "expires_in": 3600
 }
 ~~~
-
 
 Na aba **Scripts**, configure a captura de um valor, como <code>data.access_token</code>, para uma variável como <code>token</code>. O painel também mostra o código equivalente para o fluxo After-response do Insomnia, que pode ser copiado.
 
