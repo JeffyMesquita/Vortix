@@ -7,7 +7,7 @@
 
   const methods = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
   const writeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-  const bodyModes = new Set(['json', 'text', 'xml', 'urlencoded', 'multipart']);
+  const bodyModes = new Set(['json', 'text', 'xml', 'urlencoded', 'multipart', 'graphql']);
   function normalizeBodyMode(value,strict=false){const mode=String(value||'json').trim().toLowerCase();if(bodyModes.has(mode))return mode;if(strict)throw Error('Modo de body não suportado: '+mode);return 'json';}
   function normalizeMultipartFields(fields){
     if(fields==null)return[];
@@ -24,6 +24,47 @@
       if(/[\r\n]/.test(fileName)||/[\r\n]/.test(contentType))throw Error('Metadados de arquivo multipart inválidos.');
       return{name,type,value,fileName,contentType};
     });
+  }
+  function buildGraphqlBody(query,variables='',operationName='',resolve=value=>value){
+    const queryText=String(query??'').trim();
+    if(!queryText)throw Error('Informe uma query GraphQL.');
+    const rawVariables=typeof variables==='string'?variables.trim():variables;
+    let parsedVariables,includeVariables=false;
+    if(typeof rawVariables==='string'&&rawVariables){try{parsedVariables=JSON.parse(rawVariables);includeVariables=true;}catch{throw Error('Variables GraphQL devem ser JSON válido.');}}
+    else if(rawVariables!==''&&rawVariables!=null){parsedVariables=rawVariables;includeVariables=true;}
+    if(includeVariables&&(!parsedVariables||typeof parsedVariables!=='object'||Array.isArray(parsedVariables)))throw Error('Variables GraphQL devem ser um objeto JSON.');
+    const resolveValues=value=>{
+      if(typeof value==='string')return resolve(value);
+      if(Array.isArray(value))return value.map(resolveValues);
+      if(value&&typeof value==='object'){const result={};for(const[key,item]of Object.entries(value))Object.defineProperty(result,key,{value:resolveValues(item),enumerable:true,writable:true,configurable:true});return result;}
+      return value;
+    };
+    const payload={query:resolve(queryText)};
+    if(includeVariables)payload.variables=resolveValues(parsedVariables);
+    const operation=resolve(String(operationName??'').trim());if(operation)payload.operationName=operation;
+    return JSON.stringify(payload);
+  }
+  function buildPostmanGraphqlBody(fields){
+    const query=String(fields?.graphqlQuery||''),variables=String(fields?.graphqlVariables||''),operationName=String(fields?.graphqlOperationName||'').trim();
+    buildGraphqlBody(query,variables,operationName);
+    const graphql={query,variables};if(operationName)graphql.operationName=operationName;
+    return{mode:'graphql',graphql};
+  }
+  function buildInsomniaGraphqlBody(fields){
+    const query=String(fields?.graphqlQuery||''),variables=String(fields?.graphqlVariables||''),operationName=String(fields?.graphqlOperationName||'').trim();
+    return{mimeType:'application/graphql',text:buildGraphqlBody(query,variables,operationName)};
+  }
+  function normalizeGraphqlImportBody(body){
+    const source=body?.graphql;
+    if(source&&typeof source==='object'){
+      return{graphqlQuery:String(source.query||''),graphqlVariables:typeof source.variables==='string'?source.variables:source.variables==null?'':JSON.stringify(source.variables,null,2),graphqlOperationName:String(source.operationName||'')};
+    }
+    if(body?.mode==='graphql'||body?.mimeType==='application/graphql'){
+      const raw=String(body.text||'');
+      try{const parsed=JSON.parse(raw);if(typeof parsed?.query==='string')return{graphqlQuery:parsed.query,graphqlVariables:parsed.variables==null?'':JSON.stringify(parsed.variables,null,2),graphqlOperationName:String(parsed.operationName||'')};}catch{}
+      return{graphqlQuery:raw,graphqlVariables:'',graphqlOperationName:''};
+    }
+    return{graphqlQuery:'',graphqlVariables:'',graphqlOperationName:''};
   }
   const reservedNames = new Set(['__proto__', 'prototype', 'constructor']);
   const maxDataSets = 100;
@@ -94,6 +135,9 @@
         ...source.request,
         bodyMode: normalizeBodyMode(source.request.bodyMode),
         multipartFields: normalizeMultipartFields(source.request.multipartFields),
+        graphqlQuery: String(source.request.graphqlQuery || ''),
+        graphqlVariables: String(source.request.graphqlVariables || ''),
+        graphqlOperationName: String(source.request.graphqlOperationName || ''),
         bearerToken: saveBearerToken ? String(source.request.bearerToken || '') : '',
         basicUsername: saveBearerToken ? String(source.request.basicUsername || '') : '',
         basicPassword: saveBearerToken ? String(source.request.basicPassword || '') : '',
@@ -612,6 +656,11 @@
     const bodyMode = normalizeBodyMode(saved?.bodyMode,true);
     const multipartFields = bodyMode === 'multipart' ? normalizeMultipartFields(saved?.multipartFields).map(field => ({ ...field, name: resolve(field.name), value: field.type === 'text' ? resolve(field.value) : '' })) : [];
     if (multipartFields.some(field => field.type === 'file')) throw Error('O Runner não carrega arquivos salvos. Abra a request e selecione os arquivos novamente.');
+    if (bodyMode === 'graphql' && method !== 'POST') throw Error('GraphQL usa POST no Vortix.');
+    const graphqlQuery = bodyMode === 'graphql' ? String(saved?.graphqlQuery || '') : '';
+    const graphqlVariables = bodyMode === 'graphql' ? String(saved?.graphqlVariables || '') : '';
+    const graphqlOperationName = bodyMode === 'graphql' ? String(saved?.graphqlOperationName || '') : '';
+    const body = bodyMode === 'graphql' ? buildGraphqlBody(graphqlQuery, graphqlVariables, graphqlOperationName, resolve) : resolve(saved?.body || '');
     const requestedAuthType = String(saved?.authType || (saved?.bearerToken ? 'bearer' : 'none'));
     const authType = requestedAuthType === 'api-key' ? 'apiKey' : requestedAuthType;
     if (!['none', 'bearer', 'basic', 'apiKey'].includes(authType)) throw Error('Tipo de autenticacao nao suportado na colecao.');
@@ -630,6 +679,9 @@
       method,
       bodyMode,
       multipartFields,
+      graphqlQuery,
+      graphqlVariables,
+      graphqlOperationName,
       authType,
       bearerToken: authType === 'bearer' ? resolve(saved?.bearerToken || '') : '',
       basicUsername,
@@ -638,7 +690,7 @@
       apiKeyLocation,
       apiKeyValue,
       headers: resolve(saved?.headers || ''),
-      body: resolve(saved?.body || ''),
+      body,
       allowInsecureHttp: saved?.allowInsecureHttp === true,
       confirmTestData: writeMethods.has(method) && allowWrites,
       testDataPhrase: writeMethods.has(method) && allowWrites ? 'TESTE' : '',
@@ -792,5 +844,5 @@
     catch { throw Error('O conteúdo descriptografado não é um backup válido do Vortix.'); }
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeMultipartFields, normalizeTokenRequestConfig, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { parseOpenApiSpec, parseCurlCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeMultipartFields, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, normalizeGraphqlImportBody, normalizeTokenRequestConfig, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

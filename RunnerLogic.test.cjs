@@ -598,3 +598,55 @@ test('Vortix, Insomnia, and Postman adapters keep multipart metadata without fil
   assert.ok(app.includes('importedMultipartFields'), 'multipart imports should restore text and file metadata');
   assert.ok(app.includes('normalizePersistableMultipartFields'), 'persisted and exported multipart fields should strip file bytes');
 });
+
+
+test('GraphQL body builder validates variables and omits empty optional properties', () => {
+  const { buildGraphqlBody, normalizeWorkspaceTabs, prepareSavedRequest } = runnerLogic();
+  const body = JSON.parse(buildGraphqlBody('query User($id: ID!) { user(id: $id) { id } }', '{"id":"{{userId}}"}', 'User'));
+  assert.deepEqual(body, { query: 'query User($id: ID!) { user(id: $id) { id } }', variables: { id: '{{userId}}' }, operationName: 'User' });
+  assert.deepEqual(JSON.parse(buildGraphqlBody('{ ping }', '', '')), { query: '{ ping }' });
+  assert.throws(() => buildGraphqlBody('', '', ''), /query/i);
+  assert.throws(() => buildGraphqlBody('{ ping }', '{bad', ''), /JSON/i);
+  assert.throws(() => buildGraphqlBody('{ ping }', '[]', ''), /objeto/i);
+  const request = prepareSavedRequest({ method: 'POST', route: '/graphql', bodyMode: 'graphql', graphqlQuery: 'query User($id: ID!) { user(id: $id) { id } }', graphqlVariables: '{"id":"{{userId}}"}', graphqlOperationName: 'User' }, { userId: '42' }, {}, true);
+  assert.equal(request.bodyMode, 'graphql');
+  assert.deepEqual(JSON.parse(request.body), { query: 'query User($id: ID!) { user(id: $id) { id } }', variables: { id: '42' }, operationName: 'User' });
+  const tabs = normalizeWorkspaceTabs({ tabs: [{ id: 'g', request: { bodyMode: 'graphql', graphqlQuery: '{ ping }', graphqlVariables: '{}', graphqlOperationName: 'Ping' } }] });
+  assert.equal(tabs.tabs[0].request.graphqlQuery, '{ ping }');
+  assert.equal(tabs.tabs[0].request.graphqlVariables, '{}');
+  assert.equal(tabs.tabs[0].request.graphqlOperationName, 'Ping');
+  assert.throws(() => prepareSavedRequest({ method: 'GET', route: '/graphql', bodyMode: 'graphql', graphqlQuery: '{ ping }' }, {}, {}, true), /POST/i);
+});
+
+test('GraphQL editor exposes query, JSON variables, and operation name controls', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  for (const id of ['graphql-query', 'graphql-variables', 'graphql-operation-name']) assert.ok(html.includes('id="' + id + '"'), 'missing GraphQL field: ' + id);
+  assert.ok(html.includes('value="graphql"'), 'GraphQL body mode should exist');
+});
+
+
+test('GraphQL adapters map Postman and Insomnia query/variables formats', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.ok(app.includes('buildPostmanGraphqlBody'), 'Postman export should use the GraphQL adapter');
+  assert.ok(app.includes('buildInsomniaGraphqlBody'), 'Insomnia export should use the GraphQL adapter');
+  assert.ok(app.includes('importedGraphqlFields'), 'Postman and Insomnia imports should restore GraphQL fields');
+  assert.ok(app.includes('graphqlOperationName:graphql.graphqlOperationName'), 'Vortix JSON should preserve operationName');
+  assert.ok(app.includes('graphqlQuery,graphqlVariables,graphqlOperationName,...proxyRequest'), 'Client-only GraphQL editor fields should not be sent to the proxy separately');
+});
+
+
+test('GraphQL adapters round-trip query, variables, and operationName', () => {
+  const { buildGraphqlBody, buildInsomniaGraphqlBody, buildPostmanGraphqlBody, normalizeGraphqlImportBody } = runnerLogic();
+  const fields = { graphqlQuery: 'query User($id: ID!) { user(id: $id) { id } }', graphqlVariables: '{"id":"42"}', graphqlOperationName: 'User' };
+  const postman = buildPostmanGraphqlBody(fields);
+  assert.equal(postman.mode, 'graphql');
+  assert.equal(postman.graphql.query, fields.graphqlQuery);
+  assert.equal(postman.graphql.variables, fields.graphqlVariables);
+  assert.equal(postman.graphql.operationName, 'User');
+  const insomnia = buildInsomniaGraphqlBody(fields);
+  assert.equal(insomnia.mimeType, 'application/graphql');
+  assert.deepEqual(JSON.parse(insomnia.text), { query: fields.graphqlQuery, variables: { id: '42' }, operationName: 'User' });
+  assert.deepEqual(normalizeGraphqlImportBody(postman), fields);
+  assert.deepEqual(normalizeGraphqlImportBody(insomnia), { ...fields, graphqlVariables: '{\n  "id": "42"\n}' });
+  assert.deepEqual(JSON.parse(buildGraphqlBody(fields.graphqlQuery, fields.graphqlVariables, fields.graphqlOperationName)), JSON.parse(insomnia.text));
+});

@@ -165,13 +165,14 @@ try {
     if ((Get-PlaintextScan $secrets $scanPath) -ne 'CLEAR') { throw 'A cookie value remains in SQLite plaintext.' }
 
 
-    $bodyMockServer = Start-BodyCaptureServer 6
+    $bodyMockServer = Start-BodyCaptureServer 7
     $bodyMockBaseUrl = 'http://127.0.0.1:' + $bodyMockServer.Port
     $bodyCases = @(
         [pscustomobject]@{ mode = 'json'; body = '{"ok":true}'; contentType = 'application/json'; headers = '' },
         [pscustomobject]@{ mode = 'text'; body = 'plain-text-body'; contentType = 'text/plain'; headers = '' },
         [pscustomobject]@{ mode = 'xml'; body = '<note>ok</note>'; contentType = 'application/xml'; headers = '' },
         [pscustomobject]@{ mode = 'urlencoded'; body = 'name=Ana&tag=one&tag=two'; contentType = 'application/x-www-form-urlencoded'; headers = '' },
+        [pscustomobject]@{ mode = 'graphql'; body = '{"query":"query Example { ping }","variables":{"id":7},"operationName":"Example"}'; contentType = 'application/json'; headers = '' },
         [pscustomobject]@{ mode = 'text'; body = '{"override":true}'; contentType = 'application/vnd.example+json'; headers = 'Content-Type: application/vnd.example+json' }
     )
     for ($bodyIndex = 0; $bodyIndex -lt $bodyCases.Count; $bodyIndex++) {
@@ -183,6 +184,11 @@ try {
         if ($bodyCapture -notmatch ('(?im)^Content-Type:\s*' + [regex]::Escape($bodyCase.contentType))) { throw ('Wrong Content-Type for body mode: ' + $bodyCase.mode) }
         if (-not $bodyCapture.Contains($bodyCase.body)) { throw ('Request body was altered for mode: ' + $bodyCase.mode) }
     }
+
+    $invalidGraphql = @{ baseUrl = $bodyMockBaseUrl; route = '/graphql'; method = 'POST'; bodyMode = 'graphql'; body = '{"query":"{ ping }","variables":[]}'; confirmTestData = $true; testDataPhrase = 'TESTE' } | ConvertTo-Json -Compress
+    $invalidGraphqlStatus = 0
+    try { $null = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $invalidGraphql -TimeoutSec 5; throw 'GraphQL array variables were accepted.' } catch { if ($_.Exception.Response) { $invalidGraphqlStatus = [int]$_.Exception.Response.StatusCode } else { throw } }
+    if ($invalidGraphqlStatus -ne 400) { throw ('Invalid GraphQL variables expected HTTP 400, got ' + $invalidGraphqlStatus) }
 
     $fileBytes = [byte[]](86, 79, 82, 84, 73, 88, 0, 255)
     $fileBase64 = [Convert]::ToBase64String($fileBytes)
@@ -198,9 +204,9 @@ try {
     } | ConvertTo-Json -Compress -Depth 8
     $multipartResult = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $multipartCall -TimeoutSec 5
     if ($multipartResult.status -ne 200) { throw 'Multipart request did not reach the local capture server.' }
-    $multipartHeaders = Get-Content -Raw (Join-Path $temporaryRoot 'body-request-5.headers.txt')
+    $multipartHeaders = Get-Content -Raw (Join-Path $temporaryRoot 'body-request-6.headers.txt')
     if ($multipartHeaders -notmatch '(?im)^Content-Type:\s*multipart/form-data;\s*boundary=') { throw 'Multipart Content-Type did not include an automatic boundary.' }
-    $multipartBytes = [System.IO.File]::ReadAllBytes((Join-Path $temporaryRoot 'body-request-5.bin'))
+    $multipartBytes = [System.IO.File]::ReadAllBytes((Join-Path $temporaryRoot 'body-request-6.bin'))
     $multipartText = [System.Text.Encoding]::Latin1.GetString($multipartBytes)
     if ([regex]::Matches($multipartText, 'name="?tag"?').Count -ne 2 -or -not $multipartText.Contains('one') -or -not $multipartText.Contains('two')) { throw 'Repeated multipart text fields were not preserved.' }
     if ($multipartText -notmatch 'name="?empty"?\r\n\r\n\r\n--') { throw 'Empty multipart field was not preserved.' }

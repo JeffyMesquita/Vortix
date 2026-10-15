@@ -23,6 +23,7 @@
 - [Autenticação](#autenticação)
 - [Modos de body](#modos-de-body)
 - [Multipart form-data](#multipart-form-data)
+- [GraphQL](#graphql)
 - [Importar cURL](#importar-curl)
 - [Importar OpenAPI JSON](#importar-openapi-json)
 - [Ambientes e variáveis](#ambientes-e-variáveis)
@@ -47,7 +48,7 @@ A aplicação escuta somente em loopback e foi pensada para uso em computador de
 
 ## Recursos
 
-- **Editor de requests:** GET, HEAD, POST, PUT, PATCH, DELETE e OPTIONS; URL base, rota, Params, Headers, body JSON/texto/XML/form URL-encoded/Multipart e Auth Bearer, Basic ou API Key.
+- **Editor de requests:** GET, HEAD, POST, PUT, PATCH, DELETE e OPTIONS; URL base, rota, Params, Headers, body JSON/texto/XML/form URL-encoded/Multipart/GraphQL e Auth Bearer, Basic ou API Key.
 - **Coleções:** coleções, pastas e subpastas para organizar requests.
 - **Ambientes:** variáveis próprias e Cookie jar isolado por ambiente, com substituição por templates como <code>{{baseUrl}}</code> e <code>{{token}}</code>.
 - **Abas e histórico:** até 12 requests abertas; abas, histórico, coleções, ambientes e preferências ficam salvos localmente.
@@ -162,7 +163,7 @@ O formato acompanha a request nas abas, histórico, coleções e Runner. Vortix 
 
 O JSON mantém destaque, indentação e compactação. Para texto, XML e form URL-encoded, o editor mostra o conteúdo sem destaque JSON. O header Content-Type manual pode substituir o padrão. GET, HEAD e OPTIONS continuam sem body.
 
-GraphQL é a próxima feature; Multipart tem uma seção própria abaixo. Veja o [plano de ação](ROADMAP.md).
+Multipart e GraphQL têm seções próprias abaixo. Veja o [plano de ação](ROADMAP.md).
 
 ## Multipart form-data
 
@@ -189,6 +190,42 @@ Exemplo do metadata que o workspace preserva:
 O limite total por envio é **10 MB**. O arquivo fica em memória durante a chamada e segue pelo proxy local. A request é preservada em JSON Vortix, Insomnia v4 e Postman Collection v2.1 com os metadados; nenhum formato de exportação inclui os bytes do arquivo.
 
 O Runner executa campos de texto. Requests com arquivos precisam ser enviadas manualmente depois de selecionar os arquivos novamente.
+
+## GraphQL
+
+<p align="center">
+  <img src="docs/images/vortix-graphql-flow.svg" alt="Fluxo GraphQL: query, variables e envio JSON por POST" width="100%">
+</p>
+
+Edite a query, as variables JSON e o **Operation Name** em campos separados. O Vortix envia um POST com <code>Content-Type: application/json</code>:
+
+~~~graphql
+query GetUser($id: ID!) {
+  user(id: $id) { id name }
+}
+~~~
+
+~~~json
+{
+  "id": "{{userId}}"
+}
+~~~
+
+O payload enviado é montado pelo Vortix:
+
+~~~json
+{
+  "query": "query GetUser($id: ID!) { user(id: $id) { id name } }",
+  "variables": { "id": "42" },
+  "operationName": "GetUser"
+}
+~~~
+
+Variables precisam ser um objeto JSON. Se o campo ficar vazio, a propriedade <code>variables</code> não é enviada. Templates de ambiente dentro dos valores são resolvidos no envio. Query, variables e operationName ficam salvos na request, histórico e abas; o Runner também os preserva. Requests com método diferente de POST são recusadas.
+
+O intercâmbio Postman Collection v2.1 usa o body GraphQL. Insomnia v4 recebe o envelope JSON de query. Importação e exportação preservam query, variables e operationName. Veja as referências oficiais de [GraphQL no Postman](https://learning.postman.com/docs/use/send-requests/protocols/graphql/graphql-http) e [GraphQL no Insomnia](https://developer.konghq.com/insomnia/graphql/).
+
+Esta fatia não busca schema por introspecção nem oferece autocomplete. A request continua agnóstica: informe o endpoint GraphQL da API que você estiver usando.
 
 ### Métodos e proteção de gravação
 

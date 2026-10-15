@@ -243,8 +243,10 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
 
     var body = call.Body ?? string.Empty;
     var bodyMode = string.IsNullOrWhiteSpace(call.BodyMode) ? "json" : call.BodyMode.Trim().ToLowerInvariant();
-    if (bodyMode is not ("json" or "text" or "xml" or "urlencoded" or "multipart"))
+    if (bodyMode is not ("json" or "text" or "xml" or "urlencoded" or "multipart" or "graphql"))
         return Error(StatusCodes.Status400BadRequest, "Modo de body não suportado.");
+    if (bodyMode == "graphql" && method != "POST")
+        return Error(StatusCodes.Status400BadRequest, "GraphQL usa POST no Vortix.");
     var contentTypeHeader = (call.Headers ?? string.Empty).Split('\n')
         .Select(line => line.Trim().TrimEnd('\r'))
         .FirstOrDefault(line => line.StartsWith("Content-Type:", StringComparison.OrdinalIgnoreCase));
@@ -290,11 +292,28 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
         var expectsJson = MediaTypeHeaderValue.TryParse(contentTypeValue, out var requestContentType) &&
              (requestContentType.MediaType?.Equals("application/json", StringComparison.OrdinalIgnoreCase) == true ||
               requestContentType.MediaType?.EndsWith("+json", StringComparison.OrdinalIgnoreCase) == true);
+        if (bodyMode == "graphql" && !expectsJson)
+            return Error(StatusCodes.Status400BadRequest, "GraphQL exige Content-Type application/json.");
+        if (bodyMode == "graphql" && string.IsNullOrWhiteSpace(body))
+            return Error(StatusCodes.Status400BadRequest, "Informe a query GraphQL.");
         if (!string.IsNullOrWhiteSpace(body) && expectsJson)
         {
             try
             {
                 using var requestBody = JsonDocument.Parse(body);
+                if (bodyMode == "graphql")
+                {
+                    var root = requestBody.RootElement;
+                    if (root.ValueKind != JsonValueKind.Object ||
+                        !root.TryGetProperty("query", out var queryValue) ||
+                        queryValue.ValueKind != JsonValueKind.String ||
+                        string.IsNullOrWhiteSpace(queryValue.GetString()))
+                        return Error(StatusCodes.Status400BadRequest, "O payload GraphQL precisa conter uma query não vazia.");
+                    if (root.TryGetProperty("variables", out var variablesValue) && variablesValue.ValueKind != JsonValueKind.Object)
+                        return Error(StatusCodes.Status400BadRequest, "Variables GraphQL precisam ser um objeto JSON.");
+                    if (root.TryGetProperty("operationName", out var operationNameValue) && operationNameValue.ValueKind != JsonValueKind.String)
+                        return Error(StatusCodes.Status400BadRequest, "OperationName GraphQL precisa ser texto.");
+                }
             }
             catch (JsonException)
             {
@@ -639,6 +658,7 @@ static string DefaultBodyContentType(string bodyMode) => bodyMode switch
     "xml" => "application/xml",
     "urlencoded" => "application/x-www-form-urlencoded",
     "multipart" => "multipart/form-data",
+    "graphql" => "application/json",
     _ => "application/json"
 };
 

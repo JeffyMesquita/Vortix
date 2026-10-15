@@ -114,7 +114,7 @@
 
           <div class="tab-panel" data-editor-panel="body" hidden>
             <div class="panel-heading"><div><h2>Request Body</h2><p>Escolha o formato do conteúdo; o Content-Type padrão é aplicado ao enviar.</p></div><div class="code-tools"><span class="language-badge" id="body-mode-badge">JSON</span><button class="text-button format-button" id="format-json" type="button" title="Formatar JSON">Identar</button><button class="text-button format-button" id="minify-json" type="button" title="Remover espaços do JSON">Compactar</button></div></div>
-            <div class="body-mode-row"><label for="body-mode">Formato</label><select id="body-mode"><option value="json">JSON</option><option value="text">Texto</option><option value="xml">XML</option><option value="urlencoded">Form URL-encoded</option><option value="multipart">Multipart form-data</option></select><span class="hint" id="body-mode-hint">Content-Type: application/json</span></div>
+            <div class="body-mode-row"><label for="body-mode">Formato</label><select id="body-mode"><option value="json">JSON</option><option value="text">Texto</option><option value="xml">XML</option><option value="urlencoded">Form URL-encoded</option><option value="multipart">Multipart form-data</option><option value="graphql">GraphQL</option></select><span class="hint" id="body-mode-hint">Content-Type: application/json</span></div>
             <div class="code-editor" id="raw-body-editor">
               <pre id="body-highlight" class="code-highlight" aria-hidden="true"></pre>
               <label class="visually-hidden" for="body">Conteúdo do body</label>
@@ -125,6 +125,16 @@
               <div id="multipart-fields-list" class="multipart-fields-list"></div>
               <div class="multipart-actions"><button class="button secondary" id="multipart-add-text" type="button">+ Campo de texto</button><button class="button secondary" id="multipart-add-file" type="button">+ Arquivo</button></div>
               <p class="hint">Arquivos não são persistidos. Ao reabrir a request, selecione-os novamente. Limite total por envio: 10 MB.</p>
+            </div>
+            <div id="graphql-editor" class="graphql-editor" hidden>
+              <div class="graphql-editor-heading"><label for="graphql-query">Query</label><span class="language-badge">GRAPHQL</span></div>
+              <textarea id="graphql-query" rows="12" spellcheck="false" autocomplete="off" placeholder="query GetUser($id: ID!) {&#10;  user(id: $id) { id name }&#10;}" aria-label="Query GraphQL"></textarea>
+              <div class="graphql-operation-row"><label for="graphql-operation-name">Operation Name <span class="hint">opcional</span></label><input id="graphql-operation-name" type="text" autocomplete="off" placeholder="GetUser"></div>
+              <div class="graphql-variables-panel">
+                <div class="graphql-variables-heading"><label for="graphql-variables">Variables (JSON)</label><button class="text-button" id="format-graphql-variables" type="button">Identar</button></div>
+                <textarea id="graphql-variables" rows="8" spellcheck="false" autocomplete="off" placeholder="{&#10;  &quot;id&quot;: &quot;{{userId}}&quot;&#10;}" aria-label="Variables GraphQL em JSON"></textarea>
+                <p class="hint">Use um objeto JSON. Se ficar vazio, a propriedade variables não será enviada.</p>
+              </div>
             </div>
           </div>
 

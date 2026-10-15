@@ -242,11 +242,12 @@ function updateAuthTypeUi(){
 }
 function hasAuthCredentials(request){return!!(request?.bearerToken||request?.basicUsername||request?.basicPassword||request?.apiKeyValue);}
 function authTypeLabel(request){const type=normalizeAuthType(request?.authType,request?.bearerToken);return type==='apiKey'?'API Key':type==='basic'?'Basic Auth':type==='bearer'?'Bearer':'sem autenticação';}
-function normalizeBodyMode(value){const mode=String(value||'json').trim().toLowerCase();return['json','text','xml','urlencoded','multipart'].includes(mode)?mode:'json';}
-function bodyModeContentType(value){return({json:'application/json',text:'text/plain',xml:'application/xml',urlencoded:'application/x-www-form-urlencoded',multipart:'multipart/form-data'})[normalizeBodyMode(value)];}
-function bodyModeFromContentType(value){const type=String(value||'').split(';')[0].trim().toLowerCase();if(type==='application/x-www-form-urlencoded')return'urlencoded';if(type==='multipart/form-data')return'multipart';if(type.includes('xml'))return'xml';if(type.startsWith('text/'))return'text';return'json';}
+function normalizeBodyMode(value){const mode=String(value||'json').trim().toLowerCase();return['json','text','xml','urlencoded','multipart','graphql'].includes(mode)?mode:'json';}
+function bodyModeContentType(value){return({json:'application/json',text:'text/plain',xml:'application/xml',urlencoded:'application/x-www-form-urlencoded',multipart:'multipart/form-data',graphql:'application/json'})[normalizeBodyMode(value)];}
+function bodyModeFromContentType(value){const type=String(value||'').split(';')[0].trim().toLowerCase();if(type==='application/x-www-form-urlencoded')return'urlencoded';if(type==='multipart/form-data')return'multipart';if(type==='application/graphql')return'graphql';if(type.includes('xml'))return'xml';if(type.startsWith('text/'))return'text';return'json';}
 function bodyModeFromHeaderEntries(headers){const entries=Array.isArray(headers)?headers:[];const header=entries.find(([name])=>String(name).toLowerCase()==='content-type');return bodyModeFromContentType(header?.[1]);}
 function inferImportedBodyMode(requestBody,headers){
+  if(requestBody?.mode==='graphql'||requestBody?.graphql||requestBody?.mimeType==='application/graphql')return'graphql';
   if(requestBody?.mode==='formdata'||requestBody?.mimeType==='multipart/form-data'||Array.isArray(requestBody?.params))return'multipart';
   if(requestBody?.mode==='urlencoded'||requestBody?.urlencoded||requestBody?.mimeType==='application/x-www-form-urlencoded')return'urlencoded';
   const language=String(requestBody?.options?.raw?.language||'').toLowerCase();if(language==='xml')return'xml';if(language==='text')return'text';if(language==='json')return'json';
@@ -255,11 +256,11 @@ function inferImportedBodyMode(requestBody,headers){
 }
 function applyBodyMode(value){byId('body-mode').value=normalizeBodyMode(value);updateBodyModeUi();}
 function updateBodyModeUi(){
-  const mode=normalizeBodyMode(byId('body-mode').value),json=mode==='json',multipart=mode==='multipart';byId('body-mode').value=mode;
-  byId('body-mode-badge').textContent=({json:'JSON',text:'TEXT',xml:'XML',urlencoded:'FORM URL-ENCODED',multipart:'MULTIPART'})[mode];
-  byId('body-mode-hint').textContent=multipart?'Content-Type e boundary são automáticos; remova qualquer Content-Type manual.':('Content-Type padrão: '+bodyModeContentType(mode)+'; pode ser sobrescrito em Headers.');
+  const mode=normalizeBodyMode(byId('body-mode').value),json=mode==='json',multipart=mode==='multipart',graphql=mode==='graphql';byId('body-mode').value=mode;
+  byId('body-mode-badge').textContent=({json:'JSON',text:'TEXT',xml:'XML',urlencoded:'FORM URL-ENCODED',multipart:'MULTIPART',graphql:'GRAPHQL'})[mode];
+  byId('body-mode-hint').textContent=graphql?'Query e variables serão enviados como JSON via POST.':multipart?'Content-Type e boundary são automáticos; remova qualquer Content-Type manual.':'Content-Type padrão: '+bodyModeContentType(mode)+'; pode ser sobrescrito em Headers.';
   byId('body-highlight').hidden=!json;body.classList.toggle('plain-body-input',!json);
-  byId('raw-body-editor').hidden=multipart;byId('multipart-editor').hidden=!multipart;
+  byId('raw-body-editor').hidden=multipart||graphql;byId('multipart-editor').hidden=!multipart;byId('graphql-editor').hidden=!graphql;
   body.placeholder=({json:'{\n  "exemplo": true\n}',text:'Texto da requisição',xml:'<request>conteúdo</request>',urlencoded:'chave=valor&outra=valor'})[mode];
   updateJsonTools();renderBodyHighlight();
 }
@@ -324,6 +325,21 @@ async function multipartFieldsForSend(resolveValue=value=>value){
   return fields;
 }
 
+function getGraphqlFieldsFromForm(){
+  return{graphqlQuery:byId('graphql-query').value,graphqlVariables:byId('graphql-variables').value,graphqlOperationName:byId('graphql-operation-name').value.trim()};
+}
+function normalizePersistableGraphqlFields(fields){
+  const query=scrubCredentialText(String(fields?.graphqlQuery||'')),variables=sanitizeBody(String(fields?.graphqlVariables||'')),operationName=scrubCredentialText(String(fields?.graphqlOperationName||''));
+  return{graphqlQuery:query,graphqlVariables:variables.value,graphqlOperationName:operationName,redacted:variables.redacted||query!==String(fields?.graphqlQuery||'')||operationName!==String(fields?.graphqlOperationName||'')};
+}
+function renderGraphqlFields(source={}){
+  byId('graphql-query').value=String(source.graphqlQuery||'');byId('graphql-variables').value=String(source.graphqlVariables||'');byId('graphql-operation-name').value=String(source.graphqlOperationName||'');
+}
+function formatGraphqlVariables(){
+  const field=byId('graphql-variables'),source=field.value.trim();if(!source)return;
+  try{const value=JSON.parse(source);if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Variables precisam ser um objeto JSON.');field.value=JSON.stringify(value,null,2);syncActiveWorkspaceTab(true);showToast('Variables formatadas','JSON identado com dois espaços.','success');}
+  catch(error){showToast('JSON inválido',error.message||'Revise as variables antes de formatar.','error');}
+}
 function protectTemplates(value) {
   const templates=[];const protectedValue=String(value||'').replace(/\{\{\s*([^{}]+?)\s*\}\}/g,match=>{const marker=`codexvar${templates.length}token`;templates.push(match);return marker;});
   return{value:protectedValue,restore:text=>String(text).replace(/codexvar(\d+)token/gi,(_,index)=>templates[Number(index)]||'')};
@@ -412,7 +428,7 @@ async function renderHistory(){
   }catch{byId('history-count').textContent='–';byId('clear-history').disabled=true;const e=document.createElement('p');e.className='history-empty';e.textContent='Banco local indisponível.';list.append(e);}
 }
 async function saveHistory(request){
-  const base=sanitizeBase(request.baseUrl),path=sanitizeRoute(request.route),headers=sanitizeHeaders(request.headers),payload=sanitizeBody(request.body),multipart=normalizePersistableMultipartFields(request.multipartFields,true);
+  const base=sanitizeBase(request.baseUrl),path=sanitizeRoute(request.route),headers=sanitizeHeaders(request.headers),payload=sanitizeBody(request.body),multipart=normalizePersistableMultipartFields(request.multipartFields,true),graphql=normalizePersistableGraphqlFields(request);
   const saveAuth=request.saveBearerToken===true,authType=normalizeAuthType(request.authType,request.bearerToken);
   const bearerToken=saveAuth&&authType==='bearer'?sanitizeBearer(request.bearerToken):'';
   const basicUsername=saveAuth&&authType==='basic'?String(request.basicUsername||''):'';
@@ -424,10 +440,10 @@ async function saveHistory(request){
   if(!base.value||!path.value)return;
   const tokenRequest=!!request.tokenRequest,entry={
     id:newId(),savedAt:new Date().toISOString(),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET',
-    baseUrl:base.value,route:path.value,headers:headers.value,body:payload.value,bodyMode:normalizeBodyMode(request.bodyMode),multipartFields:multipart.fields,authType,bearerToken,basicUsername,basicPassword,apiKeyName,apiKeyLocation,apiKeyValue,authOmitted,tokenRequest,allowInsecureHttp:request.allowInsecureHttp===true,
+    baseUrl:base.value,route:path.value,headers:bodyModeHeaders(headers.value,request.bodyMode),body:payload.value,bodyMode:normalizeBodyMode(request.bodyMode),multipartFields:multipart.fields,graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,authType,bearerToken,basicUsername,basicPassword,apiKeyName,apiKeyLocation,apiKeyValue,authOmitted,tokenRequest,allowInsecureHttp:request.allowInsecureHttp===true,
     tokenCredentialMode:tokenRequest?(request.tokenCredentialMode==='query'?'query':'body'):'',tokenClientId:tokenRequest?String(request.tokenClientId||'').trim():'',
     tokenClientIdField:tokenRequest?String(request.tokenClientIdField||'client_id'):'',tokenClientSecretField:tokenRequest?String(request.tokenClientSecretField||'client_secret'):'',
-    redacted:base.redacted||path.redacted||headers.redacted||payload.redacted||authOmitted||multipart.redacted,
+    redacted:base.redacted||path.redacted||headers.redacted||payload.redacted||authOmitted||multipart.redacted||graphql.redacted,
     captureResponseVariable:!!request.captureResponseVariable,responseVariableName:String(request.responseVariableName||''),responseValueSource:request.responseValueSource==='text'?'text':'json',responseJsonPath:String(request.responseJsonPath||''),responseSuccessOnly:request.responseSuccessOnly!==false,
     responseTests:RunnerLogic.normalizeResponseTests(request.responseTests)
   };
@@ -437,7 +453,7 @@ async function saveHistory(request){
 function applyHistoryEntry(entry,notify=true){
   byId('base-url').value=entry.baseUrl||'';baseUrlAuto=false;byId('allow-insecure-http').checked=entry.allowInsecureHttp===true;method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(entry.method)?entry.method:'GET';
   const parts=splitRoute(sanitizeRoute(String(entry.route||'')).value);route.value=parts.route;renderQueryParams(parts.params);
-  byId('headers').value=sanitizeHeaders(String(entry.headers||'')).value;body.value=entry.tokenRequest?'':sanitizeBody(String(entry.body||'')).value;applyBodyMode(entry.bodyMode);renderMultipartFields(entry.multipartFields||[]);
+  byId('headers').value=sanitizeHeaders(String(entry.headers||'')).value;body.value=entry.tokenRequest?'':sanitizeBody(String(entry.body||'')).value;applyBodyMode(entry.bodyMode);renderMultipartFields(entry.multipartFields||[]);renderGraphqlFields(entry);
   applyAuthFields(entry);if(hasAuthCredentials(entry))byId('save-token-history').checked=true;
   byId('token-client-id').value=entry.tokenRequest?String(entry.tokenClientId||''):'';byId('token-client-secret').value='';
   byId('token-credential-mode').value=entry.tokenCredentialMode==='query'?'query':'body';if(entry.tokenRequest){byId('token-route').value=parts.route;byId('token-client-id-field').value=entry.tokenClientIdField||'client_id';byId('token-client-secret-field').value=entry.tokenClientSecretField||'client_secret';tokenRequestConfig=RunnerLogic.normalizeTokenRequestConfig({route:parts.route,clientIdField:byId('token-client-id-field').value,clientSecretField:byId('token-client-secret-field').value,credentialMode:byId('token-credential-mode').value});}byId('token-helper').open=!!entry.tokenRequest;updateTokenButton();clearWriteConfirmation();updateGuard();updateCopyButtons();renderBodyHighlight();updateJsonTools();
@@ -599,7 +615,7 @@ async function rerunRunnerFailures(){
 function activeWorkspaceTab(){return workspaceTabs.find(tab=>tab.id===activeWorkspaceTabId)||null;}
 function captureResponseTestDraft(){return[...byId('response-tests-list').querySelectorAll('.response-test-row')].map(row=>({id:row.dataset.testId,target:row.querySelector('.response-test-target').value,path:row.querySelector('.response-test-path').value,operator:row.querySelector('.response-test-operator').value,expected:row.querySelector('.response-test-expected').value}));}
 function captureWorkspaceDraft(){
-  return{title:byId('request-title').textContent||'Nova requisição',method:method.value,baseUrl:byId('base-url').value,baseUrlAuto,allowInsecureHttp:byId('allow-insecure-http').checked,route:route.value,params:[...queryParams.children].map(row=>[row.querySelector('[data-query-name]').value,row.querySelector('[data-query-value]').value]),headers:byId('headers').value,body:body.value,bodyMode:byId('body-mode').value,multipartFields:getPersistableMultipartFields(true).fields,...authFieldsFromForm(value=>value,true),saveBearerToken:byId('save-token-history').checked,tokenClientId:byId('token-client-id').value,tokenCredentialMode:byId('token-credential-mode').value,tokenHelperOpen:byId('token-helper').open,captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value,responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value,responseSuccessOnly:byId('response-success-only').checked,responseTests:captureResponseTestDraft(),activeSaved:activeSaved?{...activeSaved}:null,collectionId:selectedContainer.collectionId,folderId:selectedContainer.folderId,editorSection:document.querySelector('[data-editor-tab][aria-selected="true"]')?.dataset.editorTab||'params'};
+  return{title:byId('request-title').textContent||'Nova requisição',method:method.value,baseUrl:byId('base-url').value,baseUrlAuto,allowInsecureHttp:byId('allow-insecure-http').checked,route:route.value,params:[...queryParams.children].map(row=>[row.querySelector('[data-query-name]').value,row.querySelector('[data-query-value]').value]),headers:byId('headers').value,body:byId('body-mode').value==='graphql'?'':body.value,bodyMode:byId('body-mode').value,multipartFields:getPersistableMultipartFields(true).fields,...normalizePersistableGraphqlFields(getGraphqlFieldsFromForm()),...authFieldsFromForm(value=>value,true),saveBearerToken:byId('save-token-history').checked,tokenClientId:byId('token-client-id').value,tokenCredentialMode:byId('token-credential-mode').value,tokenHelperOpen:byId('token-helper').open,captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value,responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value,responseSuccessOnly:byId('response-success-only').checked,responseTests:captureResponseTestDraft(),activeSaved:activeSaved?{...activeSaved}:null,collectionId:selectedContainer.collectionId,folderId:selectedContainer.folderId,editorSection:document.querySelector('[data-editor-tab][aria-selected="true"]')?.dataset.editorTab||'params'};
 }
 function restoreResponseTestDraft(tests){
   const list=byId('response-tests-list');list.replaceChildren();
@@ -639,7 +655,7 @@ function syncActiveWorkspaceTab(markDirty=false){
 }
 function clearWorkspaceResponse(){showResponse('Aguardando envio','idle','','');byId('response-variable-result').hidden=true;renderResponseTestResults([]);}
 function applyWorkspaceDraft(draft){
-  method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(draft.method)?draft.method:'GET';byId('base-url').value=draft.baseUrl||'';baseUrlAuto=!!draft.baseUrlAuto;byId('allow-insecure-http').checked=draft.allowInsecureHttp===true;route.value=String(draft.route??'');renderQueryParams(Array.isArray(draft.params)?draft.params:[]);byId('headers').value=draft.headers||'';body.value=draft.body||'';applyBodyMode(draft.bodyMode);renderMultipartFields(draft.multipartFields||[]);byId('save-token-history').checked=draft.saveBearerToken!==false;applyAuthFields(draft);byId('token-client-id').value=draft.tokenClientId||'';byId('token-client-secret').value='';byId('token-helper').open=!!draft.tokenHelperOpen;
+  method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(draft.method)?draft.method:'GET';byId('base-url').value=draft.baseUrl||'';baseUrlAuto=!!draft.baseUrlAuto;byId('allow-insecure-http').checked=draft.allowInsecureHttp===true;route.value=String(draft.route??'');renderQueryParams(Array.isArray(draft.params)?draft.params:[]);byId('headers').value=draft.headers||'';body.value=draft.body||'';applyBodyMode(draft.bodyMode);renderMultipartFields(draft.multipartFields||[]);renderGraphqlFields(draft);byId('save-token-history').checked=draft.saveBearerToken!==false;applyAuthFields(draft);byId('token-client-id').value=draft.tokenClientId||'';byId('token-client-secret').value='';byId('token-helper').open=!!draft.tokenHelperOpen;
   byId('capture-response-variable').checked=!!draft.captureResponseVariable;byId('response-variable-name').value=draft.responseVariableName||'token';byId('response-value-source').value=draft.responseValueSource==='text'?'text':'json';byId('response-json-path').value=draft.responseJsonPath||'access_token';byId('response-success-only').checked=draft.responseSuccessOnly!==false;byId('response-variable-result').hidden=true;restoreResponseTestDraft(draft.responseTests);
   activeSaved=draft.activeSaved||null;selectedContainer={collectionId:draft.collectionId||'',folderId:draft.folderId||''};byId('request-title').textContent=draft.title||'Nova requisição';clearWriteConfirmation();updateGuard();updateTokenButton();updateCopyButtons();updateResponseCaptureUi();renderBodyHighlight();updateJsonTools();renderCollectionTree();setEditorTab(draft.editorSection||'params');
 }
@@ -835,9 +851,9 @@ function exportCollectionNode(node,includeBearer,depth=0){
   return{
     id:node.id,name:String(node.name||'Coleção').slice(0,100),
     requests:(node.requests||[]).map(request=>{
-      const base=sanitizeBase(String(request.baseUrl||'')),route=sanitizeRoute(String(request.route||'')),headers=sanitizeHeaders(String(request.headers||'')),payload=sanitizeBody(String(request.body||'')),multipart=normalizePersistableMultipartFields(request.multipartFields,true),authType=normalizeAuthType(request.authType,request.bearerToken);
+      const base=sanitizeBase(String(request.baseUrl||'')),route=sanitizeRoute(String(request.route||'')),headers=sanitizeHeaders(String(request.headers||'')),payload=sanitizeBody(String(request.body||'')),multipart=normalizePersistableMultipartFields(request.multipartFields,true),graphql=normalizePersistableGraphqlFields(request),authType=normalizeAuthType(request.authType,request.bearerToken);
       return{id:request.id,name:String(request.name||'Request').slice(0,100),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET',
-        baseUrl:base.value,route:route.value,headers:headers.value,body:payload.value,bodyMode:normalizeBodyMode(request.bodyMode),multipartFields:multipart.fields,authType,bearerToken:includeBearer&&authType==='bearer'?sanitizeBearer(request.bearerToken):'',
+        baseUrl:base.value,route:route.value,headers:bodyModeHeaders(headers.value,request.bodyMode),body:payload.value,bodyMode:normalizeBodyMode(request.bodyMode),multipartFields:multipart.fields,graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,authType,bearerToken:includeBearer&&authType==='bearer'?sanitizeBearer(request.bearerToken):'',
         basicUsername:includeBearer&&authType==='basic'?String(request.basicUsername||''):'',basicPassword:includeBearer&&authType==='basic'?String(request.basicPassword||''):'',
         apiKeyName:authType==='apiKey'?String(request.apiKeyName||''):'',apiKeyLocation:authType==='apiKey'&&request.apiKeyLocation==='query'?'query':'header',apiKeyValue:includeBearer&&authType==='apiKey'?String(request.apiKeyValue||''):'',
         allowInsecureHttp:request.allowInsecureHttp===true,tokenRequest:!!request.tokenRequest,tokenClientId:String(request.tokenClientId||''),tokenCredentialMode:request.tokenCredentialMode==='query'?'query':'body',
@@ -855,6 +871,11 @@ function responseCaptureInsomniaScript(request,postman=false){
 }
 function exportRequestUrl(request){const base=sanitizeBase(String(request.baseUrl||'')).value.replace(/\/+$/,''),path=sanitizeRoute(String(request.route||'/')).value;return base+(path.startsWith('/')?path:'/'+path);}
 function exportHeaderList(request){return sanitizeHeaders(String(request.headers||'')).value.split('\n').filter(Boolean).map(line=>{const i=line.indexOf(':');return{key:line.slice(0,i).trim(),value:line.slice(i+1).trim(),disabled:false};});}
+function bodyModeHeaders(headers,bodyMode){
+  const value=String(headers||'');
+  if(!['multipart','graphql'].includes(normalizeBodyMode(bodyMode)))return value;
+  return value.split('\\n').filter(line=>!/^content-type\\s*:/i.test(line)).join('\\n');
+}
 function appendExportQueryParameter(url,name,value){
   const separator=url.includes('?')?'&':'?';return url+separator+encodeParam(name)+'='+encodeParam(value);
 }
@@ -865,7 +886,7 @@ function buildInsomniaExport(collection,environment,includeBearer){
   const addNode=(node,parentId)=>{
     for(const folder of node.folders||[]){const id='__request_group_'+(++folderNumber)+'__';resources.push({_id:id,_type:'request_group',parentId,name:folder.name,description:'',environment:{}});addNode(folder,id);}
     for(const request of node.requests||[]){
-      const bodyMode=normalizeBodyMode(request.bodyMode),headers=exportHeaderList(request).filter(header=>bodyMode!=='multipart'||header.key.toLowerCase()!=='content-type'),authType=normalizeAuthType(request.authType,request.bearerToken),token=includeBearer&&authType==='bearer'?sanitizeBearer(request.bearerToken):'';
+      const bodyMode=normalizeBodyMode(request.bodyMode),headers=exportHeaderList(request).filter(header=>!['multipart','graphql'].includes(bodyMode)||header.key.toLowerCase()!=='content-type'),authType=normalizeAuthType(request.authType,request.bearerToken),token=includeBearer&&authType==='bearer'?sanitizeBearer(request.bearerToken):'';
       let url=exportRequestUrl(request),authentication={type:'none'};
       if(authType==='bearer')authentication={type:'bearer',token};
       else if(authType==='basic')authentication={type:'basic',username:includeBearer?String(request.basicUsername||''):'',password:includeBearer?String(request.basicPassword||''):''};
@@ -877,8 +898,9 @@ function buildInsomniaExport(collection,environment,includeBearer){
           url=appendExportQueryParameter(url,keyName,keyValue);
         }else headers.push({key:keyName,value:keyValue,disabled:false});
       }
-      const multipartFields=normalizePersistableMultipartFields(request.multipartFields,true).fields;
-      const body=bodyMode==='multipart'?{mimeType:'multipart/form-data',params:multipartFields.map(field=>field.type==='file'?{name:field.name,type:'file',value:field.fileName}:{name:field.name,type:'text',value:field.value})}:{mimeType:bodyModeContentType(bodyMode),text:sanitizeBody(String(request.body||'')).value};
+      const multipartFields=normalizePersistableMultipartFields(request.multipartFields,true).fields,graphql=normalizePersistableGraphqlFields(request);
+
+      const body=bodyMode==='multipart'?{mimeType:'multipart/form-data',params:multipartFields.map(field=>field.type==='file'?{name:field.name,type:'file',value:field.fileName}:{name:field.name,type:'text',value:field.value})}:bodyMode==='graphql'?RunnerLogic.buildInsomniaGraphqlBody(graphql):{mimeType:bodyModeContentType(bodyMode),text:sanitizeBody(String(request.body||'')).value};
       const resource={_id:'__request_'+(++requestNumber)+'__',_type:'request',parentId,name:request.name||'Request',method:request.method||'GET',url,headers:headers.map(h=>({name:h.key,value:h.value,disabled:false})),parameters:[],body,authentication};
       const script=[responseCaptureInsomniaScript(request,false).join('\n'),RunnerLogic.buildResponseTestScript(request.responseTests,'insomnia')].filter(Boolean);if(script.length)resource.afterResponseScript=script.join('\n\n');resources.push(resource);
     }
@@ -887,10 +909,14 @@ function buildInsomniaExport(collection,environment,includeBearer){
   return{_type:'export',__export_format:4,__export_date:new Date().toISOString(),__export_source:'vortix-local',resources};
 }
 function postmanRequestItem(request,includeBearer){
-  const authType=normalizeAuthType(request.authType,request.bearerToken),bodyMode=normalizeBodyMode(request.bodyMode),item={name:request.name||'Request',request:{method:request.method||'GET',header:exportHeaderList(request).filter(header=>bodyMode!=='multipart'||header.key.toLowerCase()!=='content-type'),url:{raw:exportRequestUrl(request)}}};
-  const rawBody=sanitizeBody(String(request.body||'')).value,multipartFields=normalizePersistableMultipartFields(request.multipartFields,true).fields;
-  if(bodyMode==='multipart'){item.request.body={mode:'formdata',formdata:multipartFields.map(field=>field.type==='file'?{key:field.name,type:'file',src:field.fileName}:{key:field.name,type:'text',value:field.value})};}
-  else if(rawBody&&bodyMode==='urlencoded'){
+  const authType=normalizeAuthType(request.authType,request.bearerToken),bodyMode=normalizeBodyMode(request.bodyMode);
+  const headers=exportHeaderList(request).filter(header=>!['multipart','graphql'].includes(bodyMode)||header.key.toLowerCase()!=='content-type');
+  const item={name:request.name||'Request',request:{method:request.method||'GET',header:headers,url:{raw:exportRequestUrl(request)}}};
+  const rawBody=sanitizeBody(String(request.body||'')).value,multipartFields=normalizePersistableMultipartFields(request.multipartFields,true).fields,graphql=normalizePersistableGraphqlFields(request);
+  if(bodyMode==='graphql'){item.request.body=RunnerLogic.buildPostmanGraphqlBody(graphql);}
+  else if(bodyMode==='multipart'){
+    item.request.body={mode:'formdata',formdata:multipartFields.map(field=>field.type==='file'?{key:field.name,type:'file',src:field.fileName}:{key:field.name,type:'text',value:field.value})};
+  }else if(rawBody&&bodyMode==='urlencoded'){
     const urlencoded=[...new URLSearchParams(rawBody)].map(([key,value])=>({key,value,type:'text'}));
     item.request.body={mode:'urlencoded',urlencoded};
   }else if(rawBody){
@@ -1031,7 +1057,7 @@ function importedBearer(auth,headers){
 }
 function importedBody(body,headers){
   if(body==null)return'';if(typeof body==='string')return body;
-  if(body.mode==='formdata'||body.mimeType==='multipart/form-data')return'';
+  if(body.mode==='formdata'||body.mimeType==='multipart/form-data'||body.mode==='graphql'||body.graphql||body.mimeType==='application/graphql')return'';
   if(typeof body.text==='string'){
     if(body.mimeType&&!headers.some(line=>/^content-type\s*:/i.test(line)))headers.push('Content-Type: '+body.mimeType);
     return body.text;
@@ -1047,6 +1073,10 @@ function importedMultipartFields(body){
     const type=String(item.type||'').toLowerCase()==='file'?'file':'text',source=item.fileName||item.src||item.value||'';
     return{name:String(item.name??item.key??''),type,value:type==='text'?String(item.value??''):'',fileName:type==='file'?(Array.isArray(source)?source[0]||'':String(source)):'',contentType:String(item.contentType||'')};
   }));
+}
+function importedGraphqlFields(body){
+  const safe=normalizePersistableGraphqlFields(RunnerLogic.normalizeGraphqlImportBody(body));
+  return{graphqlQuery:safe.graphqlQuery,graphqlVariables:safe.graphqlVariables,graphqlOperationName:safe.graphqlOperationName};
 }
 function parseResponseCaptureScript(script){
   const text=String(script||''),setter=text.match(/\b(?:insomnia|pm)\.environment\.set\s*\(\s*(['"])([^'"]+)\1\s*,\s*([\s\S]*?)\s*\)\s*;?/);
@@ -1071,6 +1101,7 @@ function importedPostmanAuth(auth,headers){
 }
 
 function inferImportedBodyMode(requestBody,headers){
+  if(requestBody?.mode==='graphql'||requestBody?.graphql||requestBody?.mimeType==='application/graphql')return'graphql';
   if(requestBody?.mode==='formdata'||requestBody?.mimeType==='multipart/form-data'||Array.isArray(requestBody?.params))return'multipart';
   if(requestBody?.mode==='urlencoded'||requestBody?.urlencoded||requestBody?.mimeType==='application/x-www-form-urlencoded')return'urlencoded';
   const language=String(requestBody?.options?.raw?.language||'').toLowerCase();if(language==='xml')return'xml';if(language==='text')return'text';if(language==='json')return'json';
@@ -1095,9 +1126,9 @@ function importPostmanItem(item,inheritedEvents,stats,depth=0){
   const script=event?postmanScriptText(event.script):'';let capture=script?parseResponseCaptureScript(script):null;
   if(script&&!capture)stats.unsupportedScripts++;
   if(event?.disabled&&capture)capture={...capture,captureResponseVariable:false};
-  const auth=importedPostmanAuth(request.auth,headers),body=importedBody(request.body,headers),bodyMode=inferImportedBodyMode(request.body,headers),multipartFields=bodyMode==='multipart'?importedMultipartFields(request.body):[];
-  if(bodyMode==='multipart')for(let i=headers.length-1;i>=0;i--)if(/^content-type\s*:/i.test(headers[i]))headers.splice(i,1);
-  return{name:String(item.name||'Request'),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(String(request.method||'GET').toUpperCase())?String(request.method||'GET').toUpperCase():'GET',...url,...auth,headers:headers.join('\n'),body,bodyMode,multipartFields,...(capture||{})};
+  const auth=importedPostmanAuth(request.auth,headers),body=importedBody(request.body,headers),bodyMode=inferImportedBodyMode(request.body,headers),multipartFields=bodyMode==='multipart'?importedMultipartFields(request.body):[],graphqlFields=bodyMode==='graphql'?importedGraphqlFields(request.body):{};
+  if(['multipart','graphql'].includes(bodyMode))for(let i=headers.length-1;i>=0;i--)if(/^content-type\s*:/i.test(headers[i]))headers.splice(i,1);
+  return{name:String(item.name||'Request'),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(String(request.method||'GET').toUpperCase())?String(request.method||'GET').toUpperCase():'GET',...url,...auth,headers:headers.join('\n'),body,bodyMode,multipartFields,...graphqlFields,...(capture||{})};
 }
 function importPostmanCollection(document){
   if(!document.info||!Array.isArray(document.item))throw Error('Coleção Postman inválida; esperado Postman v2.1.');
@@ -1128,9 +1159,9 @@ function importInsomniaCollection(document){
     if(resource?._type!=='request')continue;const headers=importedHeaders(resource.headers),url=splitImportedUrl(resource.url||''),auth=resource.authentication||{},authFields=importedInsomniaAuth(auth,headers,url.route);
     if(authFields.route)url.route=authFields.route;
     url.route=importedQueryParams(url.route,resource.parameters);
-    const body=importedBody(resource.body,headers),bodyMode=inferImportedBodyMode(resource.body,headers),multipartFields=bodyMode==='multipart'?importedMultipartFields(resource.body):[],script=String(resource.afterResponseScript||'');let capture=script?parseResponseCaptureScript(script):null;if(script&&!capture)stats.unsupportedScripts++;if(capture)capture={...capture,captureResponseVariable:false};
-    if(bodyMode==='multipart')for(let i=headers.length-1;i>=0;i--)if(/^content-type\s*:/i.test(headers[i]))headers.splice(i,1);
-    const request={name:String(resource.name||'Request'),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(String(resource.method||'GET').toUpperCase())?String(resource.method||'GET').toUpperCase():'GET',...url,...authFields,headers:headers.join('\n'),body,bodyMode,multipartFields,...(capture||{})};
+    const body=importedBody(resource.body,headers),bodyMode=inferImportedBodyMode(resource.body,headers),multipartFields=bodyMode==='multipart'?importedMultipartFields(resource.body):[],graphqlFields=bodyMode==='graphql'?importedGraphqlFields(resource.body):{},script=String(resource.afterResponseScript||'');let capture=script?parseResponseCaptureScript(script):null;if(script&&!capture)stats.unsupportedScripts++;if(capture)capture={...capture,captureResponseVariable:false};
+    if(['multipart','graphql'].includes(bodyMode))for(let i=headers.length-1;i>=0;i--)if(/^content-type\s*:/i.test(headers[i]))headers.splice(i,1);
+    const request={name:String(resource.name||'Request'),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(String(resource.method||'GET').toUpperCase())?String(resource.method||'GET').toUpperCase():'GET',...url,...authFields,headers:headers.join('\n'),body,bodyMode,multipartFields,...graphqlFields,...(capture||{})};
     const parent=groups.get(resource.parentId)||root;parent.requests.push(request);
   }
   const environments=[];for(const resource of resources.filter(resource=>resource?._type==='environment')){const variables={};for(const[key,value]of Object.entries(resource.data||{}))Object.defineProperty(variables,key,{value:typeof value==='string'?value:JSON.stringify(value),enumerable:true,writable:true,configurable:true});environments.push({name:String(resource.name||'Ambiente Insomnia'),group:root.name,variables});}
@@ -1149,9 +1180,9 @@ function normalizeImportedNode(source,keepAuth,depth=0,isRoot=false,enableCaptur
   if(source.requests.length>2000||source.folders.length>500)throw Error('A coleção ultrapassa o limite de itens por nível.');
   safe.requests=source.requests.map(request=>{
     if(!request||typeof request!=='object'||Array.isArray(request))throw Error('Uma request do arquivo está inválida.');
-    const base=sanitizeBase(String(request.baseUrl||'')),route=sanitizeRoute(String(request.route||'')),headers=sanitizeHeaders(String(request.headers||'')),payload=sanitizeBody(String(request.body||'')),multipart=normalizePersistableMultipartFields(request.multipartFields,true),authType=normalizeAuthType(request.authType,request.bearerToken);
+    const base=sanitizeBase(String(request.baseUrl||'')),route=sanitizeRoute(String(request.route||'')),headers=sanitizeHeaders(String(request.headers||'')),payload=sanitizeBody(String(request.body||'')),multipart=normalizePersistableMultipartFields(request.multipartFields,true),graphql=normalizePersistableGraphqlFields(request),authType=normalizeAuthType(request.authType,request.bearerToken);
     return{id:newId(),name:String(request.name||'Request').slice(0,100),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET',
-      baseUrl:base.value,route:route.value,headers:headers.value,body:payload.value,bodyMode:normalizeBodyMode(request.bodyMode),multipartFields:multipart.fields,authType,bearerToken:keepAuth&&authType==='bearer'?sanitizeBearer(request.bearerToken):'',
+      baseUrl:base.value,route:route.value,headers:bodyModeHeaders(headers.value,request.bodyMode),body:payload.value,bodyMode:normalizeBodyMode(request.bodyMode),multipartFields:multipart.fields,graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,authType,bearerToken:keepAuth&&authType==='bearer'?sanitizeBearer(request.bearerToken):'',
       basicUsername:keepAuth&&authType==='basic'?String(request.basicUsername||''):'',basicPassword:keepAuth&&authType==='basic'?String(request.basicPassword||''):'',
       apiKeyName:authType==='apiKey'?String(request.apiKeyName||'').slice(0,128):'',apiKeyLocation:authType==='apiKey'&&request.apiKeyLocation==='query'?'query':'header',apiKeyValue:keepAuth&&authType==='apiKey'?String(request.apiKeyValue||''):'',
       allowInsecureHttp:allowInsecureHttp&&request.allowInsecureHttp===true,tokenRequest:!!request.tokenRequest,tokenClientId:String(request.tokenClientId||'').slice(0,512),tokenCredentialMode:request.tokenCredentialMode==='query'?'query':'body',
@@ -1221,11 +1252,12 @@ function openSaveDialog(){
   byId('save-request-dialog').showModal();byId('saved-request-name').focus();
 }
 function getSnapshot(){
-  validateResponseCaptureForm();const responseTests=getResponseTestsFromForm(),rawRoute=buildRequestRoute(false,true),base=sanitizeBase(byId('base-url').value.trim()),path=rawRoute?sanitizeRoute(rawRoute):{value:'',redacted:false},headers=sanitizeHeaders(byId('headers').value),payload=sanitizeBody(body.value);
-  const saveAuth=byId('save-token-history').checked,auth=authFieldsFromForm(value=>value,saveAuth),authOmitted=!saveAuth&&hasAuthCredentials(authFieldsFromForm(value=>value,true)),multipart=getPersistableMultipartFields(true);
-  return{method:method.value,baseUrl:base.value,route:path.value,headers:headers.value,body:payload.value,bodyMode:byId('body-mode').value,multipartFields:multipart.fields,...auth,allowInsecureHttp:byId('allow-insecure-http').checked,
+  validateResponseCaptureForm();const responseTests=getResponseTestsFromForm(),rawRoute=buildRequestRoute(false,true),base=sanitizeBase(byId('base-url').value.trim()),path=rawRoute?sanitizeRoute(rawRoute):{value:'',redacted:false},headers=sanitizeHeaders(byId('headers').value),payload=sanitizeBody(body.value),bodyMode=byId('body-mode').value,graphqlInput=getGraphqlFieldsFromForm();
+  if(bodyMode==='graphql'){if(method.value!=='POST')throw Error('GraphQL usa POST no Vortix.');RunnerLogic.buildGraphqlBody(graphqlInput.graphqlQuery,graphqlInput.graphqlVariables,graphqlInput.graphqlOperationName);}
+  const saveAuth=byId('save-token-history').checked,auth=authFieldsFromForm(value=>value,saveAuth),authOmitted=!saveAuth&&hasAuthCredentials(authFieldsFromForm(value=>value,true)),multipart=getPersistableMultipartFields(true),graphql=normalizePersistableGraphqlFields(graphqlInput);
+  return{method:method.value,baseUrl:base.value,route:path.value,headers:headers.value,body:bodyMode==='graphql'?'':payload.value,bodyMode,multipartFields:multipart.fields,graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,...auth,allowInsecureHttp:byId('allow-insecure-http').checked,
     captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseTests,
-    redacted:base.redacted||path.redacted||headers.redacted||payload.redacted||authOmitted||multipart.redacted};
+    redacted:base.redacted||path.redacted||headers.redacted||payload.redacted||authOmitted||multipart.redacted||graphql.redacted};
 }
 async function saveCollectionRequest(event){
   event.preventDefault();const name=byId('saved-request-name').value.trim(),[collectionId,folderId='']=byId('saved-request-folder').value.split('|');
@@ -1242,7 +1274,7 @@ async function saveCollectionRequest(event){
 }
 function loadCollectionRequest(request,collectionId,folderId,notify=true){
   byId('base-url').value=request.baseUrl||'{{baseUrl}}';baseUrlAuto=request.baseUrl==='{{baseUrl}}';byId('allow-insecure-http').checked=request.allowInsecureHttp===true;method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET';
-  const split=splitRoute(request.route||'');route.value=split.route;renderQueryParams(split.params);byId('headers').value=request.headers||'';body.value=request.body||'';applyBodyMode(request.bodyMode);renderMultipartFields(request.multipartFields||[]);applyAuthFields(request);
+  const split=splitRoute(request.route||'');route.value=split.route;renderQueryParams(split.params);byId('headers').value=request.headers||'';body.value=request.body||'';applyBodyMode(request.bodyMode);renderMultipartFields(request.multipartFields||[]);renderGraphqlFields(request);applyAuthFields(request);
   byId('token-client-id').value=request.tokenRequest?request.tokenClientId||'':'';byId('token-client-secret').value='';byId('token-credential-mode').value=request.tokenCredentialMode==='query'?'query':'body';byId('token-helper').open=!!request.tokenRequest;
   if(request.tokenRequest){byId('token-route').value=split.route;byId('token-client-id-field').value=request.tokenClientIdField||'client_id';byId('token-client-secret-field').value=request.tokenClientSecretField||'client_secret';tokenRequestConfig=RunnerLogic.normalizeTokenRequestConfig({route:split.route,clientIdField:byId('token-client-id-field').value,clientSecretField:byId('token-client-secret-field').value,credentialMode:byId('token-credential-mode').value});}
   byId('capture-response-variable').checked=!!request.captureResponseVariable;byId('response-variable-name').value=request.responseVariableName||'token';byId('response-value-source').value=request.responseValueSource==='text'?'text':'json';byId('response-json-path').value=request.responseJsonPath||'access_token';byId('response-success-only').checked=request.responseSuccessOnly!==false;byId('response-variable-result').hidden=true;updateResponseCaptureUi();setResponseTests(request.responseTests||[]);
@@ -1587,7 +1619,8 @@ async function captureResponseVariable(request,result,quiet=false){
   }catch(error){const message=error.message||'Não foi possível ler o valor da resposta.';if(!quiet){showResponseVariableResult(message,'error');showToast('Variável não salva',message,'error');}return{ok:false,captured:true,error:message};}
 }
 async function executeApiRequest(request){
-  const response=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify(request)});
+  const {graphqlQuery,graphqlVariables,graphqlOperationName,...proxyRequest}=request;
+  const response=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify(proxyRequest)});
   let result;try{result=await response.json();}catch{throw Error('O servidor local devolveu uma resposta inválida.');}
   void renderCookieJar();if(result.cookieJarWarning)showToast('Cookie não salvo',result.cookieJarWarning,'warning');
   return{proxyStatus:response.status,result};
@@ -1605,8 +1638,9 @@ async function performApiRequest(request,button,save,historyRequest=request){
   finally{button.disabled=false;updateGuard();}
 }
 function requestFromForm(selectedMethod,requestRoute,resolveValues=true){
-  const resolve=value=>resolveValues?applyEnvironment(value):value,auth=authFieldsFromForm(resolve,true);
-  return{baseUrl:resolve(byId('base-url').value.trim()),route:resolve(requestRoute),method:selectedMethod,...auth,environmentId:activeEnvironmentId||'default',bodyMode:byId('body-mode').value,headers:resolve(byId('headers').value),body:resolve(body.value),multipartFields:readMultipartFieldEntries(resolve).map(entry=>entry.field),
+  const resolve=value=>resolveValues?applyEnvironment(value):value,auth=authFieldsFromForm(resolve,true),bodyMode=byId('body-mode').value,graphql=getGraphqlFieldsFromForm();
+  const requestBody=bodyMode==='graphql'?RunnerLogic.buildGraphqlBody(graphql.graphqlQuery,graphql.graphqlVariables,graphql.graphqlOperationName,resolve):resolve(body.value);
+  return{baseUrl:resolve(byId('base-url').value.trim()),route:resolve(requestRoute),method:selectedMethod,...auth,environmentId:activeEnvironmentId||'default',bodyMode,headers:resolve(byId('headers').value),body:requestBody,multipartFields:readMultipartFieldEntries(resolve).map(entry=>entry.field),graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,
     allowInsecureHttp:byId('allow-insecure-http').checked,confirmTestData:byId('confirm-test-data').checked,testDataPhrase:byId('test-data-phrase').value,confirmTokenRequest:false,
     saveBearerToken:byId('save-token-history').checked,
     captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseTests:getResponseTestsFromForm()};
@@ -1619,6 +1653,7 @@ async function sendCurrentRequest(){
     if(writeMethods.has(selectedMethod)&&!writeConfirmationValid())throw Error('Digite TESTE e confirme que URL e dados são exclusivos de teste.');
     const historyRequest=requestFromForm(selectedMethod,rawRoute,false);
     request=requestFromForm(selectedMethod,rawRoute);
+    if(request.bodyMode==='graphql'&&selectedMethod!=='POST')throw Error('GraphQL usa POST no Vortix.');
     if(request.bodyMode==='multipart')request.multipartFields=await multipartFieldsForSend(value=>applyEnvironment(value));
     const insecureOrigin=RunnerLogic.remoteHttpOrigin(request.baseUrl);
     if(insecureOrigin&&!request.allowInsecureHttp)throw Error('HTTP fora de localhost está bloqueado. Marque a opção de HTTP sem TLS nesta request para continuar.');
@@ -1716,12 +1751,12 @@ function addEventListeners(){
     const change=()=>{if(['method','route','body','base-url','headers'].includes(id))byId('confirm-test-data').checked=false;if(id==='base-url')baseUrlAuto=false;updateGuard();updateTokenButton();if(id==='body'){renderBodyHighlight();updateJsonTools();}};byId(id).addEventListener('input',change);byId(id).addEventListener('change',change);
   }
   body.addEventListener('scroll',renderBodyHighlight);byId('token-client-id').addEventListener('input',updateTokenButton);byId('token-client-secret').addEventListener('input',updateTokenButton);
-  byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('body-mode').addEventListener('change',updateBodyModeUi);byId('multipart-add-text').onclick=()=>addMultipartField('text');byId('multipart-add-file').onclick=()=>addMultipartField('file');byId('clear-cookie-jar').onclick=clearCookieJar;
+  byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('body-mode').addEventListener('change',updateBodyModeUi);byId('multipart-add-text').onclick=()=>addMultipartField('text');byId('multipart-add-file').onclick=()=>addMultipartField('file');byId('format-graphql-variables').onclick=formatGraphqlVariables;for(const id of ['graphql-query','graphql-variables','graphql-operation-name']){byId(id).addEventListener('input',()=>{byId('confirm-test-data').checked=false;updateGuard();});byId(id).addEventListener('change',()=>{byId('confirm-test-data').checked=false;updateGuard();});}byId('clear-cookie-jar').onclick=clearCookieJar;
   for(const id of ['token-route','token-client-id-field','token-client-secret-field','token-credential-mode']){byId(id).addEventListener('input',updateTokenButton);byId(id).addEventListener('change',()=>void persistTokenRequestConfig());}
   sendButton.onclick=sendCurrentRequest;tokenRequestButton.onclick=requestTokenFromHelper;
 }
 async function startApp(){
-  addEventListeners();renderQueryParams([]);renderMultipartFields([]);updateAuthTypeUi();updateBodyModeUi();renderBodyHighlight();
+  addEventListeners();renderQueryParams([]);renderMultipartFields([]);renderGraphqlFields({});updateAuthTypeUi();updateBodyModeUi();renderBodyHighlight();
   try{await initializeDb();await loadTokenRequestConfig();applyTheme(activeTheme);applyTypography();applyUiScale();renderCollectionTree();renderEnvironmentSelect();if(!byId('base-url').value)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';await renderHistory();await initializeWorkspaceTabs();updateGuard();updateCopyButtons();updateTokenButton();updateJsonTools();updateResponseCaptureUi();byId('sidebar-storage-note').textContent='SQLite local · proteção de dados';}
   catch(error){showToast('Banco local indisponível',error.message||'Confira o acesso ao SQLite e tente recarregar.','error',0);updateGuard();updateCopyButtons();updateTokenButton();}
 }

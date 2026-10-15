@@ -74,15 +74,19 @@ Evoluímos em fatias pequenas. Cada feature deve resolver um fluxo completo ante
 - [x] Runner executa multipart de texto; requests com arquivos pedem envio manual.
 - [x] Documentar limites, persistência e fluxo visual no README.
 
-### 5. GraphQL — próxima feature
+### 5. GraphQL
 
-Adicionar um editor próprio para query e variables, sem confundir o fluxo com body raw.
+**Status: concluída.**
 
-- [ ] Criar testes para query, variables, operationName e Content-Type.
-- [ ] Persistir e executar os campos pelo Runner.
-- [ ] Importar/exportar formatos compatíveis do Vortix, Insomnia e Postman.
-- [ ] Documentar exemplo, validações e limitações no README.
-### 6. Autenticação herdada por coleção e pasta
+- [x] Escrever query e variables JSON em campos separados, com operationName opcional.
+- [x] Validar query não vazia, variables como objeto JSON e envio somente por POST.
+- [x] Montar envelope JSON e resolver templates de ambiente antes do envio.
+- [x] Preservar query/variables/opName em coleções, abas, histórico e Runner.
+- [x] Importar/exportar GraphQL para Vortix, Insomnia v4 e Postman v2.1.
+- [x] Testar builder, método, payload e proxy em mock local; build sem warnings.
+- [x] Documentar exemplo e fluxo visual no README.
+
+### 6. Autenticação herdada por coleção e pasta — próxima feature
 
 Evitar repetir credenciais em cada request, mantendo precedência fácil de entender.
 
@@ -120,7 +124,8 @@ Só entram depois das features anteriores e dos testes de uso:
 - [ ] Histórico de respostas com limite configurável e sem guardar body sensível por padrão.
 - [ ] Comparação de respostas e duração.
 - [ ] Importação de mais formatos mediante teste de compatibilidade.
+- [ ] Schema GraphQL por introspecção e autocomplete, com confirmação antes de consultar endpoints externos.
 
 ## Regra de sequência
 
-Fechamos uma feature — testes, documentação e revisão — antes de iniciar a seguinte. A próxima execução começa por GraphQL, com testes próprios antes da implementação e atualização do README ao concluir.
+Fechamos uma feature — testes, documentação e revisão — antes de iniciar a seguinte. A próxima execução começa pela autenticação herdada entre coleção, pasta e request, com testes antes da implementação.
