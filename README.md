@@ -170,9 +170,10 @@ Exemplo mínimo:
 }
 ~~~
 
-Variáveis definidas no primeiro servidor são criadas em um ambiente OpenAPI. Parâmetros sem exemplo ficam editáveis; variáveis de path sem exemplo aparecem como <code>{{nome}}</code>. Confira a coleção gerada antes de enviar.
+Variáveis de servidor com valor padrão são criadas em um ambiente OpenAPI. Valores sensíveis e variáveis sem padrão ficam para configuração manual. Parâmetros sem exemplo ficam editáveis; variáveis de path sem exemplo aparecem como <code>{{nome}}</code>. Confira a coleção gerada antes de enviar.
 
-O importador não busca referências <code>$ref</code> externas, não aplica automaticamente os requisitos de segurança e não gera body de mídia não JSON. Esses casos aparecem como avisos para revisão manual. A primeira versão aceita JSON; YAML ainda não é importado. Consulte também a <a href="https://spec.openapis.org/oas/latest.html">especificação OpenAPI</a>.
+O importador não resolve referências <code>$ref</code> (locais ou externas), não acessa a rede para buscá-las, não aplica automaticamente os requisitos de segurança e não gera body de mídia não JSON. Esses casos aparecem como avisos para revisão manual. A primeira versão aceita JSON; YAML ainda não é importado. Consulte também a <a href="https://spec.openapis.org/oas/latest.html">especificação OpenAPI</a>.
+
 ## Ambientes e variáveis
 
 Cada ambiente mantém suas próprias variáveis. Grupos ajudam a separar ambientes como Desenvolvimento, Homologação e Produção; os nomes e valores são definidos por você.
