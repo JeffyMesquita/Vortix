@@ -21,6 +21,7 @@
 - [Início rápido](#início-rápido)
 - [Primeiro fluxo](#primeiro-fluxo)
 - [Autenticação](#autenticação)
+- [Modos de body](#modos-de-body)
 - [Importar cURL](#importar-curl)
 - [Importar OpenAPI JSON](#importar-openapi-json)
 - [Ambientes e variáveis](#ambientes-e-variáveis)
@@ -45,7 +46,7 @@ A aplicação escuta somente em loopback e foi pensada para uso em computador de
 
 ## Recursos
 
-- **Editor de requests:** GET, HEAD, POST, PUT, PATCH, DELETE e OPTIONS; URL base, rota, Params, Headers, Body e Auth Bearer, Basic ou API Key.
+- **Editor de requests:** GET, HEAD, POST, PUT, PATCH, DELETE e OPTIONS; URL base, rota, Params, Headers, body JSON/texto/XML/form URL-encoded e Auth Bearer, Basic ou API Key.
 - **Coleções:** coleções, pastas e subpastas para organizar requests.
 - **Ambientes:** variáveis próprias e Cookie jar isolado por ambiente, com substituição por templates como <code>{{baseUrl}}</code> e <code>{{token}}</code>.
 - **Abas e histórico:** até 12 requests abertas; abas, histórico, coleções, ambientes e preferências ficam salvos localmente.
@@ -120,7 +121,46 @@ Exemplo:
 | Params | <code>page=1</code> |
 | Header | <code>Accept: application/json</code> |
 
-Para um body JSON, escolha **Body**, informe o conteúdo e use o botão de formatação quando precisar indentar.
+Escolha **Body** para selecionar JSON, texto, XML ou form URL-encoded. O modo define o Content-Type padrão; um header Content-Type informado manualmente o sobrescreve.
+
+
+## Modos de body
+
+O editor mantém o body como texto e oferece formatos prontos:
+<p align="center">
+  <img src="docs/images/vortix-body-modes.svg" alt="Exemplos coloridos de JSON, texto, XML e form URL-encoded no Vortix" width="100%">
+</p>
+
+| Formato | Content-Type padrão |
+|---|---|
+| JSON | <code>application/json</code> |
+| Texto | <code>text/plain</code> |
+| XML | <code>application/xml</code> |
+| Form URL-encoded | <code>application/x-www-form-urlencoded</code> |
+
+Exemplos:
+
+~~~json
+{"name":"Ana","active":true}
+~~~
+
+~~~text
+Texto livre para uma API que não recebe JSON.
+~~~
+
+~~~xml
+<request><name>Ana</name></request>
+~~~
+
+~~~text
+name=Ana&tag=one&tag=two
+~~~
+
+O formato acompanha a request nas abas, histórico, coleções e Runner. Vortix JSON o preserva; Postman e Insomnia recebem o formato e Content-Type correspondentes.
+
+O JSON mantém destaque, indentação e compactação. Para texto, XML e form URL-encoded, o editor mostra o conteúdo sem destaque JSON. O header Content-Type manual pode substituir o padrão. GET, HEAD e OPTIONS continuam sem body.
+
+Multipart com arquivos e o editor GraphQL são próximas fatias; veja o [plano de ação](ROADMAP.md).
 
 ### Métodos e proteção de gravação
 

@@ -14,6 +14,7 @@ $oldTestRecord = $env:API_STUDIO_TEST_RECORD
 $server = $null
 $authMockServer = $null
 $cookieMockServer = $null
+$bodyMockServer = $null
 $passed = $false
 New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
 function Start-TestApi([string]$logName) {
@@ -49,6 +50,19 @@ function Start-CookieCaptureServer([int]$requestCount) {
         Start-Sleep -Milliseconds 100
     }
     if (-not (Test-Path $readyPath)) { throw 'Cookie capture server did not become ready.' }
+    return [pscustomobject]@{ Process = $process; Port = [int](Get-Content -Raw $readyPath) }
+}
+
+function Start-BodyCaptureServer([int]$requestCount) {
+    $readyPath = Join-Path $temporaryRoot 'body-mock.port'
+    $scriptPath = Join-Path $projectRoot 'BodyCaptureServer.test.ps1'
+    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath, '-RequestCount', [string]$requestCount, '-ReadyPath', $readyPath, '-OutputRoot', $temporaryRoot) -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $temporaryRoot 'body-mock.out') -RedirectStandardError (Join-Path $temporaryRoot 'body-mock.err')
+    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+        if ($process.HasExited) { throw 'Body capture server exited before becoming ready.' }
+        if (Test-Path $readyPath) { break }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not (Test-Path $readyPath)) { throw 'Body capture server did not become ready.' }
     return [pscustomobject]@{ Process = $process; Port = [int](Get-Content -Raw $readyPath) }
 }
 function Get-PlaintextScan([string[]]$secrets, [string]$pythonPath) {
@@ -150,6 +164,26 @@ try {
     if ($wrongHostCapture -match '(?im)^Cookie:') { throw 'Host-only or domain cookie leaked to another host.' }
     if ((Get-PlaintextScan $secrets $scanPath) -ne 'CLEAR') { throw 'A cookie value remains in SQLite plaintext.' }
 
+
+    $bodyMockServer = Start-BodyCaptureServer 5
+    $bodyMockBaseUrl = 'http://127.0.0.1:' + $bodyMockServer.Port
+    $bodyCases = @(
+        [pscustomobject]@{ mode = 'json'; body = '{"ok":true}'; contentType = 'application/json'; headers = '' },
+        [pscustomobject]@{ mode = 'text'; body = 'plain-text-body'; contentType = 'text/plain'; headers = '' },
+        [pscustomobject]@{ mode = 'xml'; body = '<note>ok</note>'; contentType = 'application/xml'; headers = '' },
+        [pscustomobject]@{ mode = 'urlencoded'; body = 'name=Ana&tag=one&tag=two'; contentType = 'application/x-www-form-urlencoded'; headers = '' },
+        [pscustomobject]@{ mode = 'text'; body = '{"override":true}'; contentType = 'application/vnd.example+json'; headers = 'Content-Type: application/vnd.example+json' }
+    )
+    for ($bodyIndex = 0; $bodyIndex -lt $bodyCases.Count; $bodyIndex++) {
+        $bodyCase = $bodyCases[$bodyIndex]
+        $bodyCall = @{ baseUrl = $bodyMockBaseUrl; route = '/body'; method = 'POST'; bodyMode = $bodyCase.mode; body = $bodyCase.body; headers = $bodyCase.headers; confirmTestData = $true; testDataPhrase = 'TESTE'; environmentId = 'body-mode-test' } | ConvertTo-Json -Compress
+        $bodyResult = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $bodyCall -TimeoutSec 5
+        if ($bodyResult.status -ne 200) { throw ('Body mode request failed: ' + $bodyCase.mode) }
+        $bodyCapture = Get-Content -Raw (Join-Path $temporaryRoot ('body-request-' + $bodyIndex + '.txt'))
+        if ($bodyCapture -notmatch ('(?im)^Content-Type:\s*' + [regex]::Escape($bodyCase.contentType))) { throw ('Wrong Content-Type for body mode: ' + $bodyCase.mode) }
+        if (-not $bodyCapture.Contains($bodyCase.body)) { throw ('Request body was altered for mode: ' + $bodyCase.mode) }
+    }
+
     $prefixPath = Join-Path $temporaryRoot 'prefix.sqlite.py'
     $prefixCode = @(
         'import sqlite3, sys',
@@ -221,6 +255,7 @@ finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
     if ($authMockServer -and -not $authMockServer.Process.HasExited) { Stop-Process -Id $authMockServer.Process.Id -Force }
     if ($cookieMockServer -and -not $cookieMockServer.Process.HasExited) { Stop-Process -Id $cookieMockServer.Process.Id -Force }
+    if ($bodyMockServer -and -not $bodyMockServer.Process.HasExited) { Stop-Process -Id $bodyMockServer.Process.Id -Force }
     if ($null -eq $oldPort) { Remove-Item Env:\ApiStudio__Port -ErrorAction SilentlyContinue } else { $env:ApiStudio__Port = $oldPort }
     if ($null -eq $oldDatabasePath) { Remove-Item Env:\ApiStudio__DatabasePath -ErrorAction SilentlyContinue } else { $env:ApiStudio__DatabasePath = $oldDatabasePath }
     if ($null -eq $oldTestSecrets) { Remove-Item Env:\API_STUDIO_TEST_SECRETS -ErrorAction SilentlyContinue } else { $env:API_STUDIO_TEST_SECRETS = $oldTestSecrets }

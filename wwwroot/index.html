@@ -113,11 +113,12 @@
           </div>
 
           <div class="tab-panel" data-editor-panel="body" hidden>
-            <div class="panel-heading"><div><h2>Request Body</h2><p>JSON ou texto para POST, PUT, PATCH ou DELETE. Ajuste Content-Type em Headers.</p></div><div class="code-tools"><span class="language-badge">JSON / RAW</span><button class="text-button format-button" id="format-json" type="button" title="Formatar JSON">Identar</button><button class="text-button format-button" id="minify-json" type="button" title="Remover espaços do JSON">Compactar</button></div></div>
+            <div class="panel-heading"><div><h2>Request Body</h2><p>Escolha o formato do conteúdo; o Content-Type padrão é aplicado ao enviar.</p></div><div class="code-tools"><span class="language-badge" id="body-mode-badge">JSON</span><button class="text-button format-button" id="format-json" type="button" title="Formatar JSON">Identar</button><button class="text-button format-button" id="minify-json" type="button" title="Remover espaços do JSON">Compactar</button></div></div>
+            <div class="body-mode-row"><label for="body-mode">Formato</label><select id="body-mode"><option value="json">JSON</option><option value="text">Texto</option><option value="xml">XML</option><option value="urlencoded">Form URL-encoded</option></select><span class="hint" id="body-mode-hint">Content-Type: application/json</span></div>
             <div class="code-editor">
               <pre id="body-highlight" class="code-highlight" aria-hidden="true"></pre>
-              <label class="visually-hidden" for="body">JSON da requisição</label>
-              <textarea id="body" class="code-input" rows="15" autocomplete="off" spellcheck="false" placeholder="{\n  \"exemplo\": true\n}" aria-label="JSON da requisição"></textarea>
+              <label class="visually-hidden" for="body">Conteúdo do body</label>
+              <textarea id="body" class="code-input" rows="15" autocomplete="off" spellcheck="false" placeholder="{\n  \"exemplo\": true\n}" aria-label="Conteúdo do body"></textarea>
             </div>
           </div>
 

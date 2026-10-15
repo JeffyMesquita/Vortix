@@ -169,7 +169,7 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
     if (call is null || string.IsNullOrWhiteSpace(call.BaseUrl) || call.BaseUrl.Length > 2048 ||
         string.IsNullOrWhiteSpace(call.Route) || call.Route.Length > 4096 || (call.Body?.Length ?? 0) > 900_000 ||
         (call.Headers?.Length ?? 0) > 32_000 || (call.BearerToken?.Length ?? 0) > 8192 ||
-        (call.TokenClientId?.Length ?? 0) > 512 || (call.TokenClientSecret?.Length ?? 0) > 8192 || (call.AuthType?.Length ?? 0) > 16 || (call.BasicUsername?.Length ?? 0) > 1024 || (call.BasicPassword?.Length ?? 0) > 8192 || (call.ApiKeyName?.Length ?? 0) > 128 || (call.ApiKeyLocation?.Length ?? 0) > 16 || (call.ApiKeyValue?.Length ?? 0) > 8192 || (call.EnvironmentId?.Length ?? 0) > 128 || call.EnvironmentId?.Contains('\r') == true || call.EnvironmentId?.Contains('\n') == true)
+        (call.TokenClientId?.Length ?? 0) > 512 || (call.TokenClientSecret?.Length ?? 0) > 8192 || (call.AuthType?.Length ?? 0) > 16 || (call.BasicUsername?.Length ?? 0) > 1024 || (call.BasicPassword?.Length ?? 0) > 8192 || (call.ApiKeyName?.Length ?? 0) > 128 || (call.ApiKeyLocation?.Length ?? 0) > 16 || (call.ApiKeyValue?.Length ?? 0) > 8192 || (call.BodyMode?.Length ?? 0) > 16 || (call.EnvironmentId?.Length ?? 0) > 128 || call.EnvironmentId?.Contains('\r') == true || call.EnvironmentId?.Contains('\n') == true)
     {
         return Error(StatusCodes.Status400BadRequest, "Revise URL, rota e tamanho dos campos.");
     }
@@ -242,6 +242,9 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
     }
 
     var body = call.Body ?? string.Empty;
+    var bodyMode = string.IsNullOrWhiteSpace(call.BodyMode) ? "json" : call.BodyMode.Trim().ToLowerInvariant();
+    if (bodyMode is not ("json" or "text" or "xml" or "urlencoded"))
+        return Error(StatusCodes.Status400BadRequest, "Modo de body n√£o suportado.");
     var tokenClientId = call.TokenClientId ?? string.Empty;
     var tokenClientSecret = call.TokenClientSecret ?? string.Empty;
     if ((method is "GET" or "HEAD" or "OPTIONS") && !string.IsNullOrWhiteSpace(body))
@@ -276,11 +279,11 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
         var contentTypeLine = (call.Headers ?? string.Empty).Split('\n')
             .Select(line => line.Trim().TrimEnd('\r'))
             .FirstOrDefault(line => line.StartsWith("Content-Type:", StringComparison.OrdinalIgnoreCase));
-        var contentTypeValue = contentTypeLine is null ? string.Empty : contentTypeLine[(contentTypeLine.IndexOf(':') + 1)..].Trim();
-        var expectsJson = string.IsNullOrWhiteSpace(contentTypeValue) ||
-            (MediaTypeHeaderValue.TryParse(contentTypeValue, out var requestContentType) &&
+        var contentTypeValue = contentTypeLine is null ? DefaultBodyContentType(bodyMode) : contentTypeLine[(contentTypeLine.IndexOf(':') + 1)..].Trim();
+        if (string.IsNullOrWhiteSpace(contentTypeValue)) contentTypeValue = DefaultBodyContentType(bodyMode);
+        var expectsJson = MediaTypeHeaderValue.TryParse(contentTypeValue, out var requestContentType) &&
              (requestContentType.MediaType?.Equals("application/json", StringComparison.OrdinalIgnoreCase) == true ||
-              requestContentType.MediaType?.EndsWith("+json", StringComparison.OrdinalIgnoreCase) == true));
+              requestContentType.MediaType?.EndsWith("+json", StringComparison.OrdinalIgnoreCase) == true);
         if (!string.IsNullOrWhiteSpace(body) && expectsJson)
         {
             try
@@ -345,15 +348,21 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
             [call.TokenClientIdField] = tokenClientId.Trim(),
             [call.TokenClientSecretField] = tokenClientSecret
         });
-        request.Content = new StringContent(tokenCredentials, Encoding.UTF8, "application/json");
+        request.Content = new ByteArrayContent(Encoding.UTF8.GetBytes(tokenCredentials));
     }
     else if (IsWriteMethod(method) && !string.IsNullOrWhiteSpace(body))
     {
-        request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+        request.Content = new ByteArrayContent(Encoding.UTF8.GetBytes(body));
     }
     if (!TryApplyHeaders(call.Headers ?? string.Empty, request, out var headerError))
     {
         return Error(StatusCodes.Status400BadRequest, headerError);
+    }
+    if (request.Content is not null && request.Content.Headers.ContentType is null &&
+        MediaTypeHeaderValue.TryParse(DefaultBodyContentType(bodyMode), out var defaultContentType))
+    {
+        defaultContentType.CharSet = "utf-8";
+        request.Content.Headers.ContentType = defaultContentType;
     }
 
     if (authType == "apikey" && apiKeyLocation == "header")
@@ -612,6 +621,14 @@ static IResult StorageError() => Results.Json(new { error = "Registro local inv√
 
 static bool IsWriteMethod(string method) => method is "POST" or "PUT" or "PATCH" or "DELETE";
 
+static string DefaultBodyContentType(string bodyMode) => bodyMode switch
+{
+    "text" => "text/plain",
+    "xml" => "application/xml",
+    "urlencoded" => "application/x-www-form-urlencoded",
+    _ => "application/json"
+};
+
 static bool IsValidTokenFieldName(string? value) =>
     value is { Length: > 0 and <= 128 } && char.IsAsciiLetter(value[0]) &&
     value.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-' or '.');
@@ -741,6 +758,9 @@ sealed class ApiCall
     public string Method { get; init; } = "GET";
     public string BearerToken { get; init; } = string.Empty;
     public string Headers { get; init; } = string.Empty;
+    /// <summary>Gets or sets the request body format.</summary>
+    /// <value>One of <c>json</c>, <c>text</c>, <c>xml</c>, or <c>urlencoded</c>; empty preserves JSON defaults.</value>
+    public string BodyMode { get; init; } = "json";
     public string Body { get; init; } = string.Empty;
     public bool ConfirmTestData { get; init; }
     public string TestDataPhrase { get; init; } = string.Empty;

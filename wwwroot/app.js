@@ -242,6 +242,25 @@ function updateAuthTypeUi(){
 }
 function hasAuthCredentials(request){return!!(request?.bearerToken||request?.basicUsername||request?.basicPassword||request?.apiKeyValue);}
 function authTypeLabel(request){const type=normalizeAuthType(request?.authType,request?.bearerToken);return type==='apiKey'?'API Key':type==='basic'?'Basic Auth':type==='bearer'?'Bearer':'sem autenticação';}
+function normalizeBodyMode(value){const mode=String(value||'json').trim().toLowerCase();return['json','text','xml','urlencoded'].includes(mode)?mode:'json';}
+function bodyModeContentType(value){return({json:'application/json',text:'text/plain',xml:'application/xml',urlencoded:'application/x-www-form-urlencoded'})[normalizeBodyMode(value)];}
+function bodyModeFromContentType(value){const type=String(value||'').split(';')[0].trim().toLowerCase();if(type==='application/x-www-form-urlencoded')return'urlencoded';if(type.includes('xml'))return'xml';if(type.startsWith('text/'))return'text';return'json';}
+function bodyModeFromHeaderEntries(headers){const entries=Array.isArray(headers)?headers:[];const header=entries.find(([name])=>String(name).toLowerCase()==='content-type');return bodyModeFromContentType(header?.[1]);}
+function inferImportedBodyMode(requestBody,headers){
+  if(requestBody?.mode==='urlencoded'||requestBody?.urlencoded||requestBody?.mimeType==='application/x-www-form-urlencoded')return'urlencoded';
+  const language=String(requestBody?.options?.raw?.language||'').toLowerCase();if(language==='xml')return'xml';if(language==='text')return'text';if(language==='json')return'json';
+  const contentType=requestBody?.mimeType||String(headers.find(line=>/^content-type\s*:/i.test(line))||'').split(':').slice(1).join(':').trim();
+  return bodyModeFromContentType(contentType);
+}
+function applyBodyMode(value){byId('body-mode').value=normalizeBodyMode(value);updateBodyModeUi();}
+function updateBodyModeUi(){
+  const mode=normalizeBodyMode(byId('body-mode').value),json=mode==='json';byId('body-mode').value=mode;
+  byId('body-mode-badge').textContent=({json:'JSON',text:'TEXT',xml:'XML',urlencoded:'FORM URL-ENCODED'})[mode];
+  byId('body-mode-hint').textContent='Content-Type padrão: '+bodyModeContentType(mode)+'; pode ser sobrescrito em Headers.';
+  byId('body-highlight').hidden=!json;body.classList.toggle('plain-body-input',!json);
+  body.placeholder=({json:'{\n  "exemplo": true\n}',text:'Texto da requisição',xml:'<request>conteúdo</request>',urlencoded:'chave=valor&outra=valor'})[mode];
+  updateJsonTools();renderBodyHighlight();
+}
 function protectTemplates(value) {
   const templates=[];const protectedValue=String(value||'').replace(/\{\{\s*([^{}]+?)\s*\}\}/g,match=>{const marker=`codexvar${templates.length}token`;templates.push(match);return marker;});
   return{value:protectedValue,restore:text=>String(text).replace(/codexvar(\d+)token/gi,(_,index)=>templates[Number(index)]||'')};
@@ -342,7 +361,7 @@ async function saveHistory(request){
   if(!base.value||!path.value)return;
   const tokenRequest=!!request.tokenRequest,entry={
     id:newId(),savedAt:new Date().toISOString(),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET',
-    baseUrl:base.value,route:path.value,headers:headers.value,body:payload.value,authType,bearerToken,basicUsername,basicPassword,apiKeyName,apiKeyLocation,apiKeyValue,authOmitted,tokenRequest,allowInsecureHttp:request.allowInsecureHttp===true,
+    baseUrl:base.value,route:path.value,headers:headers.value,body:payload.value,bodyMode:normalizeBodyMode(request.bodyMode),authType,bearerToken,basicUsername,basicPassword,apiKeyName,apiKeyLocation,apiKeyValue,authOmitted,tokenRequest,allowInsecureHttp:request.allowInsecureHttp===true,
     tokenCredentialMode:tokenRequest?(request.tokenCredentialMode==='query'?'query':'body'):'',tokenClientId:tokenRequest?String(request.tokenClientId||'').trim():'',
     tokenClientIdField:tokenRequest?String(request.tokenClientIdField||'client_id'):'',tokenClientSecretField:tokenRequest?String(request.tokenClientSecretField||'client_secret'):'',
     redacted:base.redacted||path.redacted||headers.redacted||payload.redacted||authOmitted,
@@ -355,7 +374,7 @@ async function saveHistory(request){
 function applyHistoryEntry(entry,notify=true){
   byId('base-url').value=entry.baseUrl||'';baseUrlAuto=false;byId('allow-insecure-http').checked=entry.allowInsecureHttp===true;method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(entry.method)?entry.method:'GET';
   const parts=splitRoute(sanitizeRoute(String(entry.route||'')).value);route.value=parts.route;renderQueryParams(parts.params);
-  byId('headers').value=sanitizeHeaders(String(entry.headers||'')).value;body.value=entry.tokenRequest?'':sanitizeBody(String(entry.body||'')).value;
+  byId('headers').value=sanitizeHeaders(String(entry.headers||'')).value;body.value=entry.tokenRequest?'':sanitizeBody(String(entry.body||'')).value;applyBodyMode(entry.bodyMode);
   applyAuthFields(entry);if(hasAuthCredentials(entry))byId('save-token-history').checked=true;
   byId('token-client-id').value=entry.tokenRequest?String(entry.tokenClientId||''):'';byId('token-client-secret').value='';
   byId('token-credential-mode').value=entry.tokenCredentialMode==='query'?'query':'body';if(entry.tokenRequest){byId('token-route').value=parts.route;byId('token-client-id-field').value=entry.tokenClientIdField||'client_id';byId('token-client-secret-field').value=entry.tokenClientSecretField||'client_secret';tokenRequestConfig=RunnerLogic.normalizeTokenRequestConfig({route:parts.route,clientIdField:byId('token-client-id-field').value,clientSecretField:byId('token-client-secret-field').value,credentialMode:byId('token-credential-mode').value});}byId('token-helper').open=!!entry.tokenRequest;updateTokenButton();clearWriteConfirmation();updateGuard();updateCopyButtons();renderBodyHighlight();updateJsonTools();
@@ -364,7 +383,7 @@ function applyHistoryEntry(entry,notify=true){
   if(notify)showToast('Requisição carregada',hasAuthCredentials(entry)?authTypeLabel(entry)+' recuperada; credenciais podem expirar.':'Params, headers e body recuperados. Credenciais foram omitidas ou precisam ser informadas.','info');
 }
 function tokenHistorySnapshot(request){
-  return{baseUrl:request.baseUrl,route:request.route,method:'POST',headers:request.headers,body:'',authType:request.authType||'none',bearerToken:request.authType==='bearer'&&request.saveBearerToken?request.bearerToken:'',basicUsername:request.authType==='basic'&&request.saveBearerToken?request.basicUsername:'',basicPassword:request.authType==='basic'&&request.saveBearerToken?request.basicPassword:'',apiKeyName:request.authType==='apiKey'?request.apiKeyName:'',apiKeyLocation:request.apiKeyLocation==='query'?'query':'header',apiKeyValue:request.authType==='apiKey'&&request.saveBearerToken?request.apiKeyValue:'',authOmitted:hasAuthCredentials(request)&&!request.saveBearerToken,allowInsecureHttp:request.allowInsecureHttp===true,saveBearerToken:request.saveBearerToken===true,tokenRequest:true,tokenCredentialMode:request.tokenCredentialMode==='query'?'query':'body',tokenClientId:'',tokenClientIdField:request.tokenClientIdField,tokenClientSecretField:request.tokenClientSecretField};
+  return{baseUrl:request.baseUrl,route:request.route,method:'POST',headers:request.headers,body:'',bodyMode:'json',authType:request.authType||'none',bearerToken:request.authType==='bearer'&&request.saveBearerToken?request.bearerToken:'',basicUsername:request.authType==='basic'&&request.saveBearerToken?request.basicUsername:'',basicPassword:request.authType==='basic'&&request.saveBearerToken?request.basicPassword:'',apiKeyName:request.authType==='apiKey'?request.apiKeyName:'',apiKeyLocation:request.apiKeyLocation==='query'?'query':'header',apiKeyValue:request.authType==='apiKey'&&request.saveBearerToken?request.apiKeyValue:'',authOmitted:hasAuthCredentials(request)&&!request.saveBearerToken,allowInsecureHttp:request.allowInsecureHttp===true,saveBearerToken:request.saveBearerToken===true,tokenRequest:true,tokenCredentialMode:request.tokenCredentialMode==='query'?'query':'body',tokenClientId:'',tokenClientIdField:request.tokenClientIdField,tokenClientSecretField:request.tokenClientSecretField};
 }
 function loadHistoryEntry(entry){openHistoryRequestInTab(entry);}
 async function removeHistory(id){try{await dbWrite('history',id,true);await renderHistory();showToast('Item removido','Requisição removida do histórico local.','info');}catch{showToast('Histórico indisponível','Não foi possível atualizar o histórico.','error');}}
@@ -517,7 +536,7 @@ async function rerunRunnerFailures(){
 function activeWorkspaceTab(){return workspaceTabs.find(tab=>tab.id===activeWorkspaceTabId)||null;}
 function captureResponseTestDraft(){return[...byId('response-tests-list').querySelectorAll('.response-test-row')].map(row=>({id:row.dataset.testId,target:row.querySelector('.response-test-target').value,path:row.querySelector('.response-test-path').value,operator:row.querySelector('.response-test-operator').value,expected:row.querySelector('.response-test-expected').value}));}
 function captureWorkspaceDraft(){
-  return{title:byId('request-title').textContent||'Nova requisição',method:method.value,baseUrl:byId('base-url').value,baseUrlAuto,allowInsecureHttp:byId('allow-insecure-http').checked,route:route.value,params:[...queryParams.children].map(row=>[row.querySelector('[data-query-name]').value,row.querySelector('[data-query-value]').value]),headers:byId('headers').value,body:body.value,...authFieldsFromForm(value=>value,true),saveBearerToken:byId('save-token-history').checked,tokenClientId:byId('token-client-id').value,tokenCredentialMode:byId('token-credential-mode').value,tokenHelperOpen:byId('token-helper').open,captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value,responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value,responseSuccessOnly:byId('response-success-only').checked,responseTests:captureResponseTestDraft(),activeSaved:activeSaved?{...activeSaved}:null,collectionId:selectedContainer.collectionId,folderId:selectedContainer.folderId,editorSection:document.querySelector('[data-editor-tab][aria-selected="true"]')?.dataset.editorTab||'params'};
+  return{title:byId('request-title').textContent||'Nova requisição',method:method.value,baseUrl:byId('base-url').value,baseUrlAuto,allowInsecureHttp:byId('allow-insecure-http').checked,route:route.value,params:[...queryParams.children].map(row=>[row.querySelector('[data-query-name]').value,row.querySelector('[data-query-value]').value]),headers:byId('headers').value,body:body.value,bodyMode:byId('body-mode').value,...authFieldsFromForm(value=>value,true),saveBearerToken:byId('save-token-history').checked,tokenClientId:byId('token-client-id').value,tokenCredentialMode:byId('token-credential-mode').value,tokenHelperOpen:byId('token-helper').open,captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value,responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value,responseSuccessOnly:byId('response-success-only').checked,responseTests:captureResponseTestDraft(),activeSaved:activeSaved?{...activeSaved}:null,collectionId:selectedContainer.collectionId,folderId:selectedContainer.folderId,editorSection:document.querySelector('[data-editor-tab][aria-selected="true"]')?.dataset.editorTab||'params'};
 }
 function restoreResponseTestDraft(tests){
   const list=byId('response-tests-list');list.replaceChildren();
@@ -557,7 +576,7 @@ function syncActiveWorkspaceTab(markDirty=false){
 }
 function clearWorkspaceResponse(){showResponse('Aguardando envio','idle','','');byId('response-variable-result').hidden=true;renderResponseTestResults([]);}
 function applyWorkspaceDraft(draft){
-  method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(draft.method)?draft.method:'GET';byId('base-url').value=draft.baseUrl||'';baseUrlAuto=!!draft.baseUrlAuto;byId('allow-insecure-http').checked=draft.allowInsecureHttp===true;route.value=String(draft.route??'');renderQueryParams(Array.isArray(draft.params)?draft.params:[]);byId('headers').value=draft.headers||'';body.value=draft.body||'';byId('save-token-history').checked=draft.saveBearerToken!==false;applyAuthFields(draft);byId('token-client-id').value=draft.tokenClientId||'';byId('token-client-secret').value='';byId('token-helper').open=!!draft.tokenHelperOpen;
+  method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(draft.method)?draft.method:'GET';byId('base-url').value=draft.baseUrl||'';baseUrlAuto=!!draft.baseUrlAuto;byId('allow-insecure-http').checked=draft.allowInsecureHttp===true;route.value=String(draft.route??'');renderQueryParams(Array.isArray(draft.params)?draft.params:[]);byId('headers').value=draft.headers||'';body.value=draft.body||'';applyBodyMode(draft.bodyMode);byId('save-token-history').checked=draft.saveBearerToken!==false;applyAuthFields(draft);byId('token-client-id').value=draft.tokenClientId||'';byId('token-client-secret').value='';byId('token-helper').open=!!draft.tokenHelperOpen;
   byId('capture-response-variable').checked=!!draft.captureResponseVariable;byId('response-variable-name').value=draft.responseVariableName||'token';byId('response-value-source').value=draft.responseValueSource==='text'?'text':'json';byId('response-json-path').value=draft.responseJsonPath||'access_token';byId('response-success-only').checked=draft.responseSuccessOnly!==false;byId('response-variable-result').hidden=true;restoreResponseTestDraft(draft.responseTests);
   activeSaved=draft.activeSaved||null;selectedContainer={collectionId:draft.collectionId||'',folderId:draft.folderId||''};byId('request-title').textContent=draft.title||'Nova requisição';clearWriteConfirmation();updateGuard();updateTokenButton();updateCopyButtons();updateResponseCaptureUi();renderBodyHighlight();updateJsonTools();renderCollectionTree();setEditorTab(draft.editorSection||'params');
 }
@@ -582,7 +601,7 @@ function applyWorkspaceTab(tab){
 }
 function nextWorkspaceDraftTitle(){let index=1,title='Nova requisição';while(workspaceTabs.some(tab=>tab.title===title)){index++;title=`Nova requisição ${index}`;}return title;}
 function resetEditorForNewWorkspaceTab(title){
-  method.value='GET';byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';baseUrlAuto=true;route.value='';byId('allow-insecure-http').checked=false;byId('headers').value='Accept: application/json';body.value='';byId('save-token-history').checked=true;applyAuthFields({authType:'none'});
+  method.value='GET';byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';baseUrlAuto=true;route.value='';byId('allow-insecure-http').checked=false;byId('headers').value='Accept: application/json';body.value='';applyBodyMode('json');byId('save-token-history').checked=true;applyAuthFields({authType:'none'});
   byId('token-client-id').value='';byId('token-client-secret').value='';byId('token-helper').open=false;byId('capture-response-variable').checked=false;byId('response-variable-name').value='token';byId('response-value-source').value='json';byId('response-json-path').value='access_token';byId('response-success-only').checked=true;setResponseTests([]);updateResponseCaptureUi();
   activeSaved=null;selectedContainer={collectionId:collections[0]?.id||'',folderId:''};byId('request-title').textContent=title;renderQueryParams([]);clearWriteConfirmation();updateGuard();renderBodyHighlight();updateJsonTools();setEditorTab('params');
 }
@@ -755,7 +774,7 @@ function exportCollectionNode(node,includeBearer,depth=0){
     requests:(node.requests||[]).map(request=>{
       const base=sanitizeBase(String(request.baseUrl||'')),route=sanitizeRoute(String(request.route||'')),headers=sanitizeHeaders(String(request.headers||'')),payload=sanitizeBody(String(request.body||'')),authType=normalizeAuthType(request.authType,request.bearerToken);
       return{id:request.id,name:String(request.name||'Request').slice(0,100),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET',
-        baseUrl:base.value,route:route.value,headers:headers.value,body:payload.value,authType,bearerToken:includeBearer&&authType==='bearer'?sanitizeBearer(request.bearerToken):'',
+        baseUrl:base.value,route:route.value,headers:headers.value,body:payload.value,bodyMode:normalizeBodyMode(request.bodyMode),authType,bearerToken:includeBearer&&authType==='bearer'?sanitizeBearer(request.bearerToken):'',
         basicUsername:includeBearer&&authType==='basic'?String(request.basicUsername||''):'',basicPassword:includeBearer&&authType==='basic'?String(request.basicPassword||''):'',
         apiKeyName:authType==='apiKey'?String(request.apiKeyName||''):'',apiKeyLocation:authType==='apiKey'&&request.apiKeyLocation==='query'?'query':'header',apiKeyValue:includeBearer&&authType==='apiKey'?String(request.apiKeyValue||''):'',
         allowInsecureHttp:request.allowInsecureHttp===true,tokenRequest:!!request.tokenRequest,tokenClientId:String(request.tokenClientId||''),tokenCredentialMode:request.tokenCredentialMode==='query'?'query':'body',
@@ -783,7 +802,7 @@ function buildInsomniaExport(collection,environment,includeBearer){
   const addNode=(node,parentId)=>{
     for(const folder of node.folders||[]){const id='__request_group_'+(++folderNumber)+'__';resources.push({_id:id,_type:'request_group',parentId,name:folder.name,description:'',environment:{}});addNode(folder,id);}
     for(const request of node.requests||[]){
-      const headers=exportHeaderList(request),authType=normalizeAuthType(request.authType,request.bearerToken),token=includeBearer&&authType==='bearer'?sanitizeBearer(request.bearerToken):'';
+      const headers=exportHeaderList(request),authType=normalizeAuthType(request.authType,request.bearerToken),bodyMode=normalizeBodyMode(request.bodyMode),token=includeBearer&&authType==='bearer'?sanitizeBearer(request.bearerToken):'';
       let url=exportRequestUrl(request),authentication={type:'none'};
       if(authType==='bearer')authentication={type:'bearer',token};
       else if(authType==='basic')authentication={type:'basic',username:includeBearer?String(request.basicUsername||''):'',password:includeBearer?String(request.basicPassword||''):''};
@@ -795,7 +814,7 @@ function buildInsomniaExport(collection,environment,includeBearer){
           url=appendExportQueryParameter(url,keyName,keyValue);
         }else headers.push({key:keyName,value:keyValue,disabled:false});
       }
-      const resource={_id:'__request_'+(++requestNumber)+'__',_type:'request',parentId,name:request.name||'Request',method:request.method||'GET',url,headers:headers.map(h=>({name:h.key,value:h.value,disabled:false})),parameters:[],body:{mimeType:'application/json',text:sanitizeBody(String(request.body||'')).value},authentication};
+      const resource={_id:'__request_'+(++requestNumber)+'__',_type:'request',parentId,name:request.name||'Request',method:request.method||'GET',url,headers:headers.map(h=>({name:h.key,value:h.value,disabled:false})),parameters:[],body:{mimeType:bodyModeContentType(bodyMode),text:sanitizeBody(String(request.body||'')).value},authentication};
       const script=[responseCaptureInsomniaScript(request,false).join('\n'),RunnerLogic.buildResponseTestScript(request.responseTests,'insomnia')].filter(Boolean);if(script.length)resource.afterResponseScript=script.join('\n\n');resources.push(resource);
     }
   };
@@ -803,8 +822,15 @@ function buildInsomniaExport(collection,environment,includeBearer){
   return{_type:'export',__export_format:4,__export_date:new Date().toISOString(),__export_source:'vortix-local',resources};
 }
 function postmanRequestItem(request,includeBearer){
-  const authType=normalizeAuthType(request.authType,request.bearerToken),item={name:request.name||'Request',request:{method:request.method||'GET',header:exportHeaderList(request),url:{raw:exportRequestUrl(request)}}};
-  const body=sanitizeBody(String(request.body||'')).value;if(body)item.request.body={mode:'raw',raw:body,options:{raw:{language:'json'}}};
+  const authType=normalizeAuthType(request.authType,request.bearerToken),bodyMode=normalizeBodyMode(request.bodyMode),item={name:request.name||'Request',request:{method:request.method||'GET',header:exportHeaderList(request),url:{raw:exportRequestUrl(request)}}};
+  const rawBody=sanitizeBody(String(request.body||'')).value;
+  if(rawBody&&bodyMode==='urlencoded'){
+    const urlencoded=[...new URLSearchParams(rawBody)].map(([key,value])=>({key,value,type:'text'}));
+    item.request.body={mode:'urlencoded',urlencoded};
+  }else if(rawBody){
+    const language=bodyMode==='json'?'json':bodyMode==='xml'?'xml':'text';
+    item.request.body={mode:'raw',raw:rawBody,options:{raw:{language}}};
+  }
   if(authType==='bearer')item.request.auth={type:'bearer',bearer:[{key:'token',value:includeBearer?sanitizeBearer(request.bearerToken):'',type:'string'}]};
   else if(authType==='basic')item.request.auth={type:'basic',basic:[{key:'username',value:includeBearer?String(request.basicUsername||''):'',type:'string'},{key:'password',value:includeBearer?String(request.basicPassword||''):'',type:'string'}]};
   else if(authType==='apiKey')item.request.auth={type:'apikey',apikey:[{key:'key',value:String(request.apiKeyName||''),type:'string'},{key:'value',value:includeBearer?String(request.apiKeyValue||''):'',type:'string'},{key:'in',value:request.apiKeyLocation==='query'?'query':'header',type:'string'}]};
@@ -968,6 +994,13 @@ function importedPostmanAuth(auth,headers){
   if(type==='apikey'||type==='api-key')return{authType:'apiKey',apiKeyName:String(authArrayValue(auth.apikey||auth.apiKey,'key')||''),apiKeyValue:String(authArrayValue(auth.apikey||auth.apiKey,'value')||''),apiKeyLocation:String(authArrayValue(auth.apikey||auth.apiKey,'in')||'header').toLowerCase()==='query'?'query':'header'};
   return{authType:'none',bearerToken:''};
 }
+
+function inferImportedBodyMode(requestBody,headers){
+  if(requestBody?.mode==='urlencoded'||requestBody?.urlencoded||requestBody?.mimeType==='application/x-www-form-urlencoded')return'urlencoded';
+  const language=String(requestBody?.options?.raw?.language||'').toLowerCase();if(language==='xml')return'xml';if(language==='text')return'text';if(language==='json')return'json';
+  const contentType=requestBody?.mimeType||String(headers.find(line=>/^content-type\s*:/i.test(line))||'').split(':').slice(1).join(':').trim();
+  return bodyModeFromContentType(contentType);
+}
 function importPostmanItem(item,inheritedEvents,stats,depth=0){
   if(depth>12)throw Error('A coleção Postman excede 12 níveis de pastas.');
   if(Array.isArray(item?.item)){
@@ -986,8 +1019,8 @@ function importPostmanItem(item,inheritedEvents,stats,depth=0){
   const script=event?postmanScriptText(event.script):'';let capture=script?parseResponseCaptureScript(script):null;
   if(script&&!capture)stats.unsupportedScripts++;
   if(event?.disabled&&capture)capture={...capture,captureResponseVariable:false};
-  const auth=importedPostmanAuth(request.auth,headers),body=importedBody(request.body,headers);
-  return{name:String(item.name||'Request'),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(String(request.method||'GET').toUpperCase())?String(request.method||'GET').toUpperCase():'GET',...url,...auth,headers:headers.join('\n'),body,...(capture||{})};
+  const auth=importedPostmanAuth(request.auth,headers),body=importedBody(request.body,headers),bodyMode=inferImportedBodyMode(request.body,headers);
+  return{name:String(item.name||'Request'),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(String(request.method||'GET').toUpperCase())?String(request.method||'GET').toUpperCase():'GET',...url,...auth,headers:headers.join('\n'),body,bodyMode,...(capture||{})};
 }
 function importPostmanCollection(document){
   if(!document.info||!Array.isArray(document.item))throw Error('Coleção Postman inválida; esperado Postman v2.1.');
@@ -1018,8 +1051,8 @@ function importInsomniaCollection(document){
     if(resource?._type!=='request')continue;const headers=importedHeaders(resource.headers),url=splitImportedUrl(resource.url||''),auth=resource.authentication||{},authFields=importedInsomniaAuth(auth,headers,url.route);
     if(authFields.route)url.route=authFields.route;
     url.route=importedQueryParams(url.route,resource.parameters);
-    const body=importedBody(resource.body,headers),script=String(resource.afterResponseScript||'');let capture=script?parseResponseCaptureScript(script):null;if(script&&!capture)stats.unsupportedScripts++;if(capture)capture={...capture,captureResponseVariable:false};
-    const request={name:String(resource.name||'Request'),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(String(resource.method||'GET').toUpperCase())?String(resource.method||'GET').toUpperCase():'GET',...url,...authFields,headers:headers.join('\n'),body,...(capture||{})};
+    const body=importedBody(resource.body,headers),bodyMode=inferImportedBodyMode(resource.body,headers),script=String(resource.afterResponseScript||'');let capture=script?parseResponseCaptureScript(script):null;if(script&&!capture)stats.unsupportedScripts++;if(capture)capture={...capture,captureResponseVariable:false};
+    const request={name:String(resource.name||'Request'),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(String(resource.method||'GET').toUpperCase())?String(resource.method||'GET').toUpperCase():'GET',...url,...authFields,headers:headers.join('\n'),body,bodyMode,...(capture||{})};
     const parent=groups.get(resource.parentId)||root;parent.requests.push(request);
   }
   const environments=[];for(const resource of resources.filter(resource=>resource?._type==='environment')){const variables={};for(const[key,value]of Object.entries(resource.data||{}))Object.defineProperty(variables,key,{value:typeof value==='string'?value:JSON.stringify(value),enumerable:true,writable:true,configurable:true});environments.push({name:String(resource.name||'Ambiente Insomnia'),group:root.name,variables});}
@@ -1040,7 +1073,7 @@ function normalizeImportedNode(source,keepAuth,depth=0,isRoot=false,enableCaptur
     if(!request||typeof request!=='object'||Array.isArray(request))throw Error('Uma request do arquivo está inválida.');
     const base=sanitizeBase(String(request.baseUrl||'')),route=sanitizeRoute(String(request.route||'')),headers=sanitizeHeaders(String(request.headers||'')),payload=sanitizeBody(String(request.body||'')),authType=normalizeAuthType(request.authType,request.bearerToken);
     return{id:newId(),name:String(request.name||'Request').slice(0,100),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET',
-      baseUrl:base.value,route:route.value,headers:headers.value,body:payload.value,authType,bearerToken:keepAuth&&authType==='bearer'?sanitizeBearer(request.bearerToken):'',
+      baseUrl:base.value,route:route.value,headers:headers.value,body:payload.value,bodyMode:normalizeBodyMode(request.bodyMode),authType,bearerToken:keepAuth&&authType==='bearer'?sanitizeBearer(request.bearerToken):'',
       basicUsername:keepAuth&&authType==='basic'?String(request.basicUsername||''):'',basicPassword:keepAuth&&authType==='basic'?String(request.basicPassword||''):'',
       apiKeyName:authType==='apiKey'?String(request.apiKeyName||'').slice(0,128):'',apiKeyLocation:authType==='apiKey'&&request.apiKeyLocation==='query'?'query':'header',apiKeyValue:keepAuth&&authType==='apiKey'?String(request.apiKeyValue||''):'',
       allowInsecureHttp:allowInsecureHttp&&request.allowInsecureHttp===true,tokenRequest:!!request.tokenRequest,tokenClientId:String(request.tokenClientId||'').slice(0,512),tokenCredentialMode:request.tokenCredentialMode==='query'?'query':'body',
@@ -1060,7 +1093,7 @@ function openCurlRequestDraft(){
     if(safeRoute.redacted||safeBase.redacted)throw Error('Remova credenciais e fragmentos da URL antes de importar.');
     if(!createNewWorkspaceTab(false))return;
     method.value=imported.method;byId('base-url').value=safeBase.value;baseUrlAuto=false;route.value=safeRoute.value;
-    renderQueryParams(routeParts.params);byId('headers').value=imported.headers.map(([name,value])=>`${name}: ${value}`).join('\n');body.value=imported.body;
+    renderQueryParams(routeParts.params);byId('headers').value=imported.headers.map(([name,value])=>`${name}: ${value}`).join('\n');body.value=imported.body;applyBodyMode(bodyModeFromHeaderEntries(imported.headers));
     applyAuthFields({authType:imported.bearerToken?'bearer':'none',bearerToken:imported.bearerToken});if(imported.bearerToken)byId('save-token-history').checked=false;
     byId('request-title').textContent=`cURL - ${imported.method} ${safeRoute.value||'/'}`;activeSaved=null;setEditorTab('params');
     byId('import-dialog').close();updateGuard();updateCopyButtons();renderBodyHighlight();updateJsonTools();syncActiveWorkspaceTab(true);renderWorkspaceTabs();scheduleWorkspaceTabsPersist();
@@ -1112,7 +1145,7 @@ function openSaveDialog(){
 function getSnapshot(){
   validateResponseCaptureForm();const responseTests=getResponseTestsFromForm(),rawRoute=buildRequestRoute(false,true),base=sanitizeBase(byId('base-url').value.trim()),path=rawRoute?sanitizeRoute(rawRoute):{value:'',redacted:false},headers=sanitizeHeaders(byId('headers').value),payload=sanitizeBody(body.value);
   const saveAuth=byId('save-token-history').checked,auth=authFieldsFromForm(value=>value,saveAuth),authOmitted=!saveAuth&&hasAuthCredentials(authFieldsFromForm(value=>value,true));
-  return{method:method.value,baseUrl:base.value,route:path.value,headers:headers.value,body:payload.value,...auth,allowInsecureHttp:byId('allow-insecure-http').checked,
+  return{method:method.value,baseUrl:base.value,route:path.value,headers:headers.value,body:payload.value,bodyMode:byId('body-mode').value,...auth,allowInsecureHttp:byId('allow-insecure-http').checked,
     captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseTests,
     redacted:base.redacted||path.redacted||headers.redacted||payload.redacted||authOmitted};
 }
@@ -1131,7 +1164,7 @@ async function saveCollectionRequest(event){
 }
 function loadCollectionRequest(request,collectionId,folderId,notify=true){
   byId('base-url').value=request.baseUrl||'{{baseUrl}}';baseUrlAuto=request.baseUrl==='{{baseUrl}}';byId('allow-insecure-http').checked=request.allowInsecureHttp===true;method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET';
-  const split=splitRoute(request.route||'');route.value=split.route;renderQueryParams(split.params);byId('headers').value=request.headers||'';body.value=request.body||'';applyAuthFields(request);
+  const split=splitRoute(request.route||'');route.value=split.route;renderQueryParams(split.params);byId('headers').value=request.headers||'';body.value=request.body||'';applyBodyMode(request.bodyMode);applyAuthFields(request);
   byId('token-client-id').value=request.tokenRequest?request.tokenClientId||'':'';byId('token-client-secret').value='';byId('token-credential-mode').value=request.tokenCredentialMode==='query'?'query':'body';byId('token-helper').open=!!request.tokenRequest;
   if(request.tokenRequest){byId('token-route').value=split.route;byId('token-client-id-field').value=request.tokenClientIdField||'client_id';byId('token-client-secret-field').value=request.tokenClientSecretField||'client_secret';tokenRequestConfig=RunnerLogic.normalizeTokenRequestConfig({route:split.route,clientIdField:byId('token-client-id-field').value,clientSecretField:byId('token-client-secret-field').value,credentialMode:byId('token-credential-mode').value});}
   byId('capture-response-variable').checked=!!request.captureResponseVariable;byId('response-variable-name').value=request.responseVariableName||'token';byId('response-value-source').value=request.responseValueSource==='text'?'text':'json';byId('response-json-path').value=request.responseJsonPath||'access_token';byId('response-success-only').checked=request.responseSuccessOnly!==false;byId('response-variable-result').hidden=true;updateResponseCaptureUi();setResponseTests(request.responseTests||[]);
@@ -1153,13 +1186,15 @@ function highlightJson(value){
     html+=`<span class="${cls}">${escHtml(token)}</span>`;offset=index+token.length;}
   return html+escHtml(text.slice(offset))||' ';
 }
-function renderBodyHighlight(){const highlight=byId('body-highlight');if(!highlight)return;highlight.innerHTML=highlightJson(body.value);highlight.scrollTop=body.scrollTop;highlight.scrollLeft=body.scrollLeft;}
-function updateJsonTools(){byId('format-json').disabled=!body.value.trim();byId('minify-json').disabled=!body.value.trim();}
+function renderBodyHighlight(){const highlight=byId('body-highlight');if(!highlight)return;if(byId('body-mode').value!=='json'){highlight.replaceChildren();return;}highlight.hidden=false;highlight.innerHTML=highlightJson(body.value);highlight.scrollTop=body.scrollTop;highlight.scrollLeft=body.scrollLeft;}
+function updateJsonTools(){const json=byId('body-mode').value==='json';byId('format-json').hidden=!json;byId('minify-json').hidden=!json;byId('format-json').disabled=!json||!body.value.trim();byId('minify-json').disabled=!json||!body.value.trim();}
 function formatBodyJson(compact=false){
+  if(byId('body-mode').value!=='json')return;
   try{body.value=JSON.stringify(JSON.parse(body.value),null,compact?0:2);body.dispatchEvent(new Event('input',{bubbles:true}));showToast(compact?'JSON compactado':'JSON indentado',compact?'Espaços removidos do body.':'Body formatado com indentação de 2 espaços.','success',3000);}
   catch{showToast('JSON inválido','Revise a sintaxe antes de formatar.','error');}
 }
 function handleJsonKeydown(event){
+  if(byId('body-mode').value!=='json')return;
   if(event.key==='Tab'){
     event.preventDefault();const start=body.selectionStart,end=body.selectionEnd;
     if(event.shiftKey){const lineStart=body.value.lastIndexOf('\n',start-1)+1;if(body.value.slice(lineStart,start).startsWith('  ')){body.setRangeText('',lineStart,lineStart+2,'end');const cursor=Math.max(lineStart,start-2);body.setSelectionRange(cursor,cursor);}}
@@ -1493,7 +1528,7 @@ async function performApiRequest(request,button,save,historyRequest=request){
 }
 function requestFromForm(selectedMethod,requestRoute,resolveValues=true){
   const resolve=value=>resolveValues?applyEnvironment(value):value,auth=authFieldsFromForm(resolve,true);
-  return{baseUrl:resolve(byId('base-url').value.trim()),route:resolve(requestRoute),method:selectedMethod,...auth,environmentId:activeEnvironmentId||'default',headers:resolve(byId('headers').value),body:resolve(body.value),
+  return{baseUrl:resolve(byId('base-url').value.trim()),route:resolve(requestRoute),method:selectedMethod,...auth,environmentId:activeEnvironmentId||'default',bodyMode:byId('body-mode').value,headers:resolve(byId('headers').value),body:resolve(body.value),
     allowInsecureHttp:byId('allow-insecure-http').checked,confirmTestData:byId('confirm-test-data').checked,testDataPhrase:byId('test-data-phrase').value,confirmTokenRequest:false,
     saveBearerToken:byId('save-token-history').checked,
     captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseTests:getResponseTestsFromForm()};
@@ -1535,7 +1570,7 @@ async function requestTokenFromHelper(){
     const config=tokenRequestConfig,routeConfig=RunnerLogic.normalizeTokenRequestConfig({...config,route:applyEnvironment(config.route)});
     if(!routeConfig.route)throw Error('Configure a rota do endpoint de token.');
     const mode=config.credentialMode,baseUrl=applyEnvironment(byId('base-url').value.trim());
-    request={baseUrl,route:routeConfig.route,method:'POST',...authFieldsFromForm(applyEnvironment,true),environmentId:activeEnvironmentId||'default',headers:'Accept: application/json',body:'',confirmTestData:false,testDataPhrase:'',confirmTokenRequest:true,tokenClientId:applyEnvironment(clientId),tokenClientSecret:applyEnvironment(secret),tokenClientIdField:config.clientIdField,tokenClientSecretField:config.clientSecretField,tokenCredentialMode:mode,allowInsecureHttp:byId('allow-insecure-http').checked,saveBearerToken:byId('save-token-history').checked};
+    request={baseUrl,route:routeConfig.route,method:'POST',...authFieldsFromForm(applyEnvironment,true),environmentId:activeEnvironmentId||'default',bodyMode:'json',headers:'Accept: application/json',body:'',confirmTestData:false,testDataPhrase:'',confirmTokenRequest:true,tokenClientId:applyEnvironment(clientId),tokenClientSecret:applyEnvironment(secret),tokenClientIdField:config.clientIdField,tokenClientSecretField:config.clientSecretField,tokenCredentialMode:mode,allowInsecureHttp:byId('allow-insecure-http').checked,saveBearerToken:byId('save-token-history').checked};
     const target=new URL(request.baseUrl);
     if(!['http:','https:'].includes(target.protocol)||target.username||target.password||target.search||target.hash)throw Error('Informe URL base HTTP ou HTTPS sem credenciais, query ou fragmento.');
     const insecureOrigin=RunnerLogic.remoteHttpOrigin(request.baseUrl);
@@ -1602,12 +1637,12 @@ function addEventListeners(){
     const change=()=>{if(['method','route','body','base-url','headers'].includes(id))byId('confirm-test-data').checked=false;if(id==='base-url')baseUrlAuto=false;updateGuard();updateTokenButton();if(id==='body'){renderBodyHighlight();updateJsonTools();}};byId(id).addEventListener('input',change);byId(id).addEventListener('change',change);
   }
   body.addEventListener('scroll',renderBodyHighlight);byId('token-client-id').addEventListener('input',updateTokenButton);byId('token-client-secret').addEventListener('input',updateTokenButton);
-  byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('clear-cookie-jar').onclick=clearCookieJar;
+  byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('body-mode').addEventListener('change',updateBodyModeUi);byId('clear-cookie-jar').onclick=clearCookieJar;
   for(const id of ['token-route','token-client-id-field','token-client-secret-field','token-credential-mode']){byId(id).addEventListener('input',updateTokenButton);byId(id).addEventListener('change',()=>void persistTokenRequestConfig());}
   sendButton.onclick=sendCurrentRequest;tokenRequestButton.onclick=requestTokenFromHelper;
 }
 async function startApp(){
-  addEventListeners();renderQueryParams([]);updateAuthTypeUi();renderBodyHighlight();
+  addEventListeners();renderQueryParams([]);updateAuthTypeUi();updateBodyModeUi();renderBodyHighlight();
   try{await initializeDb();await loadTokenRequestConfig();applyTheme(activeTheme);applyTypography();applyUiScale();renderCollectionTree();renderEnvironmentSelect();if(!byId('base-url').value)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';await renderHistory();await initializeWorkspaceTabs();updateGuard();updateCopyButtons();updateTokenButton();updateJsonTools();updateResponseCaptureUi();byId('sidebar-storage-note').textContent='SQLite local · proteção de dados';}
   catch(error){showToast('Banco local indisponível',error.message||'Confira o acesso ao SQLite e tente recarregar.','error',0);updateGuard();updateCopyButtons();updateTokenButton();}
 }

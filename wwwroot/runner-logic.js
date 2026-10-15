@@ -7,6 +7,8 @@
 
   const methods = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
   const writeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+  const bodyModes = new Set(['json', 'text', 'xml', 'urlencoded']);
+  function normalizeBodyMode(value,strict=false){const mode=String(value||'json').trim().toLowerCase();if(bodyModes.has(mode))return mode;if(strict)throw Error('Modo de body não suportado: '+mode);return 'json';}
   const reservedNames = new Set(['__proto__', 'prototype', 'constructor']);
   const maxDataSets = 100;
 
@@ -74,6 +76,7 @@
       const saveBearerToken = source.saveBearerToken !== false;
       const request = {
         ...source.request,
+        bodyMode: normalizeBodyMode(source.request.bodyMode),
         bearerToken: saveBearerToken ? String(source.request.bearerToken || '') : '',
         basicUsername: saveBearerToken ? String(source.request.basicUsername || '') : '',
         basicPassword: saveBearerToken ? String(source.request.basicPassword || '') : '',
@@ -589,6 +592,7 @@
     if (!methods.has(method)) throw Error('Método não suportado na coleção: ' + method);
     if (writeMethods.has(method) && !allowWrites) throw Error('Confirme as chamadas de escrita antes de executar.');
     const resolve = value => resolveTemplate(value, environment, dataset);
+    const bodyMode = normalizeBodyMode(saved?.bodyMode,true);
     const requestedAuthType = String(saved?.authType || (saved?.bearerToken ? 'bearer' : 'none'));
     const authType = requestedAuthType === 'api-key' ? 'apiKey' : requestedAuthType;
     if (!['none', 'bearer', 'basic', 'apiKey'].includes(authType)) throw Error('Tipo de autenticacao nao suportado na colecao.');
@@ -605,6 +609,7 @@
       baseUrl: resolve(saved?.baseUrl || ''),
       route: resolve(saved?.route || ''),
       method,
+      bodyMode,
       authType,
       bearerToken: authType === 'bearer' ? resolve(saved?.bearerToken || '') : '',
       basicUsername,

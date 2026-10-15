@@ -177,6 +177,14 @@ code { border: 1px solid #333c47; border-radius: 4px; padding: 1px 4px; color: #
 label { color: #aab5c1; font-size: 12px; font-weight: 650; }
 textarea { width: 100%; min-height: 180px; padding: 12px; font: 12px/1.55 var(--app-font-family); resize: vertical; tab-size: 2; }
 textarea.compact { min-height: 165px; }
+
+.body-mode-row { display: grid; grid-template-columns: auto minmax(170px, 240px) minmax(0, 1fr); align-items: center; gap: 10px; margin: 10px 0; }
+.body-mode-row label { margin: 0; color: var(--muted); font-size: 12px; }
+.body-mode-row select { min-width: 0; }
+.body-mode-row .hint { margin: 0; font-size: 11px; }
+.code-highlight[hidden] { display: none; }
+.code-editor textarea.plain-body-input { color: var(--text); background: var(--input); -webkit-text-fill-color: var(--text); }
+.code-editor textarea.plain-body-input::selection { color: var(--text); background: color-mix(in srgb, var(--accent) 32%, transparent); }
 .language-badge, .auth-badge { border: 1px solid #39444f; border-radius: 5px; padding: 4px 7px; color: #aab7c4; background: #222832; font: 12px var(--app-font-family); }
 .code-editor { position: relative; min-height: 300px; overflow: hidden; border: 1px solid #343d48; border-radius: 7px; background: #171c22; }
 .code-highlight, .code-editor textarea { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 300px; margin: 0; border: 0; border-radius: 0; padding: 13px; font: 12px/1.6 var(--app-font-family); tab-size: 2; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -491,7 +499,7 @@ textarea.compact { min-height: 165px; }
 :root[data-theme] .app-footer { border-color: var(--border); color: var(--muted); }
 @media (max-width: 680px) {
   .workspace-actions { gap: 3px; }
-}:root[data-theme] .code-editor textarea { border: 0; color: transparent; background: transparent; background-color: transparent; -webkit-text-fill-color: transparent; }
+}:root[data-theme] .code-editor textarea.plain-body-input { color: var(--text); -webkit-text-fill-color: var(--text); }:root[data-theme] .code-editor textarea { border: 0; color: transparent; background: transparent; background-color: transparent; -webkit-text-fill-color: transparent; }
 :root[data-theme] .code-editor .code-highlight { background: transparent; }.collection-tools { display: flex; align-items: center; gap: 1px; }
 .environment-group-row { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 7px; margin: 8px 0; }
 .environment-group-row label { margin: 0; color: var(--muted); font-size: 12px; }

@@ -548,3 +548,15 @@ test('removing an environment also removes its Cookie jar', () => {
   const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
   assert.ok(app.includes("await dbWrite('settings','cookiejar:'+env.id,true);"), 'deleted environment cookies should be cleared');
 });
+test('Runner preserves the selected request body mode and rejects unsupported modes', () => {
+  const { prepareSavedRequest } = runnerLogic();
+  const form = prepareSavedRequest({ method: 'POST', route: '/submit', bodyMode: 'urlencoded', body: 'a=1&b=2' }, {}, {}, true);
+  assert.equal(form.bodyMode, 'urlencoded');
+  assert.throws(() => prepareSavedRequest({ method: 'POST', route: '/submit', bodyMode: 'binary' }, {}, {}, true), /body/i);
+});
+
+test('Body editor exposes JSON, text, XML, and URL-encoded formats', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  assert.ok(html.includes('id="body-mode"'), 'Body mode selector should exist');
+  for (const mode of ['json', 'text', 'xml', 'urlencoded']) assert.ok(html.includes('value="' + mode + '"'), 'missing mode: ' + mode);
+});

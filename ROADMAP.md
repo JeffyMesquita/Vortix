@@ -51,18 +51,37 @@ Evoluímos em fatias pequenas. Cada feature deve resolver um fluxo completo ante
 - [x] Testar isolamento, Path, expiração, proteção em repouso e persistência após reinício.
 - [x] Documentar fluxo e limitações no README.
 
-### 3. Modos de body
+### 3. Raw e form URL-encoded
 
-Dar suporte explícito aos formatos usados em APIs sem perder o editor JSON atual:
+**Status: concluída nesta rodada.**
 
-- [ ] Raw: JSON, texto e XML.
-- [ ] application/x-www-form-urlencoded.
-- [ ] multipart/form-data com metadados de arquivo e seleção controlada.
-- [ ] GraphQL com query e variables separados.
-- [ ] Cobrir Content-Type, importação, histórico e exportação em cada modo.
-- [ ] Documentar cada modo com payload pequeno e válido.
+- [x] JSON, texto, XML e form URL-encoded com Content-Type padrão.
+- [x] Sobrescrever Content-Type em Headers.
+- [x] Preservar bodyMode em abas, histórico, coleções, Runner e intercâmbio Vortix/Insomnia/Postman.
+- [x] Testar bytes e Content-Type no proxy local, incluindo override manual.
+- [x] Documentar exemplos e limitações no README.
 
-### 4. Autenticação herdada por coleção e pasta
+### 4. Multipart/form-data — próxima feature
+
+Enviar campos de texto e arquivos sem persistir o conteúdo dos arquivos por padrão.
+
+- [ ] Escrever testes para campos repetidos/vazios, bytes de arquivo e Content-Type com boundary.
+- [ ] Criar editor de campos de texto e arquivos com remoção clara de cada item.
+- [ ] Gerar boundary automaticamente; impedir Content-Type manual incompatível.
+- [ ] Manter os bytes do arquivo somente em memória durante o envio.
+- [ ] Persistir metadados e campos de texto; ao reabrir, pedir nova seleção dos arquivos.
+- [ ] Preservar o formato no Runner e nos intercâmbios Vortix, Insomnia e Postman.
+- [ ] Documentar tamanho, persistência e um exemplo visual no README.
+
+### 5. GraphQL
+
+Adicionar um editor próprio para query e variables, sem confundir o fluxo com body raw.
+
+- [ ] Criar testes para query, variables, operationName e Content-Type.
+- [ ] Persistir e executar os campos pelo Runner.
+- [ ] Importar/exportar formatos compatíveis do Vortix, Insomnia e Postman.
+- [ ] Documentar exemplo, validações e limitações no README.
+### 6. Autenticação herdada por coleção e pasta
 
 Evitar repetir credenciais em cada request, mantendo precedência fácil de entender.
 
@@ -72,7 +91,7 @@ Evitar repetir credenciais em cada request, mantendo precedência fácil de ente
 - [ ] Cobrir importação/exportação e execução do Runner.
 - [ ] Testar que segredos não vazam entre coleções ou ambientes.
 
-### 5. OAuth 2.0
+### 7. OAuth 2.0
 
 Fazer depois de consolidar ambientes e herança, pois o fluxo exige armazenar tokens e tratar validade.
 
@@ -82,7 +101,7 @@ Fazer depois de consolidar ambientes e herança, pois o fluxo exige armazenar to
 - [ ] Nunca persistir client_secret sem consentimento explícito.
 - [ ] Testar com servidor OAuth local simulado; documentar callbacks e limites.
 
-### 6. Exemplos de resposta e mock local
+### 8. Exemplos de resposta e mock local
 
 Permitir testar interface e fluxos sem atingir um serviço externo.
 
@@ -92,7 +111,7 @@ Permitir testar interface e fluxos sem atingir um serviço externo.
 - [ ] Impedir que o mock vire um servidor acessível à rede sem configuração.
 - [ ] Adicionar exemplos para sucesso, validação e erro.
 
-### 7. Próximos refinamentos
+### 9. Próximos refinamentos
 
 Só entram depois das features anteriores e dos testes de uso:
 
@@ -103,4 +122,4 @@ Só entram depois das features anteriores e dos testes de uso:
 
 ## Regra de sequência
 
-Fechamos uma feature — testes, documentação e revisão — antes de iniciar a seguinte. A próxima execução começa pelos modos de body; o escopo pode ser ajustado se os testes revelarem uma dependência anterior.
+Fechamos uma feature — testes, documentação e revisão — antes de iniciar a seguinte. A próxima execução começa por multipart/form-data. GraphQL será uma feature separada, com seus próprios testes e documentação.
