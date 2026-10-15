@@ -147,6 +147,12 @@
               <span>Salvar credenciais de Auth nas requests locais</span>
             </label>
             <p class="hint token-history-warning">Segredos salvos usam prote&ccedil;&atilde;o de dados no SQLite. Desmarque para mant&ecirc;-los apenas nesta sess&atilde;o.</p>
+            <details class="cookie-jar-panel" id="cookie-jar-panel">
+              <summary><span>Cookies do ambiente ativo</span><span class="cookie-jar-count" id="cookie-jar-count">0</span></summary>
+              <p class="hint">O Vortix reaproveita cookies neste ambiente. Valores não aparecem nesta lista. SameSite fica como metadado; regras de navegação do navegador não se aplicam ao cliente HTTP.</p>
+              <ul class="cookie-jar-list" id="cookie-jar-list" aria-live="polite"><li class="cookie-jar-empty">Sem cookies neste ambiente.</li></ul>
+              <button class="button secondary compact-button" id="clear-cookie-jar" type="button" disabled>Limpar cookies deste ambiente</button>
+            </details>
             <details class="token-helper" id="token-helper">
               <summary>Solicitar token</summary>
               <p class="hint">Configure a rota e os nomes dos campos conforme a API. Essas prefer&ecirc;ncias ficam salvas localmente; valores de credencial s&atilde;o pedidos a cada envio e nunca entram no hist&oacute;rico.</p>

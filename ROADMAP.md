@@ -41,13 +41,15 @@ Evoluímos em fatias pequenas. Cada feature deve resolver um fluxo completo ante
 
 ### 2. Cookie jar por ambiente
 
-É a próxima feature. Guardar cookies por host e ambiente, respeitando Domain, Path, Secure, HttpOnly, SameSite e validade. Permitir inspecionar, remover e limpar cookies sem misturar ambientes.
+**Status: concluída nesta rodada.**
 
-- [ ] Definir regras de recebimento e envio a partir de Set-Cookie.
-- [ ] Testar domínio, caminho, expiração e isolamento por ambiente.
-- [ ] Proteger valores no SQLite e mascará-los na interface.
-- [ ] Permitir desligar ou limpar o jar por ambiente.
-- [ ] Mostrar no README como uma sessão de login reaproveita cookies.
+- [x] Isolar o jar por ambiente e reutilizar cookies conforme domínio, caminho, HTTPS e validade.
+- [x] Preservar SameSite como metadado; o cliente HTTP não aplica regras de navegação de browser.
+- [x] Proteger cabeçalhos de cookie no SQLite e ocultar valores na interface.
+- [x] Permitir inspecionar e limpar cookies do ambiente ativo.
+- [x] Excluir o jar ao remover o ambiente.
+- [x] Testar isolamento, Path, expiração, proteção em repouso e persistência após reinício.
+- [x] Documentar fluxo e limitações no README.
 
 ### 3. Modos de body
 
@@ -101,4 +103,4 @@ Só entram depois das features anteriores e dos testes de uso:
 
 ## Regra de sequência
 
-Fechamos uma feature — testes, documentação e revisão — antes de iniciar a seguinte. A próxima execução começa pelo Cookie jar; o escopo pode ser ajustado se os testes revelarem uma dependência anterior.
+Fechamos uma feature — testes, documentação e revisão — antes de iniciar a seguinte. A próxima execução começa pelos modos de body; o escopo pode ser ajustado se os testes revelarem uma dependência anterior.

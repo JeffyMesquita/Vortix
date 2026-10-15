@@ -13,6 +13,7 @@ $oldTestSecrets = $env:API_STUDIO_TEST_SECRETS
 $oldTestRecord = $env:API_STUDIO_TEST_RECORD
 $server = $null
 $authMockServer = $null
+$cookieMockServer = $null
 $passed = $false
 New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
 function Start-TestApi([string]$logName) {
@@ -35,6 +36,19 @@ function Start-AuthCaptureServer([int]$requestCount) {
         Start-Sleep -Milliseconds 100
     }
     if (-not (Test-Path $readyPath)) { throw 'Auth capture server did not become ready.' }
+    return [pscustomobject]@{ Process = $process; Port = [int](Get-Content -Raw $readyPath) }
+}
+
+function Start-CookieCaptureServer([int]$requestCount) {
+    $readyPath = Join-Path $temporaryRoot 'cookie-mock.port'
+    $scriptPath = Join-Path $projectRoot 'CookieCaptureServer.test.ps1'
+    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath, '-RequestCount', [string]$requestCount, '-ReadyPath', $readyPath, '-OutputRoot', $temporaryRoot) -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $temporaryRoot 'cookie-mock.out') -RedirectStandardError (Join-Path $temporaryRoot 'cookie-mock.err')
+    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+        if ($process.HasExited) { throw 'Cookie capture server exited before becoming ready.' }
+        if (Test-Path $readyPath) { break }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not (Test-Path $readyPath)) { throw 'Cookie capture server did not become ready.' }
     return [pscustomobject]@{ Process = $process; Port = [int](Get-Content -Raw $readyPath) }
 }
 function Get-PlaintextScan([string[]]$secrets, [string]$pythonPath) {
@@ -84,7 +98,7 @@ try {
         'print("FOUND" if any(secret in text for secret in secrets) else "CLEAR")'
     ) -join "`n"
     [System.IO.File]::WriteAllText($scanPath, $scanCode, [System.Text.UTF8Encoding]::new($false))
-    $secrets = @($bearer, $headerSecret, 'api-key-canary', $bodySecret, $querySecret, $paramSecret, $basicUsername, $basicPassword, $apiKey)
+    $secrets = @($bearer, $headerSecret, 'api-key-canary', $bodySecret, $querySecret, $paramSecret, $basicUsername, $basicPassword, $apiKey, 'local-session-canary', 'local-domain-canary', 'local-secure-canary')
     if ((Get-PlaintextScan $secrets $scanPath) -ne 'CLEAR') { throw 'A sensitive sentinel remains in SQLite plaintext.' }
     $authMockServer = Start-AuthCaptureServer 3
     $mockBaseUrl = 'http://127.0.0.1:' + $authMockServer.Port
@@ -108,6 +122,34 @@ try {
     if ($queryResponse.status -ne 200) { throw 'API key query request did not reach the local capture server.' }
     $queryCapture = Get-Content -Raw (Join-Path $temporaryRoot 'request-2.txt')
     if ($queryCapture -notmatch [regex]::Escape('access_key=' + $wireQueryKey)) { throw 'API key query parameter was not applied.' }
+
+    $cookieMockServer = Start-CookieCaptureServer 5
+    $cookieBaseUrl = 'http://localhost:' + $cookieMockServer.Port
+    $cookieSetCall = @{ baseUrl = $cookieBaseUrl; route = '/scope/set'; method = 'GET'; environmentId = 'cookie-env-a' } | ConvertTo-Json -Compress
+    $cookieSetResponse = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $cookieSetCall -TimeoutSec 5
+    if ($cookieSetResponse.status -ne 200) { throw 'Cookie setup request did not reach the local capture server.' }
+    $cookieRecord = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/settings?key=cookiejar%3Acookie-env-a') -Headers $headers -TimeoutSec 3
+    $sessionCookie = @($cookieRecord.value.cookies | Where-Object { $_.cookieName -eq 'session' })[0]
+    if (-not $sessionCookie -or $sessionCookie.cookiePath -ne '/scope' -or $sessionCookie.sameSite -ne 'Lax' -or $sessionCookie.httpOnly -ne $true) { throw 'Cookie metadata was not stored for its environment.' }
+    $domainCookie = @($cookieRecord.value.cookies | Where-Object { $_.cookieName -eq 'domain-session' })[0]
+    if (-not $domainCookie -or $domainCookie.cookieDomain -ne 'localhost' -or $domainCookie.hostOnly -ne $false) { throw 'Cookie domain metadata was not preserved.' }
+    $cookieOtherEnvironment = @{ baseUrl = $cookieBaseUrl; route = '/scope/read'; method = 'GET'; environmentId = 'cookie-env-b' } | ConvertTo-Json -Compress
+    $cookieOtherResponse = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $cookieOtherEnvironment -TimeoutSec 5
+    if ($cookieOtherResponse.status -ne 200) { throw 'Second-environment cookie request did not reach the local capture server.' }
+    $otherEnvironmentCapture = Get-Content -Raw (Join-Path $temporaryRoot 'cookie-request-1.txt')
+    if ($otherEnvironmentCapture -match '(?im)^Cookie:') { throw 'Cookie jar leaked between environments.' }
+    $cookieWrongPath = @{ baseUrl = $cookieBaseUrl; route = '/elsewhere'; method = 'GET'; environmentId = 'cookie-env-a' } | ConvertTo-Json -Compress
+    $cookiePathResponse = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $cookieWrongPath -TimeoutSec 5
+    if ($cookiePathResponse.status -ne 200) { throw 'Cookie path-scope request did not reach the local capture server.' }
+    $wrongPathCapture = Get-Content -Raw (Join-Path $temporaryRoot 'cookie-request-2.txt')
+    if ($wrongPathCapture -match '(?im)^Cookie:' -or $wrongPathCapture -match 'expired=') { throw 'Cookie path or expiry rules were not applied.' }
+    $cookieWrongHost = @{ baseUrl = ('http://127.0.0.1:' + $cookieMockServer.Port); route = '/scope/read'; method = 'GET'; environmentId = 'cookie-env-a' } | ConvertTo-Json -Compress
+    $cookieHostResponse = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $cookieWrongHost -TimeoutSec 5
+    if ($cookieHostResponse.status -ne 200) { throw 'Cookie host-scope request did not reach the local capture server.' }
+    $wrongHostCapture = Get-Content -Raw (Join-Path $temporaryRoot 'cookie-request-3.txt')
+    if ($wrongHostCapture -match '(?im)^Cookie:') { throw 'Host-only or domain cookie leaked to another host.' }
+    if ((Get-PlaintextScan $secrets $scanPath) -ne 'CLEAR') { throw 'A cookie value remains in SQLite plaintext.' }
+
     $prefixPath = Join-Path $temporaryRoot 'prefix.sqlite.py'
     $prefixCode = @(
         'import sqlite3, sys',
@@ -141,7 +183,7 @@ try {
     if ($protected.updatedRecords -ne 1) { throw 'Legacy migration did not protect the one plaintext record.' }
     $legacy = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/settings?key=legacy-protection-test') -Headers $headers -TimeoutSec 3
     if ($legacy.value.access_token -ne $legacySecret) { throw 'Migrated legacy secret did not round-trip.' }
-    if ((Get-PlaintextScan @($legacySecret, $bearer, $headerSecret, 'api-key-canary', $bodySecret, $querySecret, $paramSecret) $scanPath) -ne 'CLEAR') { throw 'A migrated or new secret remains in SQLite plaintext.' }
+    if ((Get-PlaintextScan @($legacySecret, $bearer, $headerSecret, 'api-key-canary', $bodySecret, $querySecret, $paramSecret, 'local-session-canary', 'local-domain-canary', 'local-secure-canary') $scanPath) -ne 'CLEAR') { throw 'A migrated or new secret remains in SQLite plaintext.' }
     $repeat = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/security/protect-existing') -Method Post -Headers $headers -ContentType 'application/json' -Body '{"confirm":true}' -TimeoutSec 10
     if ($repeat.updatedRecords -ne 0) { throw 'Repeated secret migration was not idempotent.' }
 
@@ -165,12 +207,20 @@ $authMockServer = $null
     $afterRestart = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/settings?key=protection-test') -Headers $headers -TimeoutSec 3
     $afterMigration = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/settings?key=legacy-protection-test') -Headers $headers -TimeoutSec 3
     if ($afterRestart.value.bearerToken -ne $bearer -or $afterMigration.value.access_token -ne $legacySecret) { throw 'Protected values did not decrypt after process restart.' }
+    $cookieAfterRestartCall = @{ baseUrl = $cookieBaseUrl; route = '/scope/read'; method = 'GET'; environmentId = 'cookie-env-a' } | ConvertTo-Json -Compress
+    $cookieAfterRestart = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $cookieAfterRestartCall -TimeoutSec 5
+    if ($cookieAfterRestart.status -ne 200) { throw 'Cookie request did not reach the local capture server after restart.' }
+    $restoredCookieCapture = Get-Content -Raw (Join-Path $temporaryRoot 'cookie-request-4.txt')
+    if ($restoredCookieCapture -notmatch '(?im)^Cookie:.*session=local-session-canary' -or $restoredCookieCapture -notmatch '(?im)^Cookie:.*domain-session=local-domain-canary' -or $restoredCookieCapture -match 'expired=' -or $restoredCookieCapture -match 'secure-session=local-secure-canary') { throw 'Cookie was not persisted per environment or an expired cookie was sent after restart.' }
+    if ((Get-PlaintextScan $secrets $scanPath) -ne 'CLEAR') { throw 'A persisted cookie remains in SQLite plaintext.' }
+
     'PASS: new secrets encrypted, legacy migration confirmed and idempotent, values survive process restart.'
     $passed = $true
 }
 finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
     if ($authMockServer -and -not $authMockServer.Process.HasExited) { Stop-Process -Id $authMockServer.Process.Id -Force }
+    if ($cookieMockServer -and -not $cookieMockServer.Process.HasExited) { Stop-Process -Id $cookieMockServer.Process.Id -Force }
     if ($null -eq $oldPort) { Remove-Item Env:\ApiStudio__Port -ErrorAction SilentlyContinue } else { $env:ApiStudio__Port = $oldPort }
     if ($null -eq $oldDatabasePath) { Remove-Item Env:\ApiStudio__DatabasePath -ErrorAction SilentlyContinue } else { $env:ApiStudio__DatabasePath = $oldDatabasePath }
     if ($null -eq $oldTestSecrets) { Remove-Item Env:\API_STUDIO_TEST_SECRETS -ErrorAction SilentlyContinue } else { $env:API_STUDIO_TEST_SECRETS = $oldTestSecrets }

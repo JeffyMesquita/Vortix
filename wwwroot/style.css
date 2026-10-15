@@ -770,5 +770,15 @@ textarea.compact { min-height: 165px; }
 .auth-basic { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .auth-api-key { grid-template-columns: minmax(130px, .9fr) minmax(0, 1.2fr) minmax(120px, .7fr); }
 .auth-api-key #api-key-query-warning { grid-column: 1 / -1; margin: 0; }
+.cookie-jar-panel { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 11px; }
+.cookie-jar-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; color: var(--text); font-size: 12px; font-weight: 700; }
+.cookie-jar-count { display: grid; min-width: 22px; height: 22px; place-items: center; border: 1px solid var(--border); border-radius: 999px; color: var(--accent); background: var(--surface-raised); font-size: 11px; }
+.cookie-jar-panel > .hint { margin: 9px 0; font-size: 11px; }
+.cookie-jar-list { display: grid; gap: 6px; max-height: 145px; overflow: auto; margin: 0 0 10px; padding: 0; list-style: none; }
+.cookie-jar-item { display: grid; gap: 3px; min-width: 0; padding: 8px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
+.cookie-jar-item strong { overflow: hidden; color: var(--accent); font-size: 11px; text-overflow: ellipsis; }
+.cookie-jar-location, .cookie-jar-item small, .cookie-jar-empty { overflow-wrap: anywhere; color: var(--muted); font-size: 10px; }
+.cookie-jar-empty { padding: 8px 2px; }
+.cookie-jar-panel > .button { width: 100%; }
 .auth-bearer-fields[hidden], .auth-credentials[hidden], #api-key-query-warning[hidden], #token-helper[hidden] { display: none !important; }
 @media (max-width: 600px) { .auth-basic, .auth-api-key { grid-template-columns: 1fr; } }

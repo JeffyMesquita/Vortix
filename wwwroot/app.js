@@ -469,7 +469,7 @@ async function runRunnerCases(cases,options,allowWrites){
     byId('runner-progress-label').textContent=`${index+1} / ${runCases.length} · Conjunto ${item.datasetNumber}`;setRunnerCase(item,'running','Executando…');
     const requestStarted=performance.now();let caseFailed=false,caseStatus='Falha',caseDetail='',responseBody='';
     try{
-      const request=RunnerLogic.prepareSavedRequest(item.request,getEnvironment().variables||{},item.dataset,allowWrites);
+      const request=RunnerLogic.prepareSavedRequest(item.request,getEnvironment().variables||{},item.dataset,allowWrites);request.environmentId=activeEnvironmentId||'default';
       const {proxyStatus,result}=await executeApiRequest(request),status=Number(result.status)||0,tests=RunnerLogic.evaluateResponseTests(request.responseTests,result),failedTests=tests.filter(item=>!item.passed),hasTests=tests.length>0;
       responseBody=runnerBodyPreview(result.body);caseStatus=status?`${status} ${result.reason||''}`.trim():`Proxy ${proxyStatus}`;
       const details=[];const httpFailed=!!result.error||proxyStatus>=400||status<200||status>=300&&!hasTests;
@@ -1349,7 +1349,42 @@ function renderEnvironmentSelect(){
   const select=byId('environment-select');select.replaceChildren();const groups=new Map();
   for(const env of environments){const group=String(env.group||'Geral').trim()||'Geral';if(!groups.has(group)){const optionGroup=document.createElement('optgroup');optionGroup.label=group;groups.set(group,optionGroup);select.append(optionGroup);}
     const option=document.createElement('option');option.value=env.id;option.textContent=env.name;option.selected=env.id===activeEnvironmentId;groups.get(group).append(option);}
+  void renderCookieJar();
 }async function chooseEnvironment(id){if(!environments.some(x=>x.id===id))return;activeEnvironmentId=id;await dbWrite('settings',{key:'activeEnvironmentId',value:id});renderEnvironmentSelect();if(baseUrlAuto)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';await loadTokenRequestConfig();syncActiveWorkspaceTab(false);showToast('Ambiente alterado',`Requests usarão “${getEnvironment().name}”.`,'info',3000);}
+
+function cookieJarStorageKey(){return'cookiejar:'+(activeEnvironmentId||'default');}
+async function renderCookieJar(){
+  const list=byId('cookie-jar-list'),count=byId('cookie-jar-count'),clear=byId('clear-cookie-jar'),key=cookieJarStorageKey();
+  if(!list||!count||!clear)return;
+  try{
+    const record=await dbRead('settings',key);
+    if(key!==cookieJarStorageKey())return;
+    const cookies=Array.isArray(record?.value?.cookies)?record.value.cookies.filter(cookie=>cookie&&typeof cookie==='object'):[];
+    list.replaceChildren();count.textContent=String(cookies.length);clear.disabled=!cookies.length;
+    if(!cookies.length){const empty=document.createElement('li');empty.className='cookie-jar-empty';empty.textContent='Sem cookies neste ambiente.';list.append(empty);return;}
+    for(const cookie of cookies){
+      const item=document.createElement('li');item.className='cookie-jar-item';
+      const heading=document.createElement('strong');heading.textContent=String(cookie.cookieName||'Cookie');
+      const location=document.createElement('span');location.className='cookie-jar-location';location.textContent=String(cookie.cookieDomain||'')+(cookie.hostOnly?' · host':'')+' · '+String(cookie.cookiePath||'/');
+      const flags=[cookie.secure?'Secure':'',cookie.httpOnly?'HttpOnly':'',cookie.sameSite?'SameSite='+cookie.sameSite:'SameSite não informado',cookie.expiresUtc?'Expira '+new Date(cookie.expiresUtc).toLocaleString():'Sem expiração'].filter(Boolean);
+      const metadata=document.createElement('small');metadata.textContent=flags.join(' · ');
+      item.append(heading,location,metadata);list.append(item);
+    }
+  }catch{
+    list.replaceChildren();count.textContent='–';clear.disabled=true;
+    const empty=document.createElement('li');empty.className='cookie-jar-empty';empty.textContent='Cookie jar indisponível.';list.append(empty);
+  }
+}
+async function clearCookieJar(){
+  const key=cookieJarStorageKey(),environment=getEnvironment();
+  try{
+    const record=await dbRead('settings',key),count=Array.isArray(record?.value?.cookies)?record.value.cookies.length:0;
+    if(!count)return;
+    if(!(await confirmWithDialog({eyebrow:'COOKIES',title:'Limpar cookies deste ambiente?',description:'Serão removidos '+count+' cookies de “'+environment.name+'”.',warning:'Outros ambientes não serão alterados.',confirmLabel:'Limpar cookies',danger:true})))return;
+    await dbWrite('settings',key,true);await renderCookieJar();showToast('Cookie jar limpo','Cookies removidos do ambiente “'+environment.name+'”.','success');
+  }catch(error){showToast('Não foi possível limpar cookies',error.message||'Confira o banco local.','error');}
+}
+
 function makeVarRow(key='',value=''){
   const row=document.createElement('div');row.className='environment-var-row';const name=document.createElement('input');name.className='environment-var-name';name.value=key;name.placeholder='chave';name.autocomplete='off';name.setAttribute('aria-label','Nome da variável');
   const input=document.createElement('input');input.className='environment-var-value';input.value=value;input.type=isSensitiveName(key)?'password':'text';input.placeholder='valor';input.autocomplete='new-password';input.setAttribute('aria-label',`Valor da variável ${key||'nova'}`);
@@ -1388,7 +1423,7 @@ async function saveEnvironmentDraft(event){
   }
   if(!next.length){showToast('Mantenha um ambiente','Crie pelo menos um ambiente.','error');return;}
   try{
-    const ids=new Set(next.map(x=>x.id));for(const env of environments)if(!ids.has(env.id)){await dbWrite('environments',env.id,true);await dbWrite('settings',TOKEN_REQUEST_CONFIG_KEY+':'+env.id,true);}
+    const ids=new Set(next.map(x=>x.id));for(const env of environments)if(!ids.has(env.id)){await dbWrite('environments',env.id,true);await dbWrite('settings',TOKEN_REQUEST_CONFIG_KEY+':'+env.id,true);await dbWrite('settings','cookiejar:'+env.id,true);}
     for(const env of next)await dbWrite('environments',env);environments=next;
     if(!environments.some(x=>x.id===activeEnvironmentId))activeEnvironmentId=environments[0].id;
     environmentDraft=[];await dbWrite('settings',{key:'activeEnvironmentId',value:activeEnvironmentId});renderEnvironmentSelect();await loadTokenRequestConfig();
@@ -1441,6 +1476,7 @@ async function captureResponseVariable(request,result,quiet=false){
 async function executeApiRequest(request){
   const response=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify(request)});
   let result;try{result=await response.json();}catch{throw Error('O servidor local devolveu uma resposta inválida.');}
+  void renderCookieJar();if(result.cookieJarWarning)showToast('Cookie não salvo',result.cookieJarWarning,'warning');
   return{proxyStatus:response.status,result};
 }
 async function performApiRequest(request,button,save,historyRequest=request){
@@ -1457,7 +1493,7 @@ async function performApiRequest(request,button,save,historyRequest=request){
 }
 function requestFromForm(selectedMethod,requestRoute,resolveValues=true){
   const resolve=value=>resolveValues?applyEnvironment(value):value,auth=authFieldsFromForm(resolve,true);
-  return{baseUrl:resolve(byId('base-url').value.trim()),route:resolve(requestRoute),method:selectedMethod,...auth,headers:resolve(byId('headers').value),body:resolve(body.value),
+  return{baseUrl:resolve(byId('base-url').value.trim()),route:resolve(requestRoute),method:selectedMethod,...auth,environmentId:activeEnvironmentId||'default',headers:resolve(byId('headers').value),body:resolve(body.value),
     allowInsecureHttp:byId('allow-insecure-http').checked,confirmTestData:byId('confirm-test-data').checked,testDataPhrase:byId('test-data-phrase').value,confirmTokenRequest:false,
     saveBearerToken:byId('save-token-history').checked,
     captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseTests:getResponseTestsFromForm()};
@@ -1499,7 +1535,7 @@ async function requestTokenFromHelper(){
     const config=tokenRequestConfig,routeConfig=RunnerLogic.normalizeTokenRequestConfig({...config,route:applyEnvironment(config.route)});
     if(!routeConfig.route)throw Error('Configure a rota do endpoint de token.');
     const mode=config.credentialMode,baseUrl=applyEnvironment(byId('base-url').value.trim());
-    request={baseUrl,route:routeConfig.route,method:'POST',...authFieldsFromForm(applyEnvironment,true),headers:'Accept: application/json',body:'',confirmTestData:false,testDataPhrase:'',confirmTokenRequest:true,tokenClientId:applyEnvironment(clientId),tokenClientSecret:applyEnvironment(secret),tokenClientIdField:config.clientIdField,tokenClientSecretField:config.clientSecretField,tokenCredentialMode:mode,allowInsecureHttp:byId('allow-insecure-http').checked,saveBearerToken:byId('save-token-history').checked};
+    request={baseUrl,route:routeConfig.route,method:'POST',...authFieldsFromForm(applyEnvironment,true),environmentId:activeEnvironmentId||'default',headers:'Accept: application/json',body:'',confirmTestData:false,testDataPhrase:'',confirmTokenRequest:true,tokenClientId:applyEnvironment(clientId),tokenClientSecret:applyEnvironment(secret),tokenClientIdField:config.clientIdField,tokenClientSecretField:config.clientSecretField,tokenCredentialMode:mode,allowInsecureHttp:byId('allow-insecure-http').checked,saveBearerToken:byId('save-token-history').checked};
     const target=new URL(request.baseUrl);
     if(!['http:','https:'].includes(target.protocol)||target.username||target.password||target.search||target.hash)throw Error('Informe URL base HTTP ou HTTPS sem credenciais, query ou fragmento.');
     const insecureOrigin=RunnerLogic.remoteHttpOrigin(request.baseUrl);
@@ -1566,7 +1602,7 @@ function addEventListeners(){
     const change=()=>{if(['method','route','body','base-url','headers'].includes(id))byId('confirm-test-data').checked=false;if(id==='base-url')baseUrlAuto=false;updateGuard();updateTokenButton();if(id==='body'){renderBodyHighlight();updateJsonTools();}};byId(id).addEventListener('input',change);byId(id).addEventListener('change',change);
   }
   body.addEventListener('scroll',renderBodyHighlight);byId('token-client-id').addEventListener('input',updateTokenButton);byId('token-client-secret').addEventListener('input',updateTokenButton);
-  byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);
+  byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('clear-cookie-jar').onclick=clearCookieJar;
   for(const id of ['token-route','token-client-id-field','token-client-secret-field','token-credential-mode']){byId(id).addEventListener('input',updateTokenButton);byId(id).addEventListener('change',()=>void persistTokenRequestConfig());}
   sendButton.onclick=sendCurrentRequest;tokenRequestButton.onclick=requestTokenFromHelper;
 }

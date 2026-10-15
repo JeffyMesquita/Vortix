@@ -538,3 +538,13 @@ test('GitHub ignore rules exclude local databases, secrets, and .NET artifacts',
   for (const rule of ['bin/', 'obj/', '*.sqlite', '*.db', '.env', 'appsettings.Local.json', 'secrets.json']) assert.ok(gitignore.includes(rule));
   assert.doesNotMatch(gitignore, /wwwroot\/fonts/);
 });
+test('request Auth view exposes its environment-scoped cookie jar', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  assert.match(html, /id="cookie-jar-panel"/);
+  assert.match(html, /id="cookie-jar-list"/);
+  assert.match(html, /id="clear-cookie-jar"/);
+});
+test('removing an environment also removes its Cookie jar', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.ok(app.includes("await dbWrite('settings','cookiejar:'+env.id,true);"), 'deleted environment cookies should be cleared');
+});

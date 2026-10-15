@@ -47,7 +47,7 @@ A aplicação escuta somente em loopback e foi pensada para uso em computador de
 
 - **Editor de requests:** GET, HEAD, POST, PUT, PATCH, DELETE e OPTIONS; URL base, rota, Params, Headers, Body e Auth Bearer, Basic ou API Key.
 - **Coleções:** coleções, pastas e subpastas para organizar requests.
-- **Ambientes:** grupos de ambientes e variáveis próprias, com substituição por templates como <code>{{baseUrl}}</code> e <code>{{token}}</code>.
+- **Ambientes:** variáveis próprias e Cookie jar isolado por ambiente, com substituição por templates como <code>{{baseUrl}}</code> e <code>{{token}}</code>.
 - **Abas e histórico:** até 12 requests abertas; abas, histórico, coleções, ambientes e preferências ficam salvos localmente.
 - **Resposta:** visualização Pretty, Árvore ou Raw, cópia de cabeçalhos e body, busca de texto e resposta temporária.
 - **Captura de variáveis:** salve um campo JSON da resposta ou o texto completo no ambiente ativo.
@@ -216,6 +216,14 @@ O importador não resolve referências <code>$ref</code> (locais ou externas), n
 
 Cada ambiente mantém suas próprias variáveis. Grupos ajudam a separar ambientes como Desenvolvimento, Homologação e Produção; os nomes e valores são definidos por você.
 
+O Cookie jar também é separado por ambiente. Cookies recebidos em <code>Set-Cookie</code> são reutilizados quando domínio, caminho, HTTPS e validade correspondem. A lista mostra nome e metadados, nunca o valor; use **Limpar cookies deste ambiente** para removê-los. Excluir um ambiente também remove seu jar.
+
+~~~http
+Set-Cookie: session=exemplo; Path=/; Secure; HttpOnly; SameSite=Lax
+~~~
+
+O Vortix preserva SameSite como metadado. Como o envio é feito por um cliente HTTP local, regras de navegação de navegador para SameSite não são aplicadas.
+
 Use <code>{{nomeDaVariavel}}</code> em URL base, rota, Params, Headers e Body. O Vortix substitui os templates antes do envio. Variáveis não definidas geram erro para evitar requests com valores incompletos.
 
 Ao capturar uma variável de resposta, escolha o nome, a origem (campo JSON ou texto completo) e, para JSON, o caminho desejado. Por padrão, a captura ocorre apenas em respostas 2xx e salva o valor no ambiente ativo.
@@ -293,7 +301,7 @@ Exports Insomnia e Postman podem conter scripts After-response/Post-response ger
 
 ## Persistência e backups
 
-Histórico, coleções, pastas, ambientes, requests, abas e configurações ficam em um banco SQLite local. O body das respostas não é persistido. Requests e variáveis podem conter dados sensíveis, portanto proteja o computador e os backups.
+Histórico, coleções, pastas, ambientes, Cookie jars, requests, abas e configurações ficam em um banco SQLite local. Valores de cookies são protegidos com Data Protection. O body das respostas não é persistido. Requests e variáveis podem conter dados sensíveis, portanto proteja o computador e os backups.
 
 Em Windows, sem configuração personalizada, o banco fica em:
 

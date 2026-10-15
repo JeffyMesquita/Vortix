@@ -1,5 +1,8 @@
 
 using System.Net;
+using System.Collections.Concurrent;
+using System.Globalization;
+using Microsoft.Data.Sqlite;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -29,7 +32,7 @@ builder.WebHost.ConfigureKestrel(options =>
     options.Listen(IPAddress.Loopback, port);
 });
 
-using var httpClient = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+using var httpClient = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
 {
     Timeout = TimeSpan.FromSeconds(30),
     MaxResponseContentBufferSize = 5 * 1024 * 1024
@@ -39,6 +42,7 @@ builder.Services.AddDataProtection().SetApplicationName("ApiPublicacaoTester");
 var app = builder.Build();
 var dataProtector = app.Services.GetRequiredService<IDataProtectionProvider>().CreateProtector("LocalDataStore.v1");
 var localDataStore = new LocalDataStore(databasePath, dataProtector);
+var cookieJarLocks = new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal);
 await localDataStore.InitializeAsync();
 app.Use(async (context, next) =>
 {
@@ -152,10 +156,10 @@ app.MapDelete("/api/storage/{store}", async (HttpContext context, string store, 
         return StorageError();
     }
 });
-app.MapPost("/api/request", (HttpContext context, ApiCall call) => HandleRequest(context, call, httpClient, port));
+app.MapPost("/api/request", (HttpContext context, ApiCall call) => HandleRequest(context, call, httpClient, localDataStore, cookieJarLocks, port));
 await app.RunAsync();
 
-static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, HttpClient httpClient, int port)
+static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, HttpClient httpClient, LocalDataStore localDataStore, ConcurrentDictionary<string, SemaphoreSlim> cookieJarLocks, int port)
 {
     if (!IsTrustedLocalRequest(context, port))
     {
@@ -165,11 +169,13 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
     if (call is null || string.IsNullOrWhiteSpace(call.BaseUrl) || call.BaseUrl.Length > 2048 ||
         string.IsNullOrWhiteSpace(call.Route) || call.Route.Length > 4096 || (call.Body?.Length ?? 0) > 900_000 ||
         (call.Headers?.Length ?? 0) > 32_000 || (call.BearerToken?.Length ?? 0) > 8192 ||
-        (call.TokenClientId?.Length ?? 0) > 512 || (call.TokenClientSecret?.Length ?? 0) > 8192 || (call.AuthType?.Length ?? 0) > 16 || (call.BasicUsername?.Length ?? 0) > 1024 || (call.BasicPassword?.Length ?? 0) > 8192 || (call.ApiKeyName?.Length ?? 0) > 128 || (call.ApiKeyLocation?.Length ?? 0) > 16 || (call.ApiKeyValue?.Length ?? 0) > 8192)
+        (call.TokenClientId?.Length ?? 0) > 512 || (call.TokenClientSecret?.Length ?? 0) > 8192 || (call.AuthType?.Length ?? 0) > 16 || (call.BasicUsername?.Length ?? 0) > 1024 || (call.BasicPassword?.Length ?? 0) > 8192 || (call.ApiKeyName?.Length ?? 0) > 128 || (call.ApiKeyLocation?.Length ?? 0) > 16 || (call.ApiKeyValue?.Length ?? 0) > 8192 || (call.EnvironmentId?.Length ?? 0) > 128 || call.EnvironmentId?.Contains('\r') == true || call.EnvironmentId?.Contains('\n') == true)
     {
         return Error(StatusCodes.Status400BadRequest, "Revise URL, rota e tamanho dos campos.");
     }
 
+    var environmentId = string.IsNullOrWhiteSpace(call.EnvironmentId) ? "default" : call.EnvironmentId.Trim();
+    var cookieStorageKey = "cookiejar:" + environmentId;
     var providedAuthType = call.AuthType?.Trim() ?? string.Empty;
     var authType = providedAuthType.Length == 0
         ? (string.IsNullOrEmpty(call.BearerToken) ? "none" : "bearer")
@@ -362,18 +368,53 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
         }
     }
 
+    return await SendWithCookieJarAsync(context, request, httpClient, localDataStore, cookieJarLocks, cookieStorageKey, targetUri);
+
+}
+
+
+static async Task<IResult> SendWithCookieJarAsync(
+    HttpContext context,
+    HttpRequestMessage request,
+    HttpClient httpClient,
+    LocalDataStore localDataStore,
+    ConcurrentDictionary<string, SemaphoreSlim> cookieJarLocks,
+    string cookieStorageKey,
+    Uri targetUri)
+{
+    var cookieLock = cookieJarLocks.GetOrAdd(cookieStorageKey, static _ => new SemaphoreSlim(1, 1));
+    await cookieLock.WaitAsync(context.RequestAborted);
     try
     {
+        var cookieLoad = await ReadCookieJarAsync(localDataStore, cookieStorageKey, context.RequestAborted);
+        var cookies = cookieLoad.Cookies;
+        var cookieContainer = CreateCookieContainer(cookies);
+        var outgoingCookieHeader = cookieContainer.GetCookieHeader(targetUri);
+        if (outgoingCookieHeader.Length > 0)
+            request.Headers.TryAddWithoutValidation("Cookie", outgoingCookieHeader);
+
         using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, context.RequestAborted);
         var responseBody = await response.Content.ReadAsStringAsync(context.RequestAborted);
         var responseHeaders = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
         foreach (var header in response.Headers)
-        {
             responseHeaders[header.Key] = header.Value.ToArray();
-        }
         foreach (var header in response.Content.Headers)
-        {
             responseHeaders[header.Key] = header.Value.ToArray();
+
+        var cookieJarWarning = string.Empty;
+        var setCookieHeaders = response.Headers.TryGetValues("Set-Cookie", out var values) ? values.ToArray() : [];
+        if (setCookieHeaders.Length > 0 || cookieLoad.PrunedExpired)
+        {
+            if (setCookieHeaders.Length > 0)
+                cookies = UpdateCookieJar(cookieContainer, cookies, targetUri, setCookieHeaders);
+            try
+            {
+                await WriteCookieJarAsync(localDataStore, cookieStorageKey, cookies, context.RequestAborted);
+            }
+            catch (Exception error) when (error is SqliteException or CryptographicException or JsonException or InvalidOperationException or ArgumentException)
+            {
+                cookieJarWarning = "A resposta chegou, mas o Cookie jar não foi atualizado no SQLite local.";
+            }
         }
 
         return Results.Json(new
@@ -381,7 +422,8 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
             status = (int)response.StatusCode,
             reason = response.ReasonPhrase ?? string.Empty,
             headers = responseHeaders,
-            body = responseBody
+            body = responseBody,
+            cookieJarWarning
         });
     }
     catch (OperationCanceledException) when (!context.RequestAborted.IsCancellationRequested)
@@ -400,6 +442,159 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
     {
         return Error(StatusCodes.Status502BadGateway, "Resposta da API excedeu o limite ou não pôde ser lida.");
     }
+    finally
+    {
+        cookieLock.Release();
+    }
+}
+
+static async Task<CookieJarLoad> ReadCookieJarAsync(LocalDataStore localDataStore, string storageKey, CancellationToken cancellationToken)
+{
+    var record = await localDataStore.ReadAsync("settings", storageKey, cancellationToken);
+    if (!record.HasValue || record.Value.ValueKind != JsonValueKind.Object ||
+        !record.Value.TryGetProperty("value", out var value) ||
+        !value.TryGetProperty("cookies", out var cookieArray) ||
+        cookieArray.ValueKind != JsonValueKind.Array)
+        return new CookieJarLoad([], false);
+
+    var stored = JsonSerializer.Deserialize<List<StoredCookie>>(cookieArray.GetRawText(), new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+    var active = stored.Where(cookie => !cookie.ExpiresUtc.HasValue || cookie.ExpiresUtc.Value > DateTimeOffset.UtcNow).ToList();
+    return new CookieJarLoad(active, active.Count != stored.Count);
+}
+
+static CookieContainer CreateCookieContainer(IEnumerable<StoredCookie> cookies)
+{
+    var container = new CookieContainer();
+    foreach (var stored in cookies)
+    {
+        if (!Uri.TryCreate(stored.CookieOrigin, UriKind.Absolute, out var origin)) continue;
+        try { container.SetCookies(origin, stored.CookieHeader); }
+        catch (CookieException) { }
+    }
+    return container;
+}
+
+static List<StoredCookie> UpdateCookieJar(CookieContainer container, IEnumerable<StoredCookie> current, Uri origin, IEnumerable<string> setCookieHeaders)
+{
+    var cookies = new Dictionary<string, StoredCookie>(StringComparer.Ordinal);
+    foreach (var cookie in current)
+        if (!cookie.ExpiresUtc.HasValue || cookie.ExpiresUtc.Value > DateTimeOffset.UtcNow)
+            cookies[CookieIdentity(cookie.CookieName, cookie.CookieDomain, cookie.CookiePath)] = cookie;
+
+    foreach (var header in setCookieHeaders)
+    {
+        if (!TryNormalizeSetCookie(header, origin, out var cookie, out var identity, out var expired)) continue;
+        try { container.SetCookies(origin, cookie.CookieHeader); }
+        catch (CookieException) { continue; }
+        if (expired) cookies.Remove(identity);
+        else if (cookies.ContainsKey(identity) || cookies.Count < 300) cookies[identity] = cookie;
+    }
+
+    return cookies.Values
+        .Where(cookie => !cookie.ExpiresUtc.HasValue || cookie.ExpiresUtc.Value > DateTimeOffset.UtcNow)
+        .OrderBy(cookie => cookie.CookieDomain, StringComparer.OrdinalIgnoreCase)
+        .ThenBy(cookie => cookie.CookiePath, StringComparer.Ordinal)
+        .ThenBy(cookie => cookie.CookieName, StringComparer.Ordinal)
+        .ToList();
+}
+
+static bool TryNormalizeSetCookie(string header, Uri origin, out StoredCookie cookie, out string identity, out bool expired)
+{
+    cookie = new StoredCookie();
+    identity = string.Empty;
+    expired = false;
+    if (header.Length is 0 or > 8192) return false;
+    var parts = header.Split(';', StringSplitOptions.TrimEntries);
+    if (parts.Length == 0) return false;
+    var separator = parts[0].IndexOf('=');
+    if (separator <= 0) return false;
+    var name = parts[0][..separator].Trim();
+    if (name.Length == 0) return false;
+
+    var attributes = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+    foreach (var part in parts.Skip(1))
+    {
+        if (part.Length == 0) continue;
+        var equals = part.IndexOf('=');
+        attributes[(equals < 0 ? part : part[..equals]).Trim()] = equals < 0 ? null : part[(equals + 1)..].Trim();
+    }
+
+    var hasDomain = attributes.TryGetValue("domain", out var rawDomain) && !string.IsNullOrWhiteSpace(rawDomain);
+    var domain = hasDomain ? rawDomain!.Trim().TrimStart('.').ToLowerInvariant() : origin.IdnHost.ToLowerInvariant();
+    var path = attributes.TryGetValue("path", out var rawPath) && rawPath?.StartsWith('/') == true
+        ? rawPath
+        : DefaultCookiePath(origin.AbsolutePath);
+    var sameSite = attributes.TryGetValue("samesite", out var rawSameSite) ? rawSameSite ?? string.Empty : string.Empty;
+    var secure = attributes.ContainsKey("secure");
+    var httpOnly = attributes.ContainsKey("httponly");
+    DateTimeOffset? expiresUtc = null;
+    var hasMaxAge = attributes.TryGetValue("max-age", out var rawMaxAge);
+    if (hasMaxAge && long.TryParse(rawMaxAge, NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxAge))
+    {
+        if (maxAge <= 0) expired = true;
+        else
+        {
+            try { expiresUtc = DateTimeOffset.UtcNow.AddSeconds(Math.Min(maxAge, 315_360_000)); }
+            catch (ArgumentOutOfRangeException) { expiresUtc = DateTimeOffset.MaxValue; }
+        }
+    }
+    else if (attributes.TryGetValue("expires", out var rawExpires) &&
+        DateTimeOffset.TryParse(rawExpires, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsedExpires))
+    {
+        expiresUtc = parsedExpires;
+        expired = parsedExpires <= DateTimeOffset.UtcNow;
+    }
+
+    var normalizedParts = new List<string> { parts[0] };
+    foreach (var part in parts.Skip(1))
+    {
+        var attributeName = part.Split('=', 2)[0].Trim();
+        if (attributeName.Equals("max-age", StringComparison.OrdinalIgnoreCase)) continue;
+        if (hasMaxAge && attributeName.Equals("expires", StringComparison.OrdinalIgnoreCase)) continue;
+        normalizedParts.Add(part);
+    }
+    if (hasMaxAge && expiresUtc.HasValue)
+        normalizedParts.Add("Expires=" + expiresUtc.Value.UtcDateTime.ToString("R", CultureInfo.InvariantCulture));
+    if (expired && hasMaxAge)
+        normalizedParts.Add("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+
+    var normalizedHeader = string.Join("; ", normalizedParts);
+    cookie = new StoredCookie
+    {
+        CookieName = name,
+        CookieDomain = domain,
+        CookiePath = path,
+        CookieOrigin = origin.GetLeftPart(UriPartial.Authority),
+        CookieHeader = normalizedHeader,
+        HostOnly = !hasDomain,
+        Secure = secure,
+        HttpOnly = httpOnly,
+        SameSite = sameSite,
+        ExpiresUtc = expiresUtc
+    };
+    identity = CookieIdentity(name, domain, path);
+    return true;
+}
+
+static string DefaultCookiePath(string requestPath)
+{
+    if (string.IsNullOrEmpty(requestPath) || !requestPath.StartsWith('/') || requestPath == "/") return "/";
+    var lastSlash = requestPath.LastIndexOf('/');
+    return lastSlash <= 0 ? "/" : requestPath[..lastSlash];
+}
+
+static string CookieIdentity(string name, string domain, string path) =>
+    name + "\0" + domain.TrimStart('.').ToLowerInvariant() + "\0" + path;
+
+static async Task WriteCookieJarAsync(LocalDataStore localDataStore, string storageKey, IReadOnlyList<StoredCookie> cookies, CancellationToken cancellationToken)
+{
+    if (cookies.Count == 0)
+    {
+        await localDataStore.DeleteAsync("settings", storageKey, cancellationToken);
+        return;
+    }
+    var record = JsonSerializer.SerializeToElement(new { key = storageKey, value = new { cookies } }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    await localDataStore.WriteAsync("settings", record, cancellationToken);
 }
 
 static bool IsTrustedLocalRequest(HttpContext context, int port)
@@ -502,6 +697,22 @@ static bool TryApplyHeaders(string text, HttpRequestMessage request, out string 
     return true;
 }
 
+
+sealed record CookieJarLoad(List<StoredCookie> Cookies, bool PrunedExpired);
+
+sealed record StoredCookie
+{
+    public string CookieName { get; init; } = string.Empty;
+    public string CookieDomain { get; init; } = string.Empty;
+    public string CookiePath { get; init; } = "/";
+    public string CookieOrigin { get; init; } = string.Empty;
+    public string CookieHeader { get; init; } = string.Empty;
+    public bool HostOnly { get; init; }
+    public bool Secure { get; init; }
+    public bool HttpOnly { get; init; }
+    public string SameSite { get; init; } = string.Empty;
+    public DateTimeOffset? ExpiresUtc { get; init; }
+}
 sealed class ApiCall
 {
     /// <summary>Gets or sets the authentication type used for the outgoing API request.</summary>
@@ -522,6 +733,9 @@ sealed class ApiCall
     /// <summary>Gets or sets the API Key value.</summary>
     /// <value>The credential consumed when <see cref="AuthType"/> is <c>apiKey</c>.</value>
     public string ApiKeyValue { get; init; } = string.Empty;
+    /// <summary>Gets or sets the active local environment used to scope persisted cookies.</summary>
+    /// <value>A local environment identifier; empty values use the default scope.</value>
+    public string EnvironmentId { get; init; } = string.Empty;
     public string BaseUrl { get; init; } = string.Empty;
     public string Route { get; init; } = string.Empty;
     public string Method { get; init; } = "GET";
