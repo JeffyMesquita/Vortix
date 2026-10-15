@@ -8,6 +8,30 @@
   const methods = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
   const writeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
   const bodyModes = new Set(['json', 'text', 'xml', 'urlencoded', 'multipart', 'graphql']);
+  function normalizeAuthFields(source={}){
+    const rawType=String(source.authType|| (source.bearerToken?'bearer':'none')),authType=rawType==='api-key'?'apiKey':rawType;
+    if(!['none','bearer','basic','apiKey'].includes(authType))throw Error('Tipo de autenticação não suportado.');
+    return{authType,bearerToken:authType==='bearer'?String(source.bearerToken||''):'',basicUsername:authType==='basic'?String(source.basicUsername||''):'',basicPassword:authType==='basic'?String(source.basicPassword||''):'',apiKeyName:authType==='apiKey'?String(source.apiKeyName||''):'',apiKeyLocation:authType==='apiKey'&&source.apiKeyLocation==='query'?'query':'header',apiKeyValue:authType==='apiKey'?String(source.apiKeyValue||''):''};
+  }
+  function persistAuthFields(source={},includeCredentials=true){
+    const authMode=['inherit','none','custom'].includes(source.authMode)?source.authMode:'custom';
+    if(authMode!=='custom')return{...normalizeAuthFields({authType:'none'}),authMode,authOmitted:false};
+    const fields=normalizeAuthFields(source),hasCredentials=!!(fields.bearerToken||fields.basicUsername||fields.basicPassword||fields.apiKeyValue);
+    return{...fields,authMode,bearerToken:includeCredentials?fields.bearerToken:'',basicUsername:includeCredentials?fields.basicUsername:'',basicPassword:includeCredentials?fields.basicPassword:'',apiKeyValue:includeCredentials?fields.apiKeyValue:'',authOmitted:hasCredentials&&!includeCredentials};
+  }
+  function normalizeImportedAuthMode(auth){
+    const type=String(auth?.type||'').trim().toLowerCase();
+    if(!type||type==='inherit')return'inherit';
+    if(type==='none'||type==='noauth')return'none';
+    return'custom';
+  }
+  function resolveInheritedAuth(request={},scopes=[]){
+    const mode=['inherit','none','custom'].includes(request.authMode)?request.authMode:'custom';
+    if(mode==='none')return{...normalizeAuthFields({authType:'none'}),authMode:'none',authSource:null};
+    if(mode==='custom')return{...normalizeAuthFields(request),authMode:'custom',authSource:null};
+    const scope=[...(Array.isArray(scopes)?scopes:[])].reverse().find(item=>item?.auth&&typeof item.auth==='object'&&!Array.isArray(item.auth));
+    return{...normalizeAuthFields(scope?.auth||{authType:'none'}),authMode:'inherit',authSource:scope?{id:String(scope.id||''),name:String(scope.name||'')}:null};
+  }
   function normalizeBodyMode(value,strict=false){const mode=String(value||'json').trim().toLowerCase();if(bodyModes.has(mode))return mode;if(strict)throw Error('Modo de body não suportado: '+mode);return 'json';}
   function normalizeMultipartFields(fields){
     if(fields==null)return[];
@@ -69,13 +93,16 @@
   const reservedNames = new Set(['__proto__', 'prototype', 'constructor']);
   const maxDataSets = 100;
 
-  function flattenRequests(node, ancestors = [], depth = 0, folderId = '') {
+  function flattenRequests(node, ancestors = [], depth = 0, folderId = '', inheritedAuthScopes = []) {
     if (depth > 20) throw Error('A coleção ultrapassa 20 níveis de pastas.');
     const currentPath = [...ancestors, String(node?.name || '').trim()].filter(Boolean);
     const path = currentPath.join(' / ');
-    const result = (node?.requests || []).map(request => ({ request, path, folderId }));
+    const authScopes = node?.auth && typeof node.auth === 'object' && !Array.isArray(node.auth)
+      ? [...inheritedAuthScopes, { id: String(node.id || ''), name: String(node.name || ''), auth: node.auth }]
+      : inheritedAuthScopes;
+    const result = (node?.requests || []).map(request => ({ request, path, folderId, authScopes }));
     for (const folder of node?.folders || []) {
-      result.push(...flattenRequests(folder, currentPath, depth + 1, String(folder?.id || '')));
+      result.push(...flattenRequests(folder, currentPath, depth + 1, String(folder?.id || ''), authScopes));
     }
     return result;
   }
@@ -131,17 +158,15 @@
         : null;
       const editorSection = ['params', 'headers', 'body', 'auth', 'scripts', 'tests'].includes(source.editorSection) ? source.editorSection : 'params';
       const saveBearerToken = source.saveBearerToken !== false;
+      const savedAuth = persistAuthFields(source.request, saveBearerToken);
       const request = {
         ...source.request,
         bodyMode: normalizeBodyMode(source.request.bodyMode),
         multipartFields: normalizeMultipartFields(source.request.multipartFields),
+        ...savedAuth,
         graphqlQuery: String(source.request.graphqlQuery || ''),
         graphqlVariables: String(source.request.graphqlVariables || ''),
         graphqlOperationName: String(source.request.graphqlOperationName || ''),
-        bearerToken: saveBearerToken ? String(source.request.bearerToken || '') : '',
-        basicUsername: saveBearerToken ? String(source.request.basicUsername || '') : '',
-        basicPassword: saveBearerToken ? String(source.request.basicPassword || '') : '',
-        apiKeyValue: saveBearerToken ? String(source.request.apiKeyValue || '') : '',
         allowInsecureHttp: source.request.allowInsecureHttp === true
       };
       tabs.push({
@@ -645,7 +670,7 @@
     return lines.join('\n');
   }
 
-  function prepareSavedRequest(saved, environment, dataset, allowWrites = false) {
+  function prepareSavedRequest(saved, environment, dataset, allowWrites = false, authScopes = []) {
     const method = String(saved?.method || 'GET').toUpperCase();
     if (saved?.tokenRequest) {
       throw Error('Requests de credenciais manuais precisam ser enviadas pelo fluxo de token.');
@@ -661,14 +686,12 @@
     const graphqlVariables = bodyMode === 'graphql' ? String(saved?.graphqlVariables || '') : '';
     const graphqlOperationName = bodyMode === 'graphql' ? String(saved?.graphqlOperationName || '') : '';
     const body = bodyMode === 'graphql' ? buildGraphqlBody(graphqlQuery, graphqlVariables, graphqlOperationName, resolve) : resolve(saved?.body || '');
-    const requestedAuthType = String(saved?.authType || (saved?.bearerToken ? 'bearer' : 'none'));
-    const authType = requestedAuthType === 'api-key' ? 'apiKey' : requestedAuthType;
-    if (!['none', 'bearer', 'basic', 'apiKey'].includes(authType)) throw Error('Tipo de autenticacao nao suportado na colecao.');
-    const basicUsername = authType === 'basic' ? resolve(saved?.basicUsername || '') : '';
-    const basicPassword = authType === 'basic' ? resolve(saved?.basicPassword || '') : '';
-    const apiKeyName = authType === 'apiKey' ? resolve(saved?.apiKeyName || '') : '';
-    const apiKeyLocation = authType === 'apiKey' ? (saved?.apiKeyLocation === 'query' ? 'query' : 'header') : 'header';
-    const apiKeyValue = authType === 'apiKey' ? resolve(saved?.apiKeyValue || '') : '';
+    const effectiveAuth = resolveInheritedAuth(saved, authScopes), authType = effectiveAuth.authType;
+    const basicUsername = authType === 'basic' ? resolve(effectiveAuth.basicUsername || '') : '';
+    const basicPassword = authType === 'basic' ? resolve(effectiveAuth.basicPassword || '') : '';
+    const apiKeyName = authType === 'apiKey' ? resolve(effectiveAuth.apiKeyName || '') : '';
+    const apiKeyLocation = authType === 'apiKey' ? effectiveAuth.apiKeyLocation : 'header';
+    const apiKeyValue = authType === 'apiKey' ? resolve(effectiveAuth.apiKeyValue || '') : '';
     if (authType === 'basic' && (!basicUsername || !basicPassword)) throw Error('Basic Auth requer usuario e senha.');
     if (authType === 'apiKey' && (!apiKeyName || !apiKeyValue)) throw Error('API Key requer nome e valor.');
 
@@ -682,8 +705,10 @@
       graphqlQuery,
       graphqlVariables,
       graphqlOperationName,
+      authMode: effectiveAuth.authMode,
+      authSource: effectiveAuth.authSource,
       authType,
-      bearerToken: authType === 'bearer' ? resolve(saved?.bearerToken || '') : '',
+      bearerToken: authType === 'bearer' ? resolve(effectiveAuth.bearerToken || '') : '',
       basicUsername,
       basicPassword,
       apiKeyName,
@@ -844,5 +869,5 @@
     catch { throw Error('O conteúdo descriptografado não é um backup válido do Vortix.'); }
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeMultipartFields, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, normalizeGraphqlImportBody, normalizeTokenRequestConfig, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { parseOpenApiSpec, parseCurlCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, normalizeGraphqlImportBody, normalizeTokenRequestConfig, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

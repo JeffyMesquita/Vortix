@@ -140,7 +140,17 @@
 
           <div class="tab-panel auth-panel" data-editor-panel="auth" hidden>
             <div class="panel-heading"><div><h2>Autentica&ccedil;&atilde;o</h2><p>Escolha como esta request comprova identidade.</p></div><span class="auth-badge" id="auth-type-badge">Bearer</span></div>
-            <label for="auth-type">Tipo de autentica&ccedil;&atilde;o</label>
+            <div class="auth-inheritance-row">
+              <div><label for="auth-inheritance-mode">Autentica&ccedil;&atilde;o desta request</label>
+                <select id="auth-inheritance-mode" aria-describedby="auth-inheritance-source">
+                  <option value="inherit">Herdar da cole&ccedil;&atilde;o/pasta</option>
+                  <option value="custom">Personalizar nesta request</option>
+                  <option value="none">Sem autentica&ccedil;&atilde;o</option>
+                </select>
+              </div>
+              <button class="button secondary compact-button" id="save-auth-default" type="button">Salvar como padr&atilde;o</button>
+            </div>
+            <p class="hint auth-inheritance-source" id="auth-inheritance-source" role="status">Herdando autentica&ccedil;&atilde;o do n&iacute;vel mais pr&oacute;ximo.</p>            <label for="auth-type">Tipo de autentica&ccedil;&atilde;o</label>
             <select id="auth-type"><option value="bearer">Bearer Token</option><option value="basic">Basic Auth</option><option value="apiKey">API Key</option><option value="none">Sem autentica&ccedil;&atilde;o</option></select>
             <div id="auth-bearer-fields">
               <div class="token-row">

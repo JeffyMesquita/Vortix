@@ -97,11 +97,13 @@ try {
     $basicUsername = 'username-canary-' + [guid]::NewGuid().ToString('N')
     $basicPassword = 'basic-password-canary-' + [guid]::NewGuid().ToString('N')
     $apiKey = 'api-key-value-canary-' + [guid]::NewGuid().ToString('N')
-    $record = @{ key = 'protection-test'; value = @{ bearerToken = $bearer; headers = "Authorization: Bearer $headerSecret`r`nX-Api-Key: api-key-canary"; body = ('Body texto livre ' + $bodySecret); route = '/auth?client_secret=' + $querySecret; params = @(@('client_secret', $paramSecret), @('tenant', 'safe-tenant')); basicUsername = $basicUsername; basicPassword = $basicPassword; authType = 'apiKey'; apiKeyName = 'X-API-Key'; apiKeyValue = $apiKey } }
+    $collectionAuth = 'collection-auth-canary-' + [guid]::NewGuid().ToString('N')
+    $folderAuth = 'folder-auth-canary-' + [guid]::NewGuid().ToString('N')
+    $record = @{ key = 'protection-test'; value = @{ bearerToken = $bearer; headers = "Authorization: Bearer $headerSecret`r`nX-Api-Key: api-key-canary"; body = ('Body texto livre ' + $bodySecret); route = '/auth?client_secret=' + $querySecret; params = @(@('client_secret', $paramSecret), @('tenant', 'safe-tenant')); basicUsername = $basicUsername; basicPassword = $basicPassword; authType = 'apiKey'; apiKeyName = 'X-API-Key'; apiKeyValue = $apiKey; collection = @{ auth = @{ authType = 'bearer'; bearerToken = $collectionAuth }; folders = @(@{ auth = @{ authType = 'apiKey'; apiKeyName = 'X-API-Key'; apiKeyValue = $folderAuth } }) } } }
     $json = $record | ConvertTo-Json -Depth 20 -Compress
     Invoke-RestMethod -Uri ($baseUrl + '/api/storage/settings') -Method Post -Headers $headers -ContentType 'application/json' -Body $json -TimeoutSec 3 | Out-Null
     $saved = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/settings?key=protection-test') -Headers $headers -TimeoutSec 3
-    if ($saved.value.bearerToken -ne $bearer -or $saved.value.headers -notlike "*${headerSecret}*" -or $saved.value.body -notlike "*${bodySecret}*" -or $saved.value.route -notlike "*${querySecret}*" -or $saved.value.params[0][1] -ne $paramSecret -or $saved.value.params[1][1] -ne 'safe-tenant' -or $saved.value.basicUsername -ne $basicUsername -or $saved.value.basicPassword -ne $basicPassword -or $saved.value.apiKeyValue -ne $apiKey) { throw 'Storage API did not return original sensitive values.' }
+    if ($saved.value.bearerToken -ne $bearer -or $saved.value.headers -notlike "*${headerSecret}*" -or $saved.value.body -notlike "*${bodySecret}*" -or $saved.value.route -notlike "*${querySecret}*" -or $saved.value.params[0][1] -ne $paramSecret -or $saved.value.params[1][1] -ne 'safe-tenant' -or $saved.value.basicUsername -ne $basicUsername -or $saved.value.basicPassword -ne $basicPassword -or $saved.value.apiKeyValue -ne $apiKey -or $saved.value.collection.auth.bearerToken -ne $collectionAuth -or $saved.value.collection.folders[0].auth.apiKeyValue -ne $folderAuth) { throw 'Storage API did not return original sensitive values.' }
 
     $scanPath = Join-Path $temporaryRoot 'scan.sqlite.py'
     $scanCode = @(
@@ -112,7 +114,7 @@ try {
         'print("FOUND" if any(secret in text for secret in secrets) else "CLEAR")'
     ) -join "`n"
     [System.IO.File]::WriteAllText($scanPath, $scanCode, [System.Text.UTF8Encoding]::new($false))
-    $secrets = @($bearer, $headerSecret, 'api-key-canary', $bodySecret, $querySecret, $paramSecret, $basicUsername, $basicPassword, $apiKey, 'local-session-canary', 'local-domain-canary', 'local-secure-canary')
+    $secrets = @($bearer, $headerSecret, 'api-key-canary', $bodySecret, $querySecret, $paramSecret, $basicUsername, $basicPassword, $apiKey, $collectionAuth, $folderAuth, 'local-session-canary', 'local-domain-canary', 'local-secure-canary')
     if ((Get-PlaintextScan $secrets $scanPath) -ne 'CLEAR') { throw 'A sensitive sentinel remains in SQLite plaintext.' }
     $authMockServer = Start-AuthCaptureServer 3
     $mockBaseUrl = 'http://127.0.0.1:' + $authMockServer.Port

@@ -21,6 +21,7 @@
 - [Início rápido](#início-rápido)
 - [Primeiro fluxo](#primeiro-fluxo)
 - [Autenticação](#autenticação)
+  - [Auth herdada por coleção e pasta](#auth-herdada-por-coleção-e-pasta)
 - [Modos de body](#modos-de-body)
 - [Multipart form-data](#multipart-form-data)
 - [GraphQL](#graphql)
@@ -261,13 +262,51 @@ Informe nome do campo, valor e local de envio. Prefira **Header**. A opção **Q
 X-API-Key: {{apiKey}}
 ~~~
 
+### Auth herdada por coleção e pasta
+
+<p align="center">
+  <img src="docs/images/vortix-auth-inheritance.svg" alt="Precedência da autenticação: request personalizada, pasta mais próxima e coleção" width="100%">
+</p>
+
+Configure um padrão uma vez na coleção ou pasta. Requests novas começam em **Herdar**; a aba Auth mostra a origem, como **Herdada de Minha coleção**. Os campos ficam visíveis, mas bloqueados enquanto herdam.
+
+A precedência é request personalizada > pasta mais próxima > coleção. Sem autenticação desativa a herança naquela request. Requests antigas sem `authMode` continuam personalizadas, preservando a configuração anterior.
+
+Exemplo simplificado do JSON Vortix:
+
+~~~json
+{
+  "auth": {
+    "authType": "bearer",
+    "bearerToken": "{{token}}"
+  },
+  "requests": [
+    {
+      "name": "GET /health",
+      "route": "/health",
+      "authMode": "inherit",
+      "authType": "none"
+    },
+    {
+      "name": "GET /public",
+      "route": "/public",
+      "authMode": "none",
+      "authType": "none"
+    }
+  ]
+}
+~~~
+
+O token fica no padrão da coleção, não é copiado para cada request nem para o histórico. O histórico guarda a referência da coleção/pasta e o ambiente da chamada, para reabrir Auth herdada no mesmo escopo. Se `{{token}}` varia entre ambientes, o Vortix resolve o valor do ambiente ativo ao enviar ou executar no Runner. Requests personalizadas continuam guardando seus próprios campos conforme a opção de salvamento.
+
 ### Salvamento e intercâmbio
 
-A opção **Salvar credenciais de Auth nas requests locais** controla histórico, abas e coleções. Desmarcada, o Vortix mantém os valores só na sessão e não os grava nessas áreas; o tipo de Auth e a posição da API Key continuam disponíveis para completar depois. SQLite protege campos sensíveis com ASP.NET Core Data Protection.
+A opção **Salvar credenciais de Auth nas requests locais** controla histórico, abas e padrões de coleção/pasta. Desmarcada, o Vortix mantém os valores só na sessão e não os grava nessas áreas. SQLite protege campos sensíveis com ASP.NET Core Data Protection.
 
 Na importação, você escolhe se guarda credenciais. Na exportação, elas ficam fora por padrão. Marcar **Incluir credenciais de Auth e variáveis sensíveis** grava valores diretamente no JSON sem criptografia.
 
-Postman Collection v2.1 importa e exporta Bearer, Basic e API Key. Insomnia v4 importa Bearer e Basic; API Key exportada pelo Vortix aparece como header ou parâmetro de query, mantendo a chamada HTTP reutilizável. Veja também a documentação oficial de [autorização no Postman](https://learning.postman.com/docs/use/send-requests/authorization/authorization-types/) e [autenticação de requests no Insomnia](https://developer.konghq.com/insomnia/request-authentication/).
+Vortix JSON e Postman Collection v2.1 preservam Auth de coleção/pasta e requests herdadas. Insomnia v4 não oferece Auth nativa na coleção; ao exportar, o Vortix cria a pasta “Auth padrão” para manter o escopo. As requests herdam da pasta, como no fluxo do Insomnia. Consulte a documentação oficial sobre [Auth em pastas no Insomnia](https://developer.konghq.com/insomnia/requests/) e [herança no Postman](https://learning.postman.com/latest-v-12/docs/use/send-requests/authorization/specifying-authorization-details).
+
 
 ## Importar cURL
 

@@ -792,7 +792,12 @@ textarea.compact { min-height: 165px; }
 .curl-import-dialog textarea { width: 100%; min-height: 150px; resize: vertical; font: 12px/1.55 var(--app-font-family); }
 .curl-import-dialog .curl-import-error { margin: 0; color: var(--danger); }
 .curl-import-dialog .curl-import-error[hidden] { display: none; }
-.auth-panel > label { display: block; margin: 12px 0 5px; }
+.auth-inheritance-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; margin: 14px 0 0; }
+.auth-inheritance-row > div { display: grid; gap: 5px; min-width: 0; }
+.auth-inheritance-row select { width: 100%; min-width: 0; }
+.auth-inheritance-source { min-height: 1.5em; margin: 7px 0 10px; }
+.auth-inheritance-source[data-mode="inherit"] { color: var(--accent); }
+.auth-inheritance-source[data-mode="none"] { color: var(--muted); }.auth-panel > label { display: block; margin: 12px 0 5px; }
 .auth-panel > select { width: min(100%, 280px); }
 .auth-credentials { display: grid; gap: 10px; margin-top: 12px; }
 .auth-credentials > div { display: grid; gap: 5px; min-width: 0; }

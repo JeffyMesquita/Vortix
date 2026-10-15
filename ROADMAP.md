@@ -86,17 +86,31 @@ Evoluímos em fatias pequenas. Cada feature deve resolver um fluxo completo ante
 - [x] Testar builder, método, payload e proxy em mock local; build sem warnings.
 - [x] Documentar exemplo e fluxo visual no README.
 
-### 6. Autenticação herdada por coleção e pasta — próxima feature
+### 6. Autenticação herdada por coleção e pasta
 
-Evitar repetir credenciais em cada request, mantendo precedência fácil de entender.
+**Status: concluída.**
 
-- [ ] Definir herança: request substitui pasta; pasta substitui coleção.
-- [ ] Mostrar claramente de onde vem a Auth ativa.
-- [ ] Permitir sobrescrever ou desativar herança em uma request.
-- [ ] Cobrir importação/exportação e execução do Runner.
-- [ ] Testar que segredos não vazam entre coleções ou ambientes.
+- [x] Precedência: request personalizada > pasta mais próxima > coleção.
+- [x] Exibir origem da Auth e os modos Herdar, Personalizar e Sem autenticação.
+- [x] Salvar padrão no nível de coleção ou pasta usando a opção existente de consentimento para credenciais.
+- [x] Não copiar segredos herdados para requests, abas ou histórico; salvar apenas `authMode` e o escopo quando aplicável.
+- [x] Histórico restaura coleção/pasta e ambiente original antes de resolver Auth herdada.
+- [x] Preservar defaults em Vortix JSON, Insomnia v4 e Postman Collection v2.1.
+- [x] Runner resolve a mesma cadeia e as variáveis pelo ambiente ativo.
+- [x] Testar precedência, isolamento entre coleções/ambientes, persistência de abas e proteção recursiva no SQLite.
+- [x] Atualizar README com exemplo JSON, diagrama local e referências oficiais.
+- [x] Verificar UI desktop em SQLite temporário: Auth herdada, GET local e Runner concluídos.
+- [x] Node 67/67, build Release sem avisos, teste integrado de proteção do SQLite aprovado.
 
-### 7. OAuth 2.0
+### 7. README visual e exemplos
+
+**Status: concluída nesta rodada.**
+
+- [x] Incluir diagrama local colorido para herança Auth, combinando com os diagramas já existentes.
+- [x] Adicionar JSON de exemplo e explicar prioridade, ambientes, histórico e Runner.
+- [x] Testar links da imagem e presença dos exemplos junto da suíte Node.
+
+### 8. OAuth 2.0
 
 Fazer depois de consolidar ambientes e herança, pois o fluxo exige armazenar tokens e tratar validade.
 
@@ -106,7 +120,7 @@ Fazer depois de consolidar ambientes e herança, pois o fluxo exige armazenar to
 - [ ] Nunca persistir client_secret sem consentimento explícito.
 - [ ] Testar com servidor OAuth local simulado; documentar callbacks e limites.
 
-### 8. Exemplos de resposta e mock local
+### 9. Exemplos de resposta e mock local
 
 Permitir testar interface e fluxos sem atingir um serviço externo.
 
@@ -116,7 +130,7 @@ Permitir testar interface e fluxos sem atingir um serviço externo.
 - [ ] Impedir que o mock vire um servidor acessível à rede sem configuração.
 - [ ] Adicionar exemplos para sucesso, validação e erro.
 
-### 9. Próximos refinamentos
+### 10. Próximos refinamentos
 
 Só entram depois das features anteriores e dos testes de uso:
 
@@ -128,4 +142,4 @@ Só entram depois das features anteriores e dos testes de uso:
 
 ## Regra de sequência
 
-Fechamos uma feature — testes, documentação e revisão — antes de iniciar a seguinte. A próxima execução começa pela autenticação herdada entre coleção, pasta e request, com testes antes da implementação.
+Fechamos uma feature - testes, documentação e revisão - antes de iniciar a seguinte. A próxima execução começa por OAuth 2.0, com testes antes da implementação.

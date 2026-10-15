@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="430" viewBox="0 0 1200 430" role="img" aria-labelledby="title desc">
+  <title id="title">Herança de Auth no Vortix</title>
+  <desc id="desc">Uma request usa Auth personalizada, ou herda da pasta mais próxima e depois da coleção. Sem autenticação desativa a herança.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#211b35"/><stop offset="1" stop-color="#131923"/></linearGradient>
+    <linearGradient id="violet" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c4a3ff"/><stop offset="1" stop-color="#7853e6"/></linearGradient>
+    <linearGradient id="teal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#75e8c7"/><stop offset="1" stop-color="#138c9f"/></linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd27b"/><stop offset="1" stop-color="#ef8555"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="9" stdDeviation="11" flood-color="#000" flood-opacity=".24"/></filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#8390aa"/></marker>
+  </defs>
+  <rect width="1200" height="430" rx="26" fill="url(#bg)"/>
+  <circle cx="1142" cy="55" r="116" fill="#8b5cf6" opacity=".08"/>
+  <circle cx="39" cy="405" r="128" fill="#2dd4bf" opacity=".05"/>
+  <text x="48" y="48" fill="#79ddc3" font-family="Fira Code,monospace" font-size="12" font-weight="700" letter-spacing="2">VORTIX  /  AUTH</text>
+  <text x="48" y="87" fill="#f7f4ff" font-family="Inter,Segoe UI,sans-serif" font-size="27" font-weight="750">Credencial definida uma vez. Requests reutilizam o contexto.</text>
+  <text x="48" y="115" fill="#aab4c6" font-family="Inter,Segoe UI,sans-serif" font-size="14">Precedência previsível, variável resolvida no ambiente ativo e nenhum segredo copiado para cada request.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="48" y="154" width="310" height="174" rx="17" fill="#28243a" stroke="#6b58a1"/>
+    <rect x="48" y="154" width="6" height="174" rx="3" fill="url(#violet)"/>
+    <circle cx="82" cy="187" r="14" fill="#a78bfa" opacity=".2"/>
+    <text x="76" y="192" fill="#d9c6ff" font-family="Fira Code,monospace" font-size="14" font-weight="700">C</text>
+    <text x="107" y="192" fill="#fff" font-family="Inter,Segoe UI,sans-serif" font-size="18" font-weight="700">Coleção</text>
+    <text x="75" y="231" fill="#c9b4ff" font-family="Fira Code,monospace" font-size="12">Auth padrão</text>
+    <rect x="74" y="246" width="258" height="52" rx="8" fill="#1b1928" stroke="#46405e"/>
+    <text x="88" y="268" fill="#b99dff" font-family="Fira Code,monospace" font-size="11">Bearer {{token}}</text>
+    <text x="88" y="286" fill="#aab4c6" font-family="Inter,Segoe UI,sans-serif" font-size="11">escopo inicial</text>
+  </g>
+
+  <path d="M372 241h58" stroke="#8893aa" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="376" y="224" fill="#96a1b5" font-family="Inter,Segoe UI,sans-serif" font-size="10">override</text>
+  <g filter="url(#shadow)">
+    <rect x="449" y="154" width="310" height="174" rx="17" fill="#1d3032" stroke="#32777a"/>
+    <rect x="449" y="154" width="6" height="174" rx="3" fill="url(#teal)"/>
+    <circle cx="483" cy="187" r="14" fill="#2dd4bf" opacity=".17"/>
+    <text x="477" y="192" fill="#88ead8" font-family="Fira Code,monospace" font-size="14" font-weight="700">P</text>
+    <text x="508" y="192" fill="#fff" font-family="Inter,Segoe UI,sans-serif" font-size="18" font-weight="700">Pasta mais próxima</text>
+    <text x="476" y="231" fill="#83e5d2" font-family="Fira Code,monospace" font-size="12">Auth da pasta</text>
+    <rect x="475" y="246" width="258" height="52" rx="8" fill="#152426" stroke="#31575a"/>
+    <text x="489" y="268" fill="#8ce3d3" font-family="Fira Code,monospace" font-size="11">Bearer {{token}}</text>
+    <text x="489" y="286" fill="#aabfc1" font-family="Inter,Segoe UI,sans-serif" font-size="11">substitui a coleção</text>
+  </g>
+
+  <path d="M773 241h58" stroke="#8893aa" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="777" y="224" fill="#96a1b5" font-family="Inter,Segoe UI,sans-serif" font-size="10">override</text>
+  <g filter="url(#shadow)">
+    <rect x="850" y="154" width="302" height="174" rx="17" fill="#312a27" stroke="#916145"/>
+    <rect x="850" y="154" width="6" height="174" rx="3" fill="url(#amber)"/>
+    <circle cx="884" cy="187" r="14" fill="#fb923c" opacity=".2"/>
+    <text x="878" y="192" fill="#ffd29a" font-family="Fira Code,monospace" font-size="14" font-weight="700">R</text>
+    <text x="909" y="192" fill="#fff" font-family="Inter,Segoe UI,sans-serif" font-size="18" font-weight="700">Request</text>
+    <text x="877" y="231" fill="#ffc37e" font-family="Fira Code,monospace" font-size="12">Herdar / Personalizar</text>
+    <rect x="876" y="246" width="250" height="52" rx="8" fill="#241f1d" stroke="#5b4537"/>
+    <text x="890" y="268" fill="#ffe1b7" font-family="Fira Code,monospace" font-size="11">authMode: "inherit"</text>
+    <text x="890" y="286" fill="#c7b9ad" font-family="Inter,Segoe UI,sans-serif" font-size="11">ou desative: Sem Auth</text>
+  </g>
+
+  <rect x="48" y="355" width="1104" height="1" fill="#fff" opacity=".14"/>
+  <circle cx="58" cy="385" r="5" fill="#70dfbe"/>
+  <text x="73" y="390" fill="#c4cbd8" font-family="Inter,Segoe UI,sans-serif" font-size="12">Herdada de “Minha coleção” aparece na aba Auth.</text>
+  <circle cx="478" cy="385" r="5" fill="#a88bff"/>
+  <text x="493" y="390" fill="#c4cbd8" font-family="Inter,Segoe UI,sans-serif" font-size="12">Histórico guarda o escopo, sem duplicar o token.</text>
+  <circle cx="875" cy="385" r="5" fill="#ffc579"/>
+  <text x="890" y="390" fill="#c4cbd8" font-family="Inter,Segoe UI,sans-serif" font-size="12">Runner usa a mesma precedência.</text>
+</svg>

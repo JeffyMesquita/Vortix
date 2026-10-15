@@ -650,3 +650,137 @@ test('GraphQL adapters round-trip query, variables, and operationName', () => {
   assert.deepEqual(normalizeGraphqlImportBody(insomnia), { ...fields, graphqlVariables: '{\n  "id": "42"\n}' });
   assert.deepEqual(JSON.parse(buildGraphqlBody(fields.graphqlQuery, fields.graphqlVariables, fields.graphqlOperationName)), JSON.parse(insomnia.text));
 });
+
+
+test('Auth inheritance follows request, nearest folder, then collection precedence', () => {
+  const { resolveInheritedAuth, prepareSavedRequest, flattenRequests } = runnerLogic();
+  const scopes = [
+    { auth: { authType: 'bearer', bearerToken: 'collection-token' } },
+    { auth: { authType: 'basic', basicUsername: 'folder-user', basicPassword: 'folder-pass' } },
+    { auth: { authType: 'apiKey', apiKeyName: 'X-Nested-Key', apiKeyValue: 'nested-key', apiKeyLocation: 'header' } }
+  ];
+  const inherited = resolveInheritedAuth({ authMode: 'inherit' }, scopes);
+  assert.equal(inherited.authType, 'apiKey');
+  assert.equal(inherited.apiKeyValue, 'nested-key');
+  assert.equal(resolveInheritedAuth({ authMode: 'inherit' }, scopes.slice(0, 2)).basicPassword, 'folder-pass');
+  assert.equal(resolveInheritedAuth({ authMode: 'inherit' }, scopes.slice(0, 1)).bearerToken, 'collection-token');
+  assert.equal(resolveInheritedAuth({ authMode: 'custom', authType: 'bearer', bearerToken: 'request-token' }, scopes).bearerToken, 'request-token');
+  assert.equal(resolveInheritedAuth({ authMode: 'none', authType: 'bearer', bearerToken: 'ignored' }, scopes).authType, 'none');
+  assert.equal(resolveInheritedAuth({ authType: 'none' }, scopes).authType, 'none', 'legacy requests keep explicit auth');
+  const request = prepareSavedRequest({ method: 'GET', route: '/me', authMode: 'inherit' }, {}, {}, false, scopes);
+  assert.equal(request.authType, 'apiKey');
+  assert.equal(request.apiKeyName, 'X-Nested-Key');
+  assert.equal(request.apiKeyValue, 'nested-key');
+
+  const collection = { name: 'API', auth: scopes[0].auth, requests: [], folders: [{ id: 'folder', name: 'Folder', auth: scopes[1].auth, requests: [{ method: 'GET', route: '/me' }], folders: [] }] };
+  const flattened = flattenRequests(collection);
+  assert.equal(flattened[0].authScopes.length, 2);
+  assert.equal(flattened[0].authScopes[1].auth.authType, 'basic');
+});
+
+test('Auth tab exposes inheritance source, override, disable, and default controls', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  for (const id of ['auth-inheritance-mode', 'auth-inheritance-source', 'save-auth-default']) assert.ok(html.includes('id="' + id + '"'), 'missing Auth inheritance control: ' + id);
+});
+
+test('Auth persistence keeps inherited secrets on their parent and honors credential opt-in', () => {
+  const { persistAuthFields } = runnerLogic();
+  const inherited = persistAuthFields({ authMode: 'inherit', authType: 'bearer', bearerToken: 'parent-token' }, true);
+  assert.equal(inherited.authMode, 'inherit');
+  assert.equal(inherited.authType, 'none');
+  assert.equal(inherited.bearerToken, '');
+
+  const omitted = persistAuthFields({ authMode: 'custom', authType: 'basic', basicUsername: 'user', basicPassword: 'secret' }, false);
+  assert.equal(omitted.authType, 'basic');
+  assert.equal(omitted.basicUsername, '');
+  assert.equal(omitted.basicPassword, '');
+  assert.equal(omitted.authOmitted, true);
+
+  const saved = persistAuthFields({ authMode: 'custom', authType: 'apiKey', apiKeyName: 'X-API-Key', apiKeyLocation: 'header', apiKeyValue: 'secret' }, true);
+  assert.equal(saved.apiKeyValue, 'secret');
+  assert.equal(saved.authOmitted, false);
+});
+
+test('Auth import distinguishes inheritance from explicit no-auth and overrides', () => {
+  const { normalizeImportedAuthMode } = runnerLogic();
+  assert.equal(normalizeImportedAuthMode(undefined), 'inherit');
+  assert.equal(normalizeImportedAuthMode({}), 'inherit');
+  assert.equal(normalizeImportedAuthMode({ type: 'inherit' }), 'inherit');
+  assert.equal(normalizeImportedAuthMode({ type: 'noauth' }), 'none');
+  assert.equal(normalizeImportedAuthMode({ type: 'none' }), 'none');
+  assert.equal(normalizeImportedAuthMode({ type: 'bearer' }), 'custom');
+});
+
+test('inherited Auth stays isolated by collection and resolves per active environment', () => {
+  const { prepareSavedRequest } = runnerLogic();
+  const request = { method: 'GET', route: '/me', authMode: 'inherit' };
+  const first = prepareSavedRequest(request, { token: 'first-env-token' }, {}, false, [{ id: 'c1', name: 'First', auth: { authType: 'bearer', bearerToken: '{{token}}' } }]);
+  const second = prepareSavedRequest(request, { token: 'second-env-token' }, {}, false, [{ id: 'c2', name: 'Second', auth: { authType: 'bearer', bearerToken: '{{token}}' } }]);
+  assert.equal(first.bearerToken, 'first-env-token');
+  assert.equal(second.bearerToken, 'second-env-token');
+  assert.notEqual(first.bearerToken, second.bearerToken);
+});
+
+test('Persisted workspace tabs keep inherited auth at its collection or folder scope', () => {
+  const { normalizeWorkspaceTabs } = runnerLogic();
+  const state = normalizeWorkspaceTabs({ activeId: 'tab-1', tabs: [{ id: 'tab-1', saveBearerToken: true, request: { method: 'GET', authMode: 'inherit', authType: 'bearer', bearerToken: 'parent-token' } }] });
+  assert.equal(state.tabs[0].request.authMode, 'inherit');
+  assert.equal(state.tabs[0].request.authType, 'none');
+  assert.equal(state.tabs[0].request.bearerToken, '');
+});
+
+test('collection and folder Auth defaults round-trip through Vortix, Insomnia, and Postman adapters', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const contracts = [
+    '...(node.auth?{auth:exportAuthConfig(node.auth,includeBearer)}:{})',
+    '...exportAuthConfig(request,includeBearer,true)',
+    'if(document.auth)root.auth=exportAuthConfig(importedPostmanAuth(document.auth,[]),true)',
+    'if(item.auth)folder.auth=exportAuthConfig(importedPostmanAuth(item.auth,[]),true)',
+    'if(collection.auth)result.auth=postmanAuthDefinition(collection.auth,includeBearer)',
+    'if(folder.auth)item.auth=postmanAuthDefinition(folder.auth,includeBearer)',
+    "if(authMode!=='inherit')item.request.auth=postmanAuthDefinition(request,includeBearer)",
+    "if(collection.auth){const id='__request_group_'+(++folderNumber)+'__',group={_id:id,_type:'request_group',parentId:rootParent,name:'Auth padrão'",
+    'addNode(collection,rootParent)',
+    'if(folder.auth)group.authentication=insomniaAuthDefinition(folder.auth,includeBearer)',
+    "const authentication=authMode==='inherit'?{}:insomniaAuthDefinition(request,includeBearer)",
+    'if(rootAuth&&rootAuth.type)root.auth=exportAuthConfig(importedInsomniaAuth(rootAuth,[],\'/\'),true)',
+    'if(auth&&auth.type)group.auth=exportAuthConfig(importedInsomniaAuth(auth,[],\'/\'),true)',
+    'safe.auth=exportAuthConfig(source.auth,keepAuth)'
+  ];
+  for (const contract of contracts) assert.ok(app.includes(contract), 'missing Auth interop contract: ' + contract);
+});
+
+test('README explains inherited Auth with an example and local visual', () => {
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+  const diagramPath = path.join(__dirname, 'docs', 'images', 'vortix-auth-inheritance.svg');
+  assert.ok(readme.includes('vortix-auth-inheritance.svg'));
+  assert.ok(readme.includes('"authMode": "inherit"'));
+  assert.ok(readme.includes('pasta mais próxima'));
+  assert.ok(fs.existsSync(diagramPath));
+  assert.match(fs.readFileSync(diagramPath, 'utf8'), /<svg[\s\S]*aria-labelledby=/);
+});
+
+test('Insomnia empty request Auth retains explicit API-key headers before inheriting', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.ok(app.includes("if(authMode==='none'||type==='inherit')return{authMode,authType:'none'}"));
+  assert.ok(app.includes('const headerIndex=headers.findIndex(line=>/^(?:x[-_]?api[-_]?key|api[-_]?key)'));
+});
+
+test('Insomnia export maps collection Auth to a top-level inherited-auth folder', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.ok(app.includes("name:'Auth padrão'"), 'Insomnia collection Auth should be represented by a folder');
+  assert.ok(app.includes('authentication:insomniaAuthDefinition(collection.auth,includeBearer)'), 'the wrapper folder should carry the collection Auth');
+});
+
+test('history restores environment and clears stale collection scope before resolving inherited Auth', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const saveStart = app.indexOf('async function saveHistory(request){'), saveEnd = app.indexOf('function applyHistoryEntry', saveStart);
+  const applyStart = app.indexOf('function applyHistoryEntry(entry,notify=true){'), applyEnd = app.indexOf('function tokenHistorySnapshot', applyStart);
+  const save = app.slice(saveStart, saveEnd), apply = app.slice(applyStart, applyEnd);
+  assert.ok(save.includes('environmentId:String(request.environmentId||\'default\')'));
+  const resetScope = apply.indexOf("selectedContainer={collectionId:'',folderId:''}");
+  const restoreEnvironment = apply.indexOf('activeEnvironmentId=entry.environmentId');
+  const renderEnvironment = apply.indexOf('renderEnvironmentSelect()');
+  const resolveAuth = apply.indexOf('applyAuthFields(entry)');
+  assert.ok(resetScope >= 0 && restoreEnvironment > resetScope && renderEnvironment > restoreEnvironment && resolveAuth > renderEnvironment);
+});
