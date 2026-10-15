@@ -347,7 +347,7 @@ internal sealed class LocalDataStore
     private static bool IsSensitiveName(string name)
     {
         var compact = new string(name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
-        return new[] { "authorization", "auth", "bearer", "token", "secret", "password", "passwd", "senha", "credential", "cookie", "apikey", "privatekey" }
+        return new[] { "authorization", "auth", "bearer", "token", "secret", "password", "passwd", "basicusername", "senha", "credential", "cookie", "apikey", "privatekey" }
             .Any(part => compact.Contains(part, StringComparison.Ordinal));
     }
 

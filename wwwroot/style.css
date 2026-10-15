@@ -762,3 +762,13 @@ textarea.compact { min-height: 165px; }
 .curl-import-dialog textarea { width: 100%; min-height: 150px; resize: vertical; font: 12px/1.55 var(--app-font-family); }
 .curl-import-dialog .curl-import-error { margin: 0; color: var(--danger); }
 .curl-import-dialog .curl-import-error[hidden] { display: none; }
+.auth-panel > label { display: block; margin: 12px 0 5px; }
+.auth-panel > select { width: min(100%, 280px); }
+.auth-credentials { display: grid; gap: 10px; margin-top: 12px; }
+.auth-credentials > div { display: grid; gap: 5px; min-width: 0; }
+.auth-credentials input, .auth-credentials select { width: 100%; min-width: 0; }
+.auth-basic { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.auth-api-key { grid-template-columns: minmax(130px, .9fr) minmax(0, 1.2fr) minmax(120px, .7fr); }
+.auth-api-key #api-key-query-warning { grid-column: 1 / -1; margin: 0; }
+.auth-bearer-fields[hidden], .auth-credentials[hidden], #api-key-query-warning[hidden], #token-helper[hidden] { display: none !important; }
+@media (max-width: 600px) { .auth-basic, .auth-api-key { grid-template-columns: 1fr; } }

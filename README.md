@@ -20,6 +20,7 @@
 - [Requisitos](#requisitos)
 - [Início rápido](#início-rápido)
 - [Primeiro fluxo](#primeiro-fluxo)
+- [Autenticação](#autenticação)
 - [Importar cURL](#importar-curl)
 - [Importar OpenAPI JSON](#importar-openapi-json)
 - [Ambientes e variáveis](#ambientes-e-variáveis)
@@ -31,6 +32,7 @@
 - [Desenvolvimento e validação](#desenvolvimento-e-validação)
 - [Estrutura do projeto](#estrutura-do-projeto)
 - [Solução de problemas](#solução-de-problemas)
+- [Plano de ação](ROADMAP.md)
 - [Licenças das fontes](#licenças-das-fontes)
 
 ## Visão geral
@@ -43,7 +45,7 @@ A aplicação escuta somente em loopback e foi pensada para uso em computador de
 
 ## Recursos
 
-- **Editor de requests:** GET, HEAD, POST, PUT, PATCH, DELETE e OPTIONS; URL base, rota, Params, Headers, Body e Bearer.
+- **Editor de requests:** GET, HEAD, POST, PUT, PATCH, DELETE e OPTIONS; URL base, rota, Params, Headers, Body e Auth Bearer, Basic ou API Key.
 - **Coleções:** coleções, pastas e subpastas para organizar requests.
 - **Ambientes:** grupos de ambientes e variáveis próprias, com substituição por templates como <code>{{baseUrl}}</code> e <code>{{token}}</code>.
 - **Abas e histórico:** até 12 requests abertas; abas, histórico, coleções, ambientes e preferências ficam salvos localmente.
@@ -125,6 +127,42 @@ Para um body JSON, escolha **Body**, informe o conteúdo e use o botão de forma
 Todos os métodos suportados estão disponíveis no seletor. POST, PUT, PATCH e DELETE exigem digitar <code>TESTE</code>, marcar a confirmação e aceitar a confirmação final do navegador. No Runner, gravações também exigem a frase e confirmações correspondentes.
 
 Essa proteção é uma confirmação manual. O Vortix não consegue determinar se os dados ou o ambiente de destino são descartáveis. GET, HEAD e OPTIONS não aceitam body.
+
+## Autenticação
+
+<p align="center">
+  <img src="docs/images/vortix-auth-modes.svg" alt="Modos Bearer, Basic Auth e API Key no Vortix" width="100%">
+</p>
+
+A aba **Auth** oferece três formas comuns de autenticar requests. Selecione o tipo, preencha os campos e reutilize variáveis do ambiente, como <code>{{token}}</code>, <code>{{usuario}}</code> ou <code>{{apiKey}}</code>.
+
+### Bearer
+
+Use o token direto ou uma variável. O Vortix monta o header Authorization ao enviar:
+
+~~~http
+Authorization: Bearer {{token}}
+~~~
+
+### Basic Auth
+
+Informe usuário e senha em campos separados. O Vortix cria o header Basic durante o envio; você não precisa codificar Base64 manualmente.
+
+### API Key
+
+Informe nome do campo, valor e local de envio. Prefira **Header**. A opção **Query Params** fica disponível para APIs que exigem esse formato e pede confirmação porque valores na URL podem aparecer em logs.
+
+~~~http
+X-API-Key: {{apiKey}}
+~~~
+
+### Salvamento e intercâmbio
+
+A opção **Salvar credenciais de Auth nas requests locais** controla histórico, abas e coleções. Desmarcada, o Vortix mantém os valores só na sessão e não os grava nessas áreas; o tipo de Auth e a posição da API Key continuam disponíveis para completar depois. SQLite protege campos sensíveis com ASP.NET Core Data Protection.
+
+Na importação, você escolhe se guarda credenciais. Na exportação, elas ficam fora por padrão. Marcar **Incluir credenciais de Auth e variáveis sensíveis** grava valores diretamente no JSON sem criptografia.
+
+Postman Collection v2.1 importa e exporta Bearer, Basic e API Key. Insomnia v4 importa Bearer e Basic; API Key exportada pelo Vortix aparece como header ou parâmetro de query, mantendo a chamada HTTP reutilizável. Veja também a documentação oficial de [autorização no Postman](https://learning.postman.com/docs/use/send-requests/authorization/authorization-types/) e [autenticação de requests no Insomnia](https://developer.konghq.com/insomnia/request-authentication/).
 
 ## Importar cURL
 
@@ -249,7 +287,7 @@ Cada rodada aceita até 500 requests. Credenciais solicitadas manualmente pelo h
 | OpenAPI 3.0/3.1/3.2 JSON | Sim | - |
 | Ambiente Postman | Sim | Acompanha a coleção exportada |
 
-Ao importar tokens, o Vortix pede confirmação para salvá-los com proteção local; também é possível importar sem esses valores. Durante a exportação, Bearer e variáveis sensíveis são omitidos por padrão. O <code>client_secret</code>, senhas e chaves privadas não são incluídos.
+Na importação, o Vortix pede confirmação antes de guardar credenciais Bearer, Basic, API Key e variáveis sensíveis com proteção local. A exportação omite credenciais por padrão; se marcar a opção, o JSON poderá conter esses valores sem criptografia. Cookies e chaves privadas continuam fora do export.
 
 Exports Insomnia e Postman podem conter scripts After-response/Post-response gerados para captura e testes. O Vortix pede confirmação antes de gerar esses scripts. Revise o arquivo e o código antes de importá-lo em outro cliente.
 
@@ -271,7 +309,7 @@ Na primeira execução, o Vortix tenta importar os dados antigos do IndexedDB do
 
 O SQLite inteiro não é criptografado. ASP.NET Core Data Protection protege campos reconhecidos como sensíveis e bodies não vazios. A proteção depende do key ring e da identidade que executa o aplicativo. Mantenha acesso às chaves ao mover o banco ou trocar a identidade do processo.
 
-O Bearer só é salvo conforme a opção escolhida no histórico ou na request. No helper **Solicitar token**, as credenciais são pedidas a cada envio, não são salvas no request nem no histórico e são limpas depois do uso.
+As credenciais de Auth seguem a opção de salvamento da request ou do histórico. No helper **Solicitar token**, client_id/client_secret são pedidos a cada envio e não entram no histórico.
 
 ### Backup do workspace
 
@@ -288,7 +326,7 @@ A restauração substitui o workspace local, incluindo histórico, coleções, a
 - A interface não oferece autenticação. Não exponha o serviço à rede local ou à internet por proxy reverso.
 - HTTPS é recomendado para a API de destino. HTTP em localhost funciona; HTTP em outros hosts exige habilitação explícita na request e confirmação antes do envio. HTTP não cifra tokens, headers ou body.
 - O Vortix valida URL base e rota, não permite trocar de host pela rota e bloqueia alguns cabeçalhos de transporte. Redirecionamentos HTTP não são seguidos automaticamente.
-- Authorization deve ser informado na aba **Auth → Bearer**, não como header manual.
+- Configure a autenticação na aba **Auth**. O Vortix gera o header Authorization para Bearer e Basic; não informe esse header manualmente.
 - Requests importadas não executam scripts arbitrários.
 - Arquivos SQLite, key rings, configurações locais e segredos estão excluídos pelo <code>.gitignore</code>. Não remova essas regras ao preparar um fork ou publicação.
 

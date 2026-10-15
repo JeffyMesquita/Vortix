@@ -165,9 +165,44 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
     if (call is null || string.IsNullOrWhiteSpace(call.BaseUrl) || call.BaseUrl.Length > 2048 ||
         string.IsNullOrWhiteSpace(call.Route) || call.Route.Length > 4096 || (call.Body?.Length ?? 0) > 900_000 ||
         (call.Headers?.Length ?? 0) > 32_000 || (call.BearerToken?.Length ?? 0) > 8192 ||
-        (call.TokenClientId?.Length ?? 0) > 512 || (call.TokenClientSecret?.Length ?? 0) > 8192)
+        (call.TokenClientId?.Length ?? 0) > 512 || (call.TokenClientSecret?.Length ?? 0) > 8192 || (call.AuthType?.Length ?? 0) > 16 || (call.BasicUsername?.Length ?? 0) > 1024 || (call.BasicPassword?.Length ?? 0) > 8192 || (call.ApiKeyName?.Length ?? 0) > 128 || (call.ApiKeyLocation?.Length ?? 0) > 16 || (call.ApiKeyValue?.Length ?? 0) > 8192)
     {
         return Error(StatusCodes.Status400BadRequest, "Revise URL, rota e tamanho dos campos.");
+    }
+
+    var providedAuthType = call.AuthType?.Trim() ?? string.Empty;
+    var authType = providedAuthType.Length == 0
+        ? (string.IsNullOrEmpty(call.BearerToken) ? "none" : "bearer")
+        : providedAuthType.ToLowerInvariant();
+    if (authType == "api-key") authType = "apikey";
+    if (authType is not ("none" or "bearer" or "basic" or "apikey"))
+    {
+        return Error(StatusCodes.Status400BadRequest, "Tipo de autenticação não suportado.");
+    }
+
+    var basicUsername = call.BasicUsername ?? string.Empty;
+    var basicPassword = call.BasicPassword ?? string.Empty;
+    var apiKeyName = call.ApiKeyName ?? string.Empty;
+    var apiKeyValue = call.ApiKeyValue ?? string.Empty;
+    var apiKeyLocation = string.IsNullOrWhiteSpace(call.ApiKeyLocation) ? "header" : call.ApiKeyLocation.Trim().ToLowerInvariant();
+    if (authType == "basic" &&
+        (string.IsNullOrWhiteSpace(basicUsername) || basicUsername.Contains(':') ||
+         basicUsername.Contains('\r') || basicUsername.Contains('\n') ||
+         basicPassword.Contains('\r') || basicPassword.Contains('\n')))
+    {
+        return Error(StatusCodes.Status400BadRequest, "Revise o usuário e a senha de Basic Auth.");
+    }
+    if (authType == "apikey" &&
+        (string.IsNullOrWhiteSpace(apiKeyName) || apiKeyValue.Length == 0 ||
+         apiKeyName.Contains('\r') || apiKeyName.Contains('\n') ||
+         apiKeyValue.Contains('\r') || apiKeyValue.Contains('\n') ||
+         apiKeyLocation is not ("header" or "query")))
+    {
+        return Error(StatusCodes.Status400BadRequest, "Revise o nome, valor e local da API Key.");
+    }
+    if (authType == "apikey" && apiKeyLocation == "header" && !IsValidApiKeyHeaderName(apiKeyName))
+    {
+        return Error(StatusCodes.Status400BadRequest, "Nome de header da API Key inválido ou reservado.");
     }
 
     if (!Uri.TryCreate(call.BaseUrl.Trim(), UriKind.Absolute, out var baseUri) ||
@@ -265,20 +300,37 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
         return Error(StatusCodes.Status400BadRequest, "URL final inválida.");
     }
 
-    var token = (call.BearerToken ?? string.Empty).Trim();
-    if (token.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+    if (authType == "apikey" && apiKeyLocation == "query")
     {
-        token = token[7..].Trim();
-    }
-    if (token.Contains('\r') || token.Contains('\n'))
-    {
-        return Error(StatusCodes.Status400BadRequest, "Token Bearer inválido.");
+        if (ContainsQueryParameter(targetUri, apiKeyName))
+        {
+            return Error(StatusCodes.Status400BadRequest, "API Key já aparece nos Params da request.");
+        }
+        var builder = new UriBuilder(targetUri);
+        var apiKeyPair = Uri.EscapeDataString(apiKeyName) + "=" + Uri.EscapeDataString(apiKeyValue);
+        var existingQuery = builder.Query.TrimStart('?');
+        builder.Query = existingQuery.Length == 0 ? apiKeyPair : existingQuery + "&" + apiKeyPair;
+        targetUri = builder.Uri;
     }
 
     using var request = new HttpRequestMessage(new HttpMethod(method), targetUri);
-    if (token.Length > 0)
+    if (authType == "bearer")
     {
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var token = (call.BearerToken ?? string.Empty).Trim();
+        if (token.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            token = token[7..].Trim();
+        }
+        if (token.Contains('\r') || token.Contains('\n'))
+        {
+            return Error(StatusCodes.Status400BadRequest, "Token Bearer inválido.");
+        }
+        if (token.Length > 0) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    }
+    else if (authType == "basic")
+    {
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(basicUsername + ":" + basicPassword));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", encoded);
     }
     if (isTokenRequest && call.TokenCredentialMode == "body")
     {
@@ -296,6 +348,18 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
     if (!TryApplyHeaders(call.Headers ?? string.Empty, request, out var headerError))
     {
         return Error(StatusCodes.Status400BadRequest, headerError);
+    }
+
+    if (authType == "apikey" && apiKeyLocation == "header")
+    {
+        if (request.Headers.Contains(apiKeyName) || (request.Content?.Headers.Contains(apiKeyName) ?? false))
+        {
+            return Error(StatusCodes.Status400BadRequest, "Header da API Key já aparece na request.");
+        }
+        if (!request.Headers.TryAddWithoutValidation(apiKeyName, apiKeyValue))
+        {
+            return Error(StatusCodes.Status400BadRequest, "Não foi possível aplicar o header da API Key.");
+        }
     }
 
     try
@@ -357,6 +421,31 @@ static bool IsValidTokenFieldName(string? value) =>
     value is { Length: > 0 and <= 128 } && char.IsAsciiLetter(value[0]) &&
     value.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-' or '.');
 
+static bool IsValidApiKeyHeaderName(string value) =>
+    value.Length is > 0 and <= 128 &&
+    value.All(character =>
+        char.IsAsciiLetterOrDigit(character) ||
+        "!#$%&'*+-.^_|~".Contains(character) ||
+        character == (char)96) &&
+    !new[] { "Authorization", "Proxy-Authorization", "Host", "Content-Length", "Transfer-Encoding", "Content-Type", "Cookie" }
+        .Contains(value, StringComparer.OrdinalIgnoreCase);
+
+static bool ContainsQueryParameter(Uri uri, string name)
+{
+    foreach (var pair in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+    {
+        var separator = pair.IndexOf('=');
+        var rawName = separator < 0 ? pair : pair[..separator];
+        try
+        {
+            if (Uri.UnescapeDataString(rawName.Replace('+', ' ')).Equals(name, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        catch (UriFormatException) { return false; }
+    }
+
+    return false;
+}
+
 static IResult Error(int status, string message) => Results.Json(new { error = message }, statusCode: status);
 
 static bool IsLoopbackHost(string host) =>
@@ -415,6 +504,24 @@ static bool TryApplyHeaders(string text, HttpRequestMessage request, out string 
 
 sealed class ApiCall
 {
+    /// <summary>Gets or sets the authentication type used for the outgoing API request.</summary>
+    /// <value>One of <c>none</c>, <c>bearer</c>, <c>basic</c>, or <c>apiKey</c>. An empty value preserves legacy Bearer requests.</value>
+    public string AuthType { get; init; } = string.Empty;
+    /// <summary>Gets or sets the HTTP Basic username.</summary>
+    /// <value>The username consumed when <see cref="AuthType"/> is <c>basic</c>.</value>
+    public string BasicUsername { get; init; } = string.Empty;
+    /// <summary>Gets or sets the HTTP Basic password.</summary>
+    /// <value>The password consumed when <see cref="AuthType"/> is <c>basic</c>.</value>
+    public string BasicPassword { get; init; } = string.Empty;
+    /// <summary>Gets or sets the API Key name.</summary>
+    /// <value>A header name or query parameter name.</value>
+    public string ApiKeyName { get; init; } = string.Empty;
+    /// <summary>Gets or sets where the API Key is sent.</summary>
+    /// <value>Either <c>header</c> or <c>query</c>.</value>
+    public string ApiKeyLocation { get; init; } = "header";
+    /// <summary>Gets or sets the API Key value.</summary>
+    /// <value>The credential consumed when <see cref="AuthType"/> is <c>apiKey</c>.</value>
+    public string ApiKeyValue { get; init; } = string.Empty;
     public string BaseUrl { get; init; } = string.Empty;
     public string Route { get; init; } = string.Empty;
     public string Method { get; init; } = "GET";

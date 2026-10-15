@@ -402,6 +402,24 @@ test('workspace exposes an accessible open-request tablist and a new-tab action'
   assert.match(html, /aria-label="Requests abertas"/);
   assert.match(html, /id="add-workspace-tab"/);
 });
+test('Runner resolves Basic and API Key credentials from environment variables', () => {
+  const { prepareSavedRequest } = runnerLogic();
+  const basic = prepareSavedRequest({ method: 'GET', route: '/profile', authType: 'basic', basicUsername: '{{username}}', basicPassword: '{{password}}' }, { username: 'alice', password: 'p@ss' }, {}, true);
+  assert.deepEqual({ authType: basic.authType, basicUsername: basic.basicUsername, basicPassword: basic.basicPassword }, { authType: 'basic', basicUsername: 'alice', basicPassword: 'p@ss' });
+  const apiKey = prepareSavedRequest({ method: 'GET', route: '/profile', authType: 'apiKey', apiKeyName: 'X-API-Key', apiKeyLocation: 'header', apiKeyValue: '{{key}}' }, { key: 'key-canary' }, {}, true);
+  assert.deepEqual({ authType: apiKey.authType, apiKeyName: apiKey.apiKeyName, apiKeyLocation: apiKey.apiKeyLocation, apiKeyValue: apiKey.apiKeyValue }, { authType: 'apiKey', apiKeyName: 'X-API-Key', apiKeyLocation: 'header', apiKeyValue: 'key-canary' });
+});
+
+test('workspace tabs omit all auth credentials when local credential saving is disabled', () => {
+  const { normalizeWorkspaceTabs } = runnerLogic();
+  const state = normalizeWorkspaceTabs({ tabs: [
+    { id: 'private', title: 'Private', saveBearerToken: false, request: { method: 'GET', authType: 'basic', basicUsername: 'alice', basicPassword: 'pass-canary', apiKeyName: 'X-API-Key', apiKeyValue: 'key-canary' } },
+    { id: 'saved', title: 'Saved', saveBearerToken: true, request: { method: 'GET', authType: 'apiKey', basicUsername: '', basicPassword: '', apiKeyName: 'X-API-Key', apiKeyValue: 'saved-key' } }
+  ] });
+  assert.deepEqual([state.tabs[0].request.basicUsername, state.tabs[0].request.basicPassword, state.tabs[0].request.apiKeyValue], ['', '', '']);
+  assert.equal(state.tabs[1].request.apiKeyValue, 'saved-key');
+});
+
 test('workspace tabs omit Bearer when that tab disables local token saving', () => {
   const { normalizeWorkspaceTabs } = runnerLogic();
   const state = normalizeWorkspaceTabs({ tabs: [

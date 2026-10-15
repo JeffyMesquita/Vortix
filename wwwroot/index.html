@@ -122,20 +122,34 @@
           </div>
 
           <div class="tab-panel auth-panel" data-editor-panel="auth" hidden>
-            <div class="panel-heading"><div><h2>Bearer Token</h2><p>Use o token de acesso emitido pela API.</p></div><span class="auth-badge">Bearer</span></div>
-            <div class="token-row">
-              <label class="visually-hidden" for="bearer-token">Token Bearer</label>
-              <input id="bearer-token" type="password" autocomplete="new-password" placeholder="Cole o token sem o prefixo Bearer" spellcheck="false">
-              <button class="button secondary compact-button" id="clear-token" type="button">Limpar</button>
+            <div class="panel-heading"><div><h2>Autentica&ccedil;&atilde;o</h2><p>Escolha como esta request comprova identidade.</p></div><span class="auth-badge" id="auth-type-badge">Bearer</span></div>
+            <label for="auth-type">Tipo de autentica&ccedil;&atilde;o</label>
+            <select id="auth-type"><option value="bearer">Bearer Token</option><option value="basic">Basic Auth</option><option value="apiKey">API Key</option><option value="none">Sem autentica&ccedil;&atilde;o</option></select>
+            <div id="auth-bearer-fields">
+              <div class="token-row">
+                <label class="visually-hidden" for="bearer-token">Token Bearer</label>
+                <input id="bearer-token" type="password" autocomplete="new-password" placeholder="Cole o token sem o prefixo Bearer" spellcheck="false">
+                <button class="button secondary compact-button" id="clear-token" type="button">Limpar</button>
+              </div>
+            </div>
+            <div class="auth-credentials auth-basic" id="auth-basic-fields" hidden>
+              <div><label for="basic-username">Usu&aacute;rio</label><input id="basic-username" type="text" autocomplete="off" spellcheck="false"></div>
+              <div><label for="basic-password">Senha</label><input id="basic-password" type="password" autocomplete="new-password" spellcheck="false"></div>
+            </div>
+            <div class="auth-credentials auth-api-key" id="auth-api-key-fields" hidden>
+              <div><label for="api-key-name">Nome do campo</label><input id="api-key-name" type="text" value="X-API-Key" autocomplete="off" spellcheck="false"></div>
+              <div><label for="api-key-value">Valor da API Key</label><input id="api-key-value" type="password" autocomplete="new-password" spellcheck="false"></div>
+              <div><label for="api-key-location">Enviar em</label><select id="api-key-location"><option value="header">Header</option><option value="query">Query Params</option></select></div>
+              <p class="warning-text" id="api-key-query-warning" hidden>API Key em query pode aparecer em logs do servidor. Prefira header se a API permitir.</p>
             </div>
             <label class="check-row history-token-option" for="save-token-history">
               <input id="save-token-history" type="checkbox" checked>
-              <span>Salvar Bearer nas requisições locais</span>
+              <span>Salvar credenciais de Auth nas requests locais</span>
             </label>
-            <p class="hint token-history-warning">Valores sensíveis novos usam proteção de dados. Migre os antigos em Configurações; desmarque para não salvar Bearer.</p>
+            <p class="hint token-history-warning">Segredos salvos usam prote&ccedil;&atilde;o de dados no SQLite. Desmarque para mant&ecirc;-los apenas nesta sess&atilde;o.</p>
             <details class="token-helper" id="token-helper">
               <summary>Solicitar token</summary>
-              <p class="hint">Configure a rota e os nomes dos campos conforme a API. Essas preferências ficam salvas localmente; valores de credencial são pedidos a cada envio e nunca entram no histórico.</p>
+              <p class="hint">Configure a rota e os nomes dos campos conforme a API. Essas prefer&ecirc;ncias ficam salvas localmente; valores de credencial s&atilde;o pedidos a cada envio e nunca entram no hist&oacute;rico.</p>
               <label for="token-route">Rota do endpoint de token</label>
               <input id="token-route" type="text" autocomplete="off" spellcheck="false" placeholder="/oauth/token">
               <div class="token-config-fields">
@@ -148,13 +162,12 @@
               </div>
               <label for="token-credential-mode">Enviar credenciais em</label>
               <select id="token-credential-mode"><option value="body">JSON no corpo (recomendado)</option><option value="query">Params da URL (se o endpoint exigir; pode aparecer em logs)</option></select>
-              <p class="warning-text">HTTP não cifra credenciais. Confirme o destino antes de solicitar token.</p>
+              <p class="warning-text">HTTP n&atilde;o cifra credenciais. Confirme o destino antes de solicitar token.</p>
               <label class="check-row token-environment-option" for="save-token-environment"><input id="save-token-environment" type="checkbox" checked><span>Salvar o token obtido como <code>{{token}}</code> no ambiente ativo.</span></label>
-              <p class="hint">Depois, use <code>{{token}}</code> em Params, body ou URL base. Novos tokens usam proteção local; migre registros antigos em Configurações.</p>
+              <p class="hint">Depois, use <code>{{token}}</code> em Params, body ou URL base. Novos tokens usam prote&ccedil;&atilde;o local; migre registros antigos em Configura&ccedil;&otilde;es.</p>
               <button class="button secondary" id="request-token" type="button" disabled>Obter token</button>
             </details>
           </div>
-
           <div class="tab-panel scripts-panel" data-editor-panel="scripts" hidden>
             <div class="panel-heading">
               <div><h2>Resposta → variável</h2><p>Guarda um valor da resposta no ambiente ativo.</p></div>
@@ -404,8 +417,8 @@ insomnia.environment.set("token", body.access_token);</code></pre>
       <div class="dialog-heading"><div><p class="eyebrow">INTERCÂMBIO</p><h2>Exportar coleção</h2><p class="dialog-description">Leve esta coleção para outro workspace.</p></div><button class="icon-button dialog-close" id="close-export-dialog" type="button" aria-label="Fechar">×</button></div>
       <label for="export-collection-select">Coleção</label><select id="export-collection-select" required></select>
       <label for="export-format">Formato</label><select id="export-format"><option value="api-studio">Vortix JSON</option><option value="insomnia-v4">Insomnia JSON (v4)</option><option value="postman-v21">Postman Collection v2.1</option></select>
-      <label class="check-row export-token-option" for="export-include-bearer"><input id="export-include-bearer" type="checkbox"><span>Incluir Bearer e variáveis de token</span></label>
-      <p class="hint">O export inclui requests, pastas, scripts e o ambiente ativo. Bearer é omitido por padrão; <code>client_secret</code> e campos sensíveis são removidos. No Insomnia, scripts exportados podem executar ao enviar.</p>
+      <label class="check-row export-token-option" for="export-include-bearer"><input id="export-include-bearer" type="checkbox"><span>Incluir credenciais de Auth e variáveis sensíveis</span></label>
+      <p class="hint">O export inclui requests, pastas, scripts e o ambiente ativo. Credenciais são omitidas por padrão; ao incluí-las, o arquivo JSON fica sem criptografia. No Insomnia, scripts exportados podem executar ao enviar.</p>
       <div class="dialog-actions"><button class="button secondary" id="cancel-export-dialog" type="button">Cancelar</button><button class="button primary" id="confirm-export-collection" type="submit">Baixar JSON</button></div>
     </form>
   </dialog>

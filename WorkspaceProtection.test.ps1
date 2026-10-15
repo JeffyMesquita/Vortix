@@ -12,6 +12,7 @@ $oldDatabasePath = $env:ApiStudio__DatabasePath
 $oldTestSecrets = $env:API_STUDIO_TEST_SECRETS
 $oldTestRecord = $env:API_STUDIO_TEST_RECORD
 $server = $null
+$authMockServer = $null
 $passed = $false
 New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
 function Start-TestApi([string]$logName) {
@@ -23,6 +24,18 @@ function Start-TestApi([string]$logName) {
     }
     if (-not $ready) { throw 'Temporary API did not become ready.' }
     return $process
+}
+function Start-AuthCaptureServer([int]$requestCount) {
+    $readyPath = Join-Path $temporaryRoot 'auth-mock.port'
+    $scriptPath = Join-Path $projectRoot 'AuthCaptureServer.test.ps1'
+    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath, '-RequestCount', [string]$requestCount, '-ReadyPath', $readyPath, '-OutputRoot', $temporaryRoot) -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $temporaryRoot 'auth-mock.out') -RedirectStandardError (Join-Path $temporaryRoot 'auth-mock.err')
+    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+        if ($process.HasExited) { throw 'Auth capture server exited before becoming ready.' }
+        if (Test-Path $readyPath) { break }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not (Test-Path $readyPath)) { throw 'Auth capture server did not become ready.' }
+    return [pscustomobject]@{ Process = $process; Port = [int](Get-Content -Raw $readyPath) }
 }
 function Get-PlaintextScan([string[]]$secrets, [string]$pythonPath) {
     $env:API_STUDIO_TEST_SECRETS = ConvertTo-Json -InputObject $secrets -Compress
@@ -53,11 +66,14 @@ try {
     $bodySecret = 'body-canary-' + [guid]::NewGuid().ToString('N')
     $querySecret = 'query-canary-' + [guid]::NewGuid().ToString('N')
     $paramSecret = 'params-canary-' + [guid]::NewGuid().ToString('N')
-    $record = @{ key = 'protection-test'; value = @{ bearerToken = $bearer; headers = "Authorization: Bearer $headerSecret`r`nX-Api-Key: api-key-canary"; body = ('Body texto livre ' + $bodySecret); route = '/auth?client_secret=' + $querySecret; params = @(@('client_secret', $paramSecret), @('tenant', 'safe-tenant')) } }
+    $basicUsername = 'username-canary-' + [guid]::NewGuid().ToString('N')
+    $basicPassword = 'basic-password-canary-' + [guid]::NewGuid().ToString('N')
+    $apiKey = 'api-key-value-canary-' + [guid]::NewGuid().ToString('N')
+    $record = @{ key = 'protection-test'; value = @{ bearerToken = $bearer; headers = "Authorization: Bearer $headerSecret`r`nX-Api-Key: api-key-canary"; body = ('Body texto livre ' + $bodySecret); route = '/auth?client_secret=' + $querySecret; params = @(@('client_secret', $paramSecret), @('tenant', 'safe-tenant')); basicUsername = $basicUsername; basicPassword = $basicPassword; authType = 'apiKey'; apiKeyName = 'X-API-Key'; apiKeyValue = $apiKey } }
     $json = $record | ConvertTo-Json -Depth 20 -Compress
     Invoke-RestMethod -Uri ($baseUrl + '/api/storage/settings') -Method Post -Headers $headers -ContentType 'application/json' -Body $json -TimeoutSec 3 | Out-Null
     $saved = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/settings?key=protection-test') -Headers $headers -TimeoutSec 3
-    if ($saved.value.bearerToken -ne $bearer -or $saved.value.headers -notlike "*${headerSecret}*" -or $saved.value.body -notlike "*${bodySecret}*" -or $saved.value.route -notlike "*${querySecret}*" -or $saved.value.params[0][1] -ne $paramSecret -or $saved.value.params[1][1] -ne 'safe-tenant') { throw 'Storage API did not return original sensitive values.' }
+    if ($saved.value.bearerToken -ne $bearer -or $saved.value.headers -notlike "*${headerSecret}*" -or $saved.value.body -notlike "*${bodySecret}*" -or $saved.value.route -notlike "*${querySecret}*" -or $saved.value.params[0][1] -ne $paramSecret -or $saved.value.params[1][1] -ne 'safe-tenant' -or $saved.value.basicUsername -ne $basicUsername -or $saved.value.basicPassword -ne $basicPassword -or $saved.value.apiKeyValue -ne $apiKey) { throw 'Storage API did not return original sensitive values.' }
 
     $scanPath = Join-Path $temporaryRoot 'scan.sqlite.py'
     $scanCode = @(
@@ -68,8 +84,30 @@ try {
         'print("FOUND" if any(secret in text for secret in secrets) else "CLEAR")'
     ) -join "`n"
     [System.IO.File]::WriteAllText($scanPath, $scanCode, [System.Text.UTF8Encoding]::new($false))
-    $secrets = @($bearer, $headerSecret, 'api-key-canary', $bodySecret, $querySecret, $paramSecret)
+    $secrets = @($bearer, $headerSecret, 'api-key-canary', $bodySecret, $querySecret, $paramSecret, $basicUsername, $basicPassword, $apiKey)
     if ((Get-PlaintextScan $secrets $scanPath) -ne 'CLEAR') { throw 'A sensitive sentinel remains in SQLite plaintext.' }
+    $authMockServer = Start-AuthCaptureServer 3
+    $mockBaseUrl = 'http://127.0.0.1:' + $authMockServer.Port
+    $wireUsername = 'basic-user-' + [guid]::NewGuid().ToString('N')
+    $wirePassword = 'basic-pass-' + [guid]::NewGuid().ToString('N')
+    $wireBasic = @{ baseUrl = $mockBaseUrl; route = '/auth'; method = 'GET'; authType = 'basic'; basicUsername = $wireUsername; basicPassword = $wirePassword } | ConvertTo-Json -Compress
+    $basicResponse = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $wireBasic -TimeoutSec 5
+    if ($basicResponse.status -ne 200) { throw 'Basic authentication request did not reach the local capture server.' }
+    $basicCapture = Get-Content -Raw (Join-Path $temporaryRoot 'request-0.txt')
+    $expectedBasic = 'Authorization: Basic ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($wireUsername + ':' + $wirePassword))
+    if ($basicCapture -notmatch [regex]::Escape($expectedBasic)) { throw 'Basic authentication header was not generated correctly.' }
+    $wireHeaderKey = 'header-key-' + [guid]::NewGuid().ToString('N')
+    $wireHeaderCall = @{ baseUrl = $mockBaseUrl; route = '/auth'; method = 'GET'; authType = 'apiKey'; apiKeyName = 'X-API-Key'; apiKeyLocation = 'header'; apiKeyValue = $wireHeaderKey } | ConvertTo-Json -Compress
+    $headerResponse = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $wireHeaderCall -TimeoutSec 5
+    if ($headerResponse.status -ne 200) { throw 'API key header request did not reach the local capture server.' }
+    $headerCapture = Get-Content -Raw (Join-Path $temporaryRoot 'request-1.txt')
+    if ($headerCapture -notmatch [regex]::Escape('X-API-Key: ' + $wireHeaderKey)) { throw 'API key header was not applied.' }
+    $wireQueryKey = 'query-key-' + [guid]::NewGuid().ToString('N')
+    $wireQueryCall = @{ baseUrl = $mockBaseUrl; route = '/auth'; method = 'GET'; authType = 'apiKey'; apiKeyName = 'access_key'; apiKeyLocation = 'query'; apiKeyValue = $wireQueryKey } | ConvertTo-Json -Compress
+    $queryResponse = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $wireQueryCall -TimeoutSec 5
+    if ($queryResponse.status -ne 200) { throw 'API key query request did not reach the local capture server.' }
+    $queryCapture = Get-Content -Raw (Join-Path $temporaryRoot 'request-2.txt')
+    if ($queryCapture -notmatch [regex]::Escape('access_key=' + $wireQueryKey)) { throw 'API key query parameter was not applied.' }
     $prefixPath = Join-Path $temporaryRoot 'prefix.sqlite.py'
     $prefixCode = @(
         'import sqlite3, sys',
@@ -121,6 +159,7 @@ try {
 
     Stop-Process -Id $server.Id -Force
     $server = $null
+$authMockServer = $null
     Start-Sleep -Milliseconds 300
     $server = Start-TestApi 'restart'
     $afterRestart = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/settings?key=protection-test') -Headers $headers -TimeoutSec 3
@@ -131,6 +170,7 @@ try {
 }
 finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
+    if ($authMockServer -and -not $authMockServer.Process.HasExited) { Stop-Process -Id $authMockServer.Process.Id -Force }
     if ($null -eq $oldPort) { Remove-Item Env:\ApiStudio__Port -ErrorAction SilentlyContinue } else { $env:ApiStudio__Port = $oldPort }
     if ($null -eq $oldDatabasePath) { Remove-Item Env:\ApiStudio__DatabasePath -ErrorAction SilentlyContinue } else { $env:ApiStudio__DatabasePath = $oldDatabasePath }
     if ($null -eq $oldTestSecrets) { Remove-Item Env:\API_STUDIO_TEST_SECRETS -ErrorAction SilentlyContinue } else { $env:API_STUDIO_TEST_SECRETS = $oldTestSecrets }

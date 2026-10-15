@@ -72,7 +72,14 @@
         : null;
       const editorSection = ['params', 'headers', 'body', 'auth', 'scripts', 'tests'].includes(source.editorSection) ? source.editorSection : 'params';
       const saveBearerToken = source.saveBearerToken !== false;
-      const request = { ...source.request, bearerToken: saveBearerToken ? String(source.request.bearerToken || '') : '', allowInsecureHttp: source.request.allowInsecureHttp === true };
+      const request = {
+        ...source.request,
+        bearerToken: saveBearerToken ? String(source.request.bearerToken || '') : '',
+        basicUsername: saveBearerToken ? String(source.request.basicUsername || '') : '',
+        basicPassword: saveBearerToken ? String(source.request.basicPassword || '') : '',
+        apiKeyValue: saveBearerToken ? String(source.request.apiKeyValue || '') : '',
+        allowInsecureHttp: source.request.allowInsecureHttp === true
+      };
       tabs.push({
         id,
         title: String(source.title || 'Nova requisição').trim().slice(0, 120) || 'Nova requisição',
@@ -582,12 +589,29 @@
     if (!methods.has(method)) throw Error('Método não suportado na coleção: ' + method);
     if (writeMethods.has(method) && !allowWrites) throw Error('Confirme as chamadas de escrita antes de executar.');
     const resolve = value => resolveTemplate(value, environment, dataset);
+    const requestedAuthType = String(saved?.authType || (saved?.bearerToken ? 'bearer' : 'none'));
+    const authType = requestedAuthType === 'api-key' ? 'apiKey' : requestedAuthType;
+    if (!['none', 'bearer', 'basic', 'apiKey'].includes(authType)) throw Error('Tipo de autenticacao nao suportado na colecao.');
+    const basicUsername = authType === 'basic' ? resolve(saved?.basicUsername || '') : '';
+    const basicPassword = authType === 'basic' ? resolve(saved?.basicPassword || '') : '';
+    const apiKeyName = authType === 'apiKey' ? resolve(saved?.apiKeyName || '') : '';
+    const apiKeyLocation = authType === 'apiKey' ? (saved?.apiKeyLocation === 'query' ? 'query' : 'header') : 'header';
+    const apiKeyValue = authType === 'apiKey' ? resolve(saved?.apiKeyValue || '') : '';
+    if (authType === 'basic' && (!basicUsername || !basicPassword)) throw Error('Basic Auth requer usuario e senha.');
+    if (authType === 'apiKey' && (!apiKeyName || !apiKeyValue)) throw Error('API Key requer nome e valor.');
+
 
     return {
       baseUrl: resolve(saved?.baseUrl || ''),
       route: resolve(saved?.route || ''),
       method,
-      bearerToken: resolve(saved?.bearerToken || ''),
+      authType,
+      bearerToken: authType === 'bearer' ? resolve(saved?.bearerToken || '') : '',
+      basicUsername,
+      basicPassword,
+      apiKeyName,
+      apiKeyLocation,
+      apiKeyValue,
       headers: resolve(saved?.headers || ''),
       body: resolve(saved?.body || ''),
       allowInsecureHttp: saved?.allowInsecureHttp === true,
