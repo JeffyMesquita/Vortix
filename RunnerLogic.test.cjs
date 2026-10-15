@@ -10,6 +10,52 @@ function runnerLogic() {
   return require(modulePath);
 }
 
+test('imports OpenAPI 3 paths into tagged requests with parameters and JSON examples', () => {
+  const { parseOpenApiSpec } = runnerLogic();
+  const result = parseOpenApiSpec({
+    openapi: '3.1.1',
+    info: { title: 'Pet API' },
+    servers: [{ url: 'https://api.example.test/v1' }],
+    paths: {
+      '/pets/{petId}': {
+        parameters: [{ name: 'petId', in: 'path', required: true, example: 42 }],
+        get: { tags: ['Pets'], summary: 'Get pet', parameters: [{ name: 'details', in: 'query', example: 'owner' }], responses: { '200': { content: { 'application/json': {} } } } },
+        patch: { tags: ['Pets'], summary: 'Rename pet', requestBody: { content: { 'application/json': { example: { name: 'Ana' } } } }, responses: { '200': { content: { 'application/json': {} } } } }
+      }
+    }
+  });
+  assert.equal(result.collection.name, 'Pet API');
+  assert.deepEqual(result.collection.requests, []);
+  assert.equal(result.environment, null);
+  assert.deepEqual(result.warnings, []);
+  assert.deepEqual(result.collection.folders[0].requests.map(request => ({ name: request.name, method: request.method, baseUrl: request.baseUrl, route: request.route, headers: request.headers, body: request.body })), [
+    { name: 'Get pet', method: 'GET', baseUrl: 'https://api.example.test/v1', route: '/pets/42?details=owner', headers: 'Accept: application/json', body: '' },
+    { name: 'Rename pet', method: 'PATCH', baseUrl: 'https://api.example.test/v1', route: '/pets/42', headers: 'Accept: application/json\nContent-Type: application/json', body: '{\n  "name": "Ana"\n}' }
+  ]);
+});
+
+test('imports safe server defaults and warns without copying OpenAPI security secrets', () => {
+  const { parseOpenApiSpec } = runnerLogic();
+  const result = parseOpenApiSpec({
+    openapi: '3.0.3',
+    info: { title: 'Orders' },
+    servers: [{ url: 'https://{environment}.example.test/v1', variables: { environment: { default: 'dev' }, token: { default: 'private-value' } } }],
+    security: [{ bearerAuth: [] }],
+    components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } } },
+    paths: { '/orders': { get: { responses: { '200': {} } } } }
+  });
+  assert.equal(result.collection.requests[0].baseUrl, 'https://{{environment}}.example.test/v1');
+  assert.deepEqual(result.environment, { name: 'Orders - Server', group: 'OpenAPI', variables: { environment: 'dev' } });
+  assert.equal(JSON.stringify(result).includes('private-value'), false);
+  assert.ok(result.warnings.some(warning => /seguranca/i.test(warning)));
+});
+
+test('rejects unsupported OpenAPI versions and documents without paths', () => {
+  const { parseOpenApiSpec } = runnerLogic();
+  assert.throws(() => parseOpenApiSpec({ openapi: '2.0', info: { title: 'Old API' }, paths: {} }), /3\.0.*3\.2/i);
+  assert.throws(() => parseOpenApiSpec({ openapi: '3.1.0', info: { title: 'Missing paths' } }), /paths/i);
+});
+
 test('parses a quoted cURL request without executing it', () => {
   const { parseCurlCommand } = runnerLogic();
   const command = ['curl --request PATCH "https://api.example.test/v1/items/42?notify=true"', '--header "Accept: application/json"', '--header "Content-Type: application/json"', '--data-raw ' + String.fromCharCode(39) + '{"name":"Nova"}' + String.fromCharCode(39)].join(' ');

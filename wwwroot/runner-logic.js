@@ -226,6 +226,145 @@
     return { method: effectiveMethod, url: parsedUrl.href, headers, body, bearerToken };
   }
 
+  function parseOpenApiSpec(document) {
+    if (!document || typeof document !== 'object' || Array.isArray(document)) throw Error('Documento OpenAPI invalido.');
+    const version = String(document.openapi || '');
+    if (!/^3\.(?:0|1|2)\.\d+$/.test(version)) throw Error('Versoes OpenAPI suportadas: 3.0, 3.1 e 3.2 em JSON.');
+    if (!document.paths || typeof document.paths !== 'object' || Array.isArray(document.paths)) throw Error('O documento OpenAPI precisa conter um objeto paths.');
+    const title = String(document.info?.title || 'OpenAPI').trim().slice(0, 100);
+    const warnings = new Set(), environmentVariables = Object.create(null);
+    const warn = message => warnings.add(message);
+    const isSensitive = name => /authorization|bearer|token|secret|password|passwd|senha|credential|cookie|apikey|privatekey/i.test(String(name || '').toLowerCase().replace(/[_ -]/g, ''));
+    const has = (object, key) => !!object && Object.hasOwn(object, key);
+    const scalar = value => typeof value === 'string' ? value : value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+    const sample = source => {
+      if (!source || typeof source !== 'object') return { found: false };
+      if (has(source, 'example')) return { found: true, value: source.example };
+      if (source.examples && typeof source.examples === 'object') {
+        for (const example of Object.values(source.examples)) if (example && has(example, 'value')) return { found: true, value: example.value };
+      }
+      const schema = source.schema;
+      if (schema && typeof schema === 'object') {
+        if (has(schema, 'example')) return { found: true, value: schema.example };
+        if (has(schema, 'default')) return { found: true, value: schema.default };
+        if (Array.isArray(schema.enum) && schema.enum.length) return { found: true, value: schema.enum[0] };
+        if (schema.type === 'object') return { found: true, value: {} };
+        if (schema.type === 'array') return { found: true, value: [] };
+      }
+      return { found: false };
+    };
+    const makeServer = server => {
+      if (!server || typeof server.url !== 'string' || !server.url.trim()) return { baseUrl: '{{baseUrl}}', prefix: '' };
+      const source = server.url.trim();
+      const resolved = source.replace(/\{([^{}]+)\}/g, (whole, name) => {
+        const variable = server.variables?.[name];
+        if (isSensitive(name)) { warn('Server variables sensiveis nao foram importadas; configure-as manualmente.'); return '{{' + name + '}}'; }
+        if (variable && has(variable, 'default')) {
+          if (!['__proto__', 'prototype', 'constructor'].includes(name)) {
+            if (has(environmentVariables, name) && environmentVariables[name] !== String(variable.default)) warn('Valores diferentes para a mesma variavel de servidor; foi mantido o primeiro.');
+            else Object.defineProperty(environmentVariables, name, { value: String(variable.default), enumerable: true, writable: true, configurable: true });
+          }
+        } else warn('Variavel de servidor sem valor padrao foi mantida como template.');
+        return '{{' + name + '}}';
+      });
+      if (/[?#]/.test(source)) throw Error('URL de servidor OpenAPI com query ou fragmento nao suportada.');
+      const validationUrl = resolved.replace(/\{\{\s*([^{}]+)\s*\}\}/g, 'vortix');
+      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(validationUrl)) {
+        let parsed;
+        try { parsed = new URL(validationUrl); } catch { throw Error('URL de servidor OpenAPI invalida.'); }
+        if (!['http:', 'https:'].includes(parsed.protocol)) throw Error('Servidor OpenAPI deve usar HTTP ou HTTPS.');
+        if (parsed.username || parsed.password) throw Error('Remova credenciais embutidas no servidor OpenAPI.');
+        return { baseUrl: resolved.replace(/\/+$/, ''), prefix: '' };
+      }
+      return { baseUrl: '{{baseUrl}}', prefix: (resolved.startsWith('/') ? resolved : '/' + resolved).replace(/\/+$/, '') };
+    };
+    const globalServers = Array.isArray(document.servers) ? document.servers : [];
+    if (globalServers.length > 1) warn('Mais de um servidor OpenAPI foi encontrado; foi selecionado o primeiro.');
+    const defaultServer = globalServers[0] || null;
+    const collection = { name: title, requests: [], folders: [] };
+    const folders = new Map();
+    const methods = ['get', 'head', 'post', 'put', 'patch', 'delete', 'options'];
+    let operationCount = 0;
+    if (Array.isArray(document.security) && document.security.length) warn('Requisitos de seguranca OpenAPI nao foram importados; configure Auth manualmente.');
+    for (const [path, pathItem] of Object.entries(document.paths)) {
+      if (!pathItem || typeof pathItem !== 'object' || Array.isArray(pathItem)) continue;
+      if (pathItem.$ref) { warn('Path Items com $ref foram ignorados; referencias nao sao carregadas da rede.'); continue; }
+      if (pathItem.trace) warn('Operacoes TRACE nao sao suportadas e foram ignoradas.');
+      for (const method of methods) {
+        const operation = pathItem[method];
+        if (!operation || typeof operation !== 'object' || Array.isArray(operation)) continue;
+        operationCount++;
+        if (Array.isArray(operation.security) && operation.security.length) warn('Requisitos de seguranca OpenAPI nao foram importados; configure Auth manualmente.');
+        const server = Array.isArray(operation.servers) && operation.servers.length ? operation.servers[0] : Array.isArray(pathItem.servers) && pathItem.servers.length ? pathItem.servers[0] : defaultServer;
+        const serverInfo = makeServer(server);
+        const parameters = new Map();
+        for (const parameter of [...(Array.isArray(pathItem.parameters) ? pathItem.parameters : []), ...(Array.isArray(operation.parameters) ? operation.parameters : [])]) {
+          if (!parameter || typeof parameter !== 'object') continue;
+          if (parameter.$ref) { warn('Parametros referenciados foram ignorados; use definicoes inline na especificacao.'); continue; }
+          if (parameter.name && ['path', 'query', 'header', 'cookie'].includes(parameter.in)) parameters.set(parameter.in + ':' + parameter.name, parameter);
+        }
+        const pathParameters = new Map([...parameters].filter(([key]) => key.startsWith('path:')).map(([key, value]) => [key.slice(5), value]));
+        let route = serverInfo.prefix + path;
+        if (!route.startsWith('/')) route = '/' + route;
+        route = route.replace(/\{([^{}]+)\}/g, (whole, name) => {
+          const parameter = pathParameters.get(name);
+          if (isSensitive(name)) { warn('Parametros de caminho sensiveis foram deixados como template.'); return '{{' + name + '}}'; }
+          const value = parameter ? sample(parameter) : { found: false };
+          if (!parameter) warn('Parametro de caminho sem definicao inline foi deixado como template.');
+          return value.found ? encodeURIComponent(scalar(value.value)) : '{{' + name + '}}';
+        });
+        const query = [], headerMap = new Map();
+        const addHeader = (name, value) => headerMap.set(String(name).toLowerCase(), [String(name), scalar(value)]);
+        for (const parameter of parameters.values()) {
+          if (parameter.in === 'path') continue;
+          if (parameter.in === 'cookie') { warn('Parametros de cookie OpenAPI nao foram importados; use o gerenciador de cookies quando disponivel.'); continue; }
+          if (isSensitive(parameter.name)) { warn('Parametros sensiveis OpenAPI foram ignorados; configure Auth manualmente.'); continue; }
+          const value = sample(parameter);
+          if (parameter.in === 'query') query.push(encodeURIComponent(parameter.name) + '=' + encodeURIComponent(value.found ? scalar(value.value) : ''));
+          else if (parameter.in === 'header') addHeader(parameter.name, value.found ? value.value : '');
+        }
+        if (query.length) route += (route.includes('?') ? '&' : '?') + query.join('&');
+        const accept = [];
+        for (const response of Object.values(operation.responses || {})) {
+          const types = response && response.content && typeof response.content === 'object' ? Object.keys(response.content) : [];
+          if (types.length) { accept.push(...types); break; }
+        }
+        if (accept.length && !headerMap.has('accept')) addHeader('Accept', [...new Set(accept)].join(', '));
+        let body = '';
+        const requestBody = operation.requestBody;
+        if (requestBody?.$ref) warn('Request Body referenciado foi ignorado; referencias nao sao carregadas da rede.');
+        else if (requestBody?.content && typeof requestBody.content === 'object') {
+          const content = requestBody.content, mediaTypes = Object.keys(content);
+          const mediaType = mediaTypes.find(type => /^application\/(?:json|[^;]+\+json)$/i.test(type));
+          if (!mediaType && mediaTypes.length) warn('Body nao JSON da OpenAPI nao foi importado.');
+          if (mediaType) {
+            const media = content[mediaType], value = sample(media);
+            if (value.found) body = JSON.stringify(value.value, null, 2);
+            else if (media.schema?.type === 'object') body = '{}';
+            else if (media.schema?.type === 'array') body = '[]';
+            else if (media.schema?.$ref) warn('Schema JSON referenciado nao foi carregado; body iniciado vazio.');
+            addHeader('Content-Type', mediaType);
+          }
+        }
+        const headers = [...headerMap.values()].map(([name, value]) => name + ': ' + value).join('\n');
+        const folderName = Array.isArray(operation.tags) ? operation.tags.find(tag => typeof tag === 'string' && tag.trim()) : '';
+        let target = collection;
+        if (folderName) {
+          const tagName = folderName.trim().slice(0, 100);
+          if (!folders.has(tagName)) { const folder = { name: tagName, requests: [], folders: [] }; folders.set(tagName, folder); collection.folders.push(folder); }
+          target = folders.get(tagName);
+        }
+        target.requests.push({
+          name: String(operation.summary || operation.operationId || method.toUpperCase() + ' ' + path).slice(0, 100),
+          method: method.toUpperCase(), baseUrl: serverInfo.baseUrl, route, headers, body
+        });
+      }
+    }
+    if (!operationCount) throw Error('A especificacao OpenAPI nao contem operacoes HTTP suportadas em paths.');
+    const environment = Object.keys(environmentVariables).length ? { name: title + ' - Server', group: 'OpenAPI', variables: Object.fromEntries(Object.entries(environmentVariables)) } : null;
+    return { collection, environment, warnings: [...warnings] };
+  }
+
   function splitRoute(value) {
     const source = String(value ?? '');
     if (!source.trim()) return { route: '', params: [] };
@@ -604,5 +743,5 @@
     catch { throw Error('O conteúdo descriptografado não é um backup válido do Vortix.'); }
   }
 
-  return { parseCurlCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeTokenRequestConfig, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { parseOpenApiSpec, parseCurlCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeTokenRequestConfig, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

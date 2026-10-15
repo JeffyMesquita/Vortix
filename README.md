@@ -21,6 +21,7 @@
 - [Início rápido](#início-rápido)
 - [Primeiro fluxo](#primeiro-fluxo)
 - [Importar cURL](#importar-curl)
+- [Importar OpenAPI JSON](#importar-openapi-json)
 - [Ambientes e variáveis](#ambientes-e-variáveis)
 - [Scripts, testes e Runner](#scripts-testes-e-runner)
 - [Importação e exportação](#importação-e-exportação)
@@ -52,7 +53,7 @@ A aplicação escuta somente em loopback e foi pensada para uso em computador de
 - **Runner:** execute requests de uma coleção ou pasta em sequência, com conjuntos de dados, intervalo, parada por falha e repetição das falhas.
 - **Temas e fontes:** Dracula, Monokai, One Dark, Nord, Solarized Dark e GitHub Dark; Fira Code, JetBrains Mono, Cascadia Code, Cascadia Mono e IBM Plex Mono.
 - **Editor JSON:** destaque de sintaxe e formatação com indentação de dois espaços.
-- **Intercâmbio:** Vortix JSON, Insomnia v4, Postman Collection v2.1 e importação de comandos cURL.
+- **Intercâmbio:** Vortix JSON, Insomnia v4, Postman Collection v2.1, cURL e OpenAPI 3 em JSON.
 - **Backups:** exportação simples em JSON ou arquivo protegido por senha.
 
 Requests novas começam vazias. A URL base e os demais valores vêm do ambiente e da configuração que você criar.
@@ -145,6 +146,33 @@ A primeira versão aceita `-X`/`--request`, `-H`/`--header`, `--url`, `-d`/`--da
 
 O Vortix rejeita comandos com credenciais na URL, parâmetros de query sensíveis, autenticação Basic, cookies, upload de arquivo e opções não reconhecidas. Isso evita importar uma chamada alterada silenciosamente. Configure esses campos manualmente e importe a request novamente quando terminar.
 
+## Importar OpenAPI JSON
+
+Importe um documento OpenAPI 3.0, 3.1 ou 3.2 em JSON pelo botão de importação de coleções. O Vortix gera requests por operação, agrupa pela primeira tag, usa o primeiro servidor e converte parâmetros de path, query e header. Exemplos JSON da request viram body editável.
+
+Exemplo mínimo:
+
+~~~json
+{
+  "openapi": "3.1.1",
+  "info": { "title": "Store API" },
+  "servers": [{ "url": "https://api.example.com/v1" }],
+  "paths": {
+    "/users/{id}": {
+      "get": {
+        "tags": ["Users"],
+        "summary": "Get user",
+        "parameters": [{ "name": "id", "in": "path", "example": 42 }],
+        "responses": { "200": { "content": { "application/json": {} } } }
+      }
+    }
+  }
+}
+~~~
+
+Variáveis definidas no primeiro servidor são criadas em um ambiente OpenAPI. Parâmetros sem exemplo ficam editáveis; variáveis de path sem exemplo aparecem como <code>{{nome}}</code>. Confira a coleção gerada antes de enviar.
+
+O importador não busca referências <code>$ref</code> externas, não aplica automaticamente os requisitos de segurança e não gera body de mídia não JSON. Esses casos aparecem como avisos para revisão manual. A primeira versão aceita JSON; YAML ainda não é importado. Consulte também a <a href="https://spec.openapis.org/oas/latest.html">especificação OpenAPI</a>.
 ## Ambientes e variáveis
 
 Cada ambiente mantém suas próprias variáveis. Grupos ajudam a separar ambientes como Desenvolvimento, Homologação e Produção; os nomes e valores são definidos por você.
@@ -217,6 +245,7 @@ Cada rodada aceita até 500 requests. Credenciais solicitadas manualmente pelo h
 | Insomnia Export JSON v4 | Sim | Sim |
 | Postman Collection v2.1 | Sim | Sim |
 | Comando cURL | Sim | - |
+| OpenAPI 3.0/3.1/3.2 JSON | Sim | - |
 | Ambiente Postman | Sim | Acompanha a coleção exportada |
 
 Ao importar tokens, o Vortix pede confirmação para salvá-los com proteção local; também é possível importar sem esses valores. Durante a exportação, Bearer e variáveis sensíveis são omitidos por padrão. O <code>client_secret</code>, senhas e chaves privadas não são incluídos.

@@ -976,10 +976,11 @@ async function importCollectionFile(event){
   const file=event.target.files?.[0];event.target.value='';if(!file)return;
   try{
     if(file.size>10*1024*1024)throw Error('O arquivo ultrapassa o limite de 10 MB.');
-    const document=JSON.parse(await file.text());let sourceCollection=null,environmentSources=[],enableCapture=true,allowInsecureHttp=false,unsupportedScripts=0,sourceName='Vortix';
+    const document=JSON.parse(await file.text());let sourceCollection=null,environmentSources=[],enableCapture=true,allowInsecureHttp=false,unsupportedScripts=0,sourceName='Vortix',importWarnings=[];
     if(document.format==='api-studio-collection'&&[1,2].includes(document.version)&&document.collection){sourceCollection=document.collection;allowInsecureHttp=true;if(document.environment)environmentSources.push(document.environment);}
     else if(document._type==='export'&&document.__export_format===4){const imported=importInsomniaCollection(document);sourceCollection=imported.collection;environmentSources=imported.environments;unsupportedScripts=imported.stats.unsupportedScripts;enableCapture=false;sourceName='Insomnia';}
     else if(document.info?.schema?.includes('postman.com/json/collection/v2.')&&Array.isArray(document.item)){const imported=importPostmanCollection(document);sourceCollection=imported.collection;environmentSources=imported.environments;unsupportedScripts=imported.stats.unsupportedScripts;enableCapture=false;sourceName='Postman';}
+    else if(typeof document.openapi==='string'){const parsed=RunnerLogic.parseOpenApiSpec(document);sourceCollection=parsed.collection;environmentSources=parsed.environment?[parsed.environment]:[];importWarnings=parsed.warnings;sourceName='OpenAPI';}
     else{const environment=importPostmanEnvironment(document);if(environment)environmentSources.push(environment);else throw Error('Formato não reconhecido. Use Vortix JSON, arquivos API Studio JSON legados, Insomnia v4, Postman v2.1 ou um ambiente Postman.');}
     const containsBearer=(sourceCollection&&collectionHasBearer(sourceCollection))||environmentSources.some(environment=>environmentHasBearer(environment.variables));
     const keepBearer=containsBearer?await confirmWithDialog({eyebrow:'DADOS SENSÍVEIS',title:'Tokens encontrados',description:'Salvar Bearer e variáveis sensíveis no SQLite local com proteção de dados?',warning:'Os dados protegidos dependem das chaves e da identidade desta instalação. Escolha “Importar sem tokens” para descartar esses valores.',confirmLabel:'Importar tokens',cancelLabel:'Importar sem tokens',danger:true}):false;
@@ -998,7 +999,8 @@ async function importCollectionFile(event){
     if(addedEnvironments)renderEnvironmentSelect();
     const capturesDisabled=!enableCapture&&sourceCollection&&collectionHasResponseCaptureConfig(sourceCollection);
     const message=[imported?'Requests e pastas disponíveis.':'Ambiente disponível no seletor.',containsBearer&&!keepBearer?' Tokens omitidos.':'',capturesDisabled?'Automações importadas desativadas até sua revisão.':'',unsupportedScripts?` ${unsupportedScripts} script(s) não convertidos; configure em Scripts.`:''].join('');
-    showToast(imported?'Coleção importada':'Ambiente importado',message,'success');
+    if(importWarnings.length)message+=(message?' ':'')+importWarnings.join(' ');
+    showToast(imported?'Coleção importada':'Ambiente importado',message,importWarnings.length?'warning':'success');
   }catch(error){showToast('Falha na importação',error.message||'Arquivo JSON inválido.','error');}
 }function flattenContainers(){
   const result=[];const visit=(collection,node,folders=[])=>{result.push({collectionId:collection.id,folderId:folders.at(-1)?.id||'',label:collection.name+(folders.length?' / '+folders.map(x=>x.name).join(' / '):'')});for(const folder of node.folders||[])visit(collection,folder,[...folders,folder]);};
