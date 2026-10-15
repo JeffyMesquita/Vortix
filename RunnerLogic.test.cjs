@@ -10,6 +10,81 @@ function runnerLogic() {
   return require(modulePath);
 }
 
+test('parses a quoted cURL request without executing it', () => {
+  const { parseCurlCommand } = runnerLogic();
+  const command = ['curl --request PATCH "https://api.example.test/v1/items/42?notify=true"', '--header "Accept: application/json"', '--header "Content-Type: application/json"', '--data-raw ' + String.fromCharCode(39) + '{"name":"Nova"}' + String.fromCharCode(39)].join(' ');
+  assert.deepEqual(parseCurlCommand(command), {
+    method: 'PATCH',
+    url: 'https://api.example.test/v1/items/42?notify=true',
+    headers: [['Accept', 'application/json'], ['Content-Type', 'application/json']],
+    body: '{"name":"Nova"}',
+    bearerToken: ''
+  });
+});
+
+test('infers POST and form content type from cURL data', () => {
+  const { parseCurlCommand } = runnerLogic();
+  assert.deepEqual(parseCurlCommand('curl --data name=Ana https://api.example.test/v1/users'), {
+    method: 'POST',
+    url: 'https://api.example.test/v1/users',
+    headers: [['Content-Type', 'application/x-www-form-urlencoded']],
+    body: 'name=Ana',
+    bearerToken: ''
+  });
+});
+
+test('parses shell line continuations and extracts Bearer without keeping Authorization header', () => {
+  const { parseCurlCommand } = runnerLogic();
+  const command = [
+    'curl --silent --request GET',
+    '--url "https://api.example.test/v1/profile?view=full"',
+    '--header "Authorization: Bearer {{token}}"',
+    '--header "Accept: application/json"'
+  ].join(' ' + String.fromCharCode(92) + '\n  ');
+  assert.deepEqual(parseCurlCommand(command), {
+    method: 'GET',
+    url: 'https://api.example.test/v1/profile?view=full',
+    headers: [['Accept', 'application/json']],
+    body: '',
+    bearerToken: '{{token}}'
+  });
+});
+
+test('rejects unsupported or secret-bearing cURL options without echoing credentials', () => {
+  const { parseCurlCommand } = runnerLogic();
+  assert.throws(() => parseCurlCommand('curl --insecure https://api.example.test'), /opção.*não suportada/i);
+  assert.throws(() => parseCurlCommand('curl --location https://api.example.test'), /--location/i);
+  assert.throws(() => parseCurlCommand('curl --user admin:very-secret https://api.example.test'), error => {
+    assert.match(error.message, /Basic.*não suportad/i);
+    assert.doesNotMatch(error.message, /very-secret/);
+    return true;
+  });
+});
+
+test('concatenates repeated cURL JSON segments without form separators', () => {
+  const { parseCurlCommand } = runnerLogic();
+  const quote = String.fromCharCode(39);
+  const command = 'curl --json ' + quote + '{"ready":' + quote + ' --json ' + quote + 'true}' + quote + ' https://api.example.test/v1/check';
+  assert.deepEqual(parseCurlCommand(command), {
+    method: 'POST',
+    url: 'https://api.example.test/v1/check',
+    headers: [['Content-Type', 'application/json'], ['Accept', 'application/json']],
+    body: '{"ready":true}',
+    bearerToken: ''
+  });
+});
+
+test('rejects file-backed data instead of treating the filename as a body', () => {
+  const { parseCurlCommand } = runnerLogic();
+  assert.throws(() => parseCurlCommand('curl --json @payload.json https://api.example.test/v1/check'), /arquivo/i);
+});
+
+test('rejects cURL destinations outside HTTP and HTTPS', () => {
+  const { parseCurlCommand } = runnerLogic();
+  assert.throws(() => parseCurlCommand('curl file:///private/data'), /HTTP ou HTTPS/i);
+  assert.throws(() => parseCurlCommand('curl https://user:password@api.example.test/data'), /credenciais.*URL/i);
+});
+
 test('flattens a collection in visual order with nested folder paths', () => {
   const { flattenRequests } = runnerLogic();
   const collection = {

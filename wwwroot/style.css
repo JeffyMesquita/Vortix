@@ -758,3 +758,7 @@ textarea.compact { min-height: 165px; }
 .tree-select.selected {
   background: color-mix(in srgb, var(--accent) 10%, var(--raised, var(--surface-raised)));
 }
+.curl-import-dialog .dialog-scroll { display: grid; gap: 12px; }
+.curl-import-dialog textarea { width: 100%; min-height: 150px; resize: vertical; font: 12px/1.55 var(--app-font-family); }
+.curl-import-dialog .curl-import-error { margin: 0; color: var(--danger); }
+.curl-import-dialog .curl-import-error[hidden] { display: none; }

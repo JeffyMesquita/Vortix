@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">Vortix: de comando cURL a fluxo reutilizavel</title>
+  <desc id="desc">Diagrama em tres etapas: importar cURL, revisar request e validar resposta com Runner.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1b2028"/><stop offset="1" stop-color="#15191f"/></linearGradient>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#82d9bd"/></marker>
+  </defs>
+  <rect width="1200" height="360" rx="24" fill="url(#bg)"/>
+  <path d="M800 0h400v360H930c95-88 98-209-130-360Z" fill="#222832" opacity=".55"/>
+  <circle cx="1120" cy="58" r="118" fill="#82d9bd" opacity=".06"/>
+  <text x="48" y="58" fill="#82d9bd" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="700" letter-spacing="2">CLIENTE DE API LOCAL</text>
+  <text x="48" y="112" fill="#f0f4f8" font-family="Segoe UI,Arial,sans-serif" font-size="38" font-weight="700">Do cURL ao fluxo de teste</text>
+  <text x="48" y="145" fill="#aeb8c4" font-family="Segoe UI,Arial,sans-serif" font-size="17">Importe, revise, organize e reutilize chamadas em ambientes separados.</text>
+  <g font-family="Segoe UI,Arial,sans-serif">
+    <rect x="48" y="190" width="310" height="112" rx="14" fill="#222832" stroke="#3a4654"/>
+    <circle cx="78" cy="220" r="15" fill="#2b3a38"/><text x="72" y="225" fill="#82d9bd" font-size="14" font-weight="700">&gt;</text>
+    <text x="104" y="224" fill="#e8edf2" font-size="16" font-weight="700">1. Importe cURL</text>
+    <text x="72" y="256" fill="#82d9bd" font-family="Consolas,monospace" font-size="13">curl --request GET</text>
+    <text x="72" y="278" fill="#b7c1cc" font-family="Consolas,monospace" font-size="13">https://api.example.com/v1</text>
+    <path d="M374 246h56" stroke="#82d9bd" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="450" y="190" width="310" height="112" rx="14" fill="#222832" stroke="#3a4654"/>
+    <circle cx="480" cy="220" r="15" fill="#302b40"/><text x="474" y="225" fill="#b799ff" font-size="14" font-weight="700">2</text>
+    <text x="506" y="224" fill="#e8edf2" font-size="16" font-weight="700">2. Revise a request</text>
+    <rect x="474" y="246" width="60" height="24" rx="6" fill="#173b34"/><text x="485" y="263" fill="#82d9bd" font-family="Consolas,monospace" font-size="12" font-weight="700">GET</text>
+    <text x="545" y="263" fill="#d4dbe3" font-family="Consolas,monospace" font-size="13">/v1/users</text>
+    <text x="474" y="286" fill="#9ca8b5" font-size="12">Params · Headers · Body · Auth</text>
+    <path d="M776 246h56" stroke="#82d9bd" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="852" y="190" width="300" height="112" rx="14" fill="#222832" stroke="#3a4654"/>
+    <circle cx="882" cy="220" r="15" fill="#173b34"/><path d="m875 220 5 5 10-12" fill="none" stroke="#82d9bd" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="908" y="224" fill="#e8edf2" font-size="16" font-weight="700">3. Valide no Runner</text>
+    <text x="876" y="258" fill="#82d9bd" font-family="Consolas,monospace" font-size="13">200 OK</text>
+    <text x="876" y="282" fill="#d6bd75" font-family="Consolas,monospace" font-size="13">token =&gt; {{token}}</text>
+  </g>
+  <text x="48" y="335" fill="#7f8b99" font-family="Segoe UI,Arial,sans-serif" font-size="12">SQLite local  ·  Colecoes e pastas  ·  Ambientes  ·  Testes e historico</text>
+</svg>

@@ -9,6 +9,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/images/vortix-workflow.svg" alt="Fluxo: importar cURL, revisar request e validar resposta" width="100%">
+</p>
+
 ## Índice
 
 - [Visão geral](#visão-geral)
@@ -16,6 +20,7 @@
 - [Requisitos](#requisitos)
 - [Início rápido](#início-rápido)
 - [Primeiro fluxo](#primeiro-fluxo)
+- [Importar cURL](#importar-curl)
 - [Ambientes e variáveis](#ambientes-e-variáveis)
 - [Scripts, testes e Runner](#scripts-testes-e-runner)
 - [Importação e exportação](#importação-e-exportação)
@@ -47,7 +52,7 @@ A aplicação escuta somente em loopback e foi pensada para uso em computador de
 - **Runner:** execute requests de uma coleção ou pasta em sequência, com conjuntos de dados, intervalo, parada por falha e repetição das falhas.
 - **Temas e fontes:** Dracula, Monokai, One Dark, Nord, Solarized Dark e GitHub Dark; Fira Code, JetBrains Mono, Cascadia Code, Cascadia Mono e IBM Plex Mono.
 - **Editor JSON:** destaque de sintaxe e formatação com indentação de dois espaços.
-- **Intercâmbio:** formatos próprios do Vortix, Insomnia v4 e Postman Collection v2.1.
+- **Intercâmbio:** Vortix JSON, Insomnia v4, Postman Collection v2.1 e importação de comandos cURL.
 - **Backups:** exportação simples em JSON ou arquivo protegido por senha.
 
 Requests novas começam vazias. A URL base e os demais valores vêm do ambiente e da configuração que você criar.
@@ -120,6 +125,25 @@ Todos os métodos suportados estão disponíveis no seletor. POST, PUT, PATCH e 
 
 Essa proteção é uma confirmação manual. O Vortix não consegue determinar se os dados ou o ambiente de destino são descartáveis. GET, HEAD e OPTIONS não aceitam body.
 
+## Importar cURL
+
+O botão de importação aceita coleções JSON ou um comando cURL. Ao colar o comando, o Vortix apenas o interpreta: **não executa o comando nem envia a request**. O resultado abre como rascunho para revisão; salve-o depois em uma coleção.
+
+Exemplo aceito:
+
+~~~sh
+curl --request PATCH \
+  "https://api.example.com/v1/users/42?notify=true" \
+  --header "Accept: application/json" \
+  --header "Content-Type: application/json" \
+  --data-raw '{"name":"Ana"}'
+~~~
+
+A importação converte método, URL, Params, headers e body. Também entende aspas simples/duplas e continuações de linha comuns do shell. O header Bearer vai para **Auth** e fica apenas em memória; marque a opção de salvamento se quiser persistir o token localmente.
+
+A primeira versão aceita `-X`/`--request`, `-H`/`--header`, `--url`, `-d`/`--data`, `--data-raw`, `--data-binary`, `--json` e `-I`/`--head`. Body enviado sem método explícito vira POST; `--data` sem Content-Type recebe `application/x-www-form-urlencoded`.
+
+O Vortix rejeita comandos com credenciais na URL, parâmetros de query sensíveis, autenticação Basic, cookies, upload de arquivo e opções não reconhecidas. Isso evita importar uma chamada alterada silenciosamente. Configure esses campos manualmente e importe a request novamente quando terminar.
 ## Ambientes e variáveis
 
 Cada ambiente mantém suas próprias variáveis. Grupos ajudam a separar ambientes como Desenvolvimento, Homologação e Produção; os nomes e valores são definidos por você.
@@ -131,6 +155,20 @@ Ao capturar uma variável de resposta, escolha o nome, a origem (campo JSON ou t
 ## Scripts, testes e Runner
 
 ### Captura de resposta
+
+<p align="center">
+  <img src="docs/images/token-capture.svg" alt="Capturar access_token da resposta e reutilizar na próxima request" width="100%">
+</p>
+
+**Exemplo:** na request de autenticação, capture <code>access_token</code> para a variável <code>token</code>. Na próxima request, use <code>Authorization: Bearer {{token}}</code>. O valor fica no ambiente ativo e não precisa ser copiado entre chamadas.
+
+~~~json
+{
+  "access_token": "valor-retornado-pela-api",
+  "expires_in": 3600
+}
+~~~
+
 
 Na aba **Scripts**, configure a captura de um valor, como <code>data.access_token</code>, para uma variável como <code>token</code>. O painel também mostra o código equivalente para o fluxo After-response do Insomnia, que pode ser copiado.
 
@@ -157,6 +195,17 @@ Selecione uma coleção ou pasta e clique em **Executar seleção**. O Runner pe
 - executar novamente somente requests que falharam;
 - acompanhar status, duração e resultado de cada request.
 
+Exemplo de conjunto de dados JSON para o Runner:
+
+~~~json
+[
+  { "userId": "101", "name": "Ana" },
+  { "userId": "102", "name": "Rui" }
+]
+~~~
+
+Use <code>/v1/users/{{userId}}</code> na rota e <code>{"name":"{{name}}"}</code> no body. O Runner substitui as variáveis em cada iteração.
+
 Cada rodada aceita até 500 requests. Credenciais solicitadas manualmente pelo helper de token permanecem no fluxo interativo e não são executadas pelo Runner. O relatório é temporário; requests e variáveis capturadas continuam salvas.
 
 ## Importação e exportação
@@ -167,6 +216,7 @@ Cada rodada aceita até 500 requests. Credenciais solicitadas manualmente pelo h
 | API Studio JSON legado v1/v2 | Sim | — |
 | Insomnia Export JSON v4 | Sim | Sim |
 | Postman Collection v2.1 | Sim | Sim |
+| Comando cURL | Sim | - |
 | Ambiente Postman | Sim | Acompanha a coleção exportada |
 
 Ao importar tokens, o Vortix pede confirmação para salvá-los com proteção local; também é possível importar sem esses valores. Durante a exportação, Bearer e variáveis sensíveis são omitidos por padrão. O <code>client_secret</code>, senhas e chaves privadas não são incluídos.

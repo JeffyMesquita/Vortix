@@ -135,6 +135,97 @@
     return resolved;
   }
 
+  function tokenizeCurlCommand(source) {
+    if (typeof source !== 'string' || source.length > 1024 * 1024) throw Error('Comando cURL inválido ou maior que 1 MB.');
+    const input = source.trim().replace(/\\\r?\n[ \t]*/g, ' ').replace(/`\r?\n[ \t]*/g, ' ').replace(/\^\r?\n[ \t]*/g, ' ');
+    const tokens = [];
+    let token = '', quote = '', active = false;
+    for (let index = 0; index < input.length; index++) {
+      const character = input[index];
+      if (quote) {
+        if (character === quote) { quote = ''; active = true; continue; }
+        if (character === '\\' && quote === '"' && index + 1 < input.length) { token += input[++index]; active = true; continue; }
+        token += character; active = true; continue;
+      }
+      if (character === "'" || character === '"') { quote = character; active = true; continue; }
+      if (character === '\\' && index + 1 < input.length) { token += input[++index]; active = true; continue; }
+      if (/\s/.test(character)) { if (active) { tokens.push(token); token = ''; active = false; } continue; }
+      token += character; active = true;
+    }
+    if (quote) throw Error('Aspas não fechadas no comando cURL.');
+    if (active) tokens.push(token);
+    return tokens;
+  }
+
+  function parseCurlCommand(source) {
+    const tokens = tokenizeCurlCommand(source);
+    if (!tokens.length || !/^curl(?:\.exe)?$/i.test(tokens[0])) throw Error('Cole um comando iniciado por curl.');
+    const headers = [], data = [];
+    let url = '', method = '', bearerToken = '', dataType = '', headOnly = false, jsonMode = false;
+    const ignoredFlags = new Set(['--include', '-i', '--silent', '-s', '-sS', '-Ss', '--show-error', '-S', '--fail', '--fail-with-body']);
+    const readValue = (option, inline, index) => {
+      if (inline !== null) return { value: inline, index };
+      if (index + 1 >= tokens.length) throw Error('Falta valor para uma opção do comando cURL.');
+      return { value: tokens[index + 1], index: index + 1 };
+    };
+    const addHeader = (raw) => {
+      const colon = raw.indexOf(':');
+      if (colon < 1) throw Error('Header cURL inválido.');
+      const name = raw.slice(0, colon).trim(), value = raw.slice(colon + 1).trim();
+      if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || /[\r\n]/.test(value)) throw Error('Header cURL inválido.');
+      if (/^authorization$/i.test(name) && /^Bearer\s+\S[\s\S]*$/i.test(value)) {
+        if (bearerToken) throw Error('O comando cURL contém mais de um token Bearer.');
+        bearerToken = value.replace(/^Bearer\s+/i, '');
+        return;
+      }
+      if (/authorization|cookie|token|secret|password|credential|api[-_]?key/i.test(name)) throw Error('Header sensível não suportado pela importação cURL.');
+      headers.push([name, value]);
+    };
+    for (let index = 1; index < tokens.length; index++) {
+      const argument = tokens[index];
+      let option = argument, inline = null;
+      if (argument.startsWith('--')) {
+        const equals = argument.indexOf('=');
+        if (equals > 2) { option = argument.slice(0, equals); inline = argument.slice(equals + 1); }
+      } else if (/^-X.+/.test(argument)) { option = '-X'; inline = argument.slice(2); }
+      else if (/^-H.+/.test(argument)) { option = '-H'; inline = argument.slice(2); }
+      else if (/^-d.+/.test(argument)) { option = '-d'; inline = argument.slice(2); }
+      if (option === '--user' || option === '-u' || argument.startsWith('-u')) throw Error('Autentica\u00e7\u00e3o Basic n\u00e3o suportada; remova a credencial do comando.');
+      if (option === '--url' || option === '--request' || option === '-X' || option === '--header' || option === '-H' || option === '--data' || option === '--data-raw' || option === '--data-binary' || option === '-d' || option === '--json') {
+        const result = readValue(option, inline, index);
+        const value = result.value;
+        index = result.index;
+        if (option === '--url') { if (url) throw Error('O comando cURL contém mais de uma URL.'); url = value; continue; }
+        if (option === '--request' || option === '-X') { method = value.toUpperCase(); continue; }
+        if (option === '--header' || option === '-H') { addHeader(value); continue; }
+        const kind = option === '--json' ? 'json' : option === '--data-binary' ? 'binary' : 'form';
+        if ((option === '--data' || option === '--data-binary' || option === '-d' || option === '--json') && value.startsWith('@')) throw Error('Importação de body por arquivo não suportada; anexe o arquivo manualmente.');
+        if (dataType && dataType !== kind) throw Error('O comando cURL mistura formatos de body não suportados.');
+        if (kind === 'binary' && data.length) throw Error('Múltiplas partes de body binário não são suportadas.');
+        dataType = kind; data.push(value); if (kind === 'json') jsonMode = true; continue;
+      }
+      if (option === '--head' || option === '-I') { headOnly = true; continue; }
+      if (ignoredFlags.has(argument)) continue;
+      if (argument.startsWith('-')) throw Error('Opção cURL não suportada: ' + option + '.');
+      if (url) throw Error('O comando cURL contém mais de uma URL.');
+      url = argument;
+    }
+    if (!url) throw Error('URL não encontrada no comando cURL.');
+    let parsedUrl;
+    try { parsedUrl = new URL(url); } catch { throw Error('Informe uma URL absoluta HTTP ou HTTPS no comando cURL.'); }
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw Error('A URL precisa usar HTTP ou HTTPS.');
+    if (parsedUrl.username || parsedUrl.password) throw Error('Remova as credenciais embutidas na URL antes de importar.');
+    if (parsedUrl.hash) throw Error('Remova o fragmento da URL antes de importar.');
+    const body = data.join(jsonMode ? '' : '&');
+    const effectiveMethod = method || (headOnly ? 'HEAD' : data.length ? 'POST' : 'GET');
+    if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(effectiveMethod)) throw Error('Método HTTP não suportado pelo Vortix.');
+    if (data.length && ['GET', 'HEAD', 'OPTIONS'].includes(effectiveMethod)) throw Error('O comando cURL envia body com método que não aceita body no Vortix.');
+    const hasHeader = name => headers.some(([headerName]) => headerName.toLowerCase() === name);
+    if (data.length && !hasHeader('content-type')) headers.push(['Content-Type', jsonMode ? 'application/json' : 'application/x-www-form-urlencoded']);
+    if (jsonMode && !hasHeader('accept')) headers.push(['Accept', 'application/json']);
+    return { method: effectiveMethod, url: parsedUrl.href, headers, body, bearerToken };
+  }
+
   function splitRoute(value) {
     const source = String(value ?? '');
     if (!source.trim()) return { route: '', params: [] };
@@ -513,5 +604,5 @@
     catch { throw Error('O conteúdo descriptografado não é um backup válido do Vortix.'); }
   }
 
-  return { flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeTokenRequestConfig, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { parseCurlCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeTokenRequestConfig, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

@@ -32,7 +32,7 @@
             <button class="icon-button small-icon quick-open-trigger" id="quick-open-button" type="button" aria-label="Buscar requisição" title="Buscar requisição (Ctrl+K)">
               <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
             </button>
-            <button class="icon-button small-icon" id="import-collection" type="button" aria-label="Importar coleção" title="Vortix JSON, Insomnia v4, Postman v2.1 ou ambiente Postman">⇩</button>
+            <button class="icon-button small-icon" id="import-collection" type="button" aria-label="Importar coleção ou cURL" title="Importar coleção JSON ou comando cURL">⇩</button>
             <button class="icon-button small-icon" id="export-collection" type="button" aria-label="Exportar coleção selecionada" title="Exportar coleção selecionada">⇧</button>
             <button class="icon-button small-icon" id="run-collection" type="button" aria-label="Executar coleção ou pasta selecionada" title="Runner da seleção">▶</button>
             <button class="icon-button small-icon" id="add-collection-heading" type="button" aria-label="Adicionar coleção" title="Adicionar coleção">＋</button>
@@ -384,6 +384,21 @@ insomnia.environment.set("token", body.access_token);</code></pre>
       </div>
     </form>
   </dialog>
+
+  <dialog class="app-dialog curl-import-dialog" id="import-dialog" aria-labelledby="import-title">
+    <form method="dialog">
+      <div class="dialog-heading"><div><p class="eyebrow">INTERCAMBIO</p><h2 id="import-title">Importar requisici&#227;o</h2><p class="dialog-description">Cole um comando cURL ou escolha uma cole&#231;&#227;o existente.</p></div><button class="icon-button dialog-close" id="close-import-dialog" type="button" aria-label="Fechar">&times;</button></div>
+      <div class="dialog-scroll">
+        <button class="button secondary" id="browse-import-file" type="button">Escolher arquivo de cole&#231;&#227;o JSON</button>
+        <label for="curl-import-source">Comando cURL</label>
+        <textarea id="curl-import-source" rows="8" maxlength="1048576" spellcheck="false" placeholder="curl --request GET &quot;https://api.example.com/v1/users&quot; --header &quot;Accept: application/json&quot;"></textarea>
+        <p class="hint">O comando ser&#225; analisado localmente, nunca executado. O Bearer importado fica apenas em mem&#243;ria at&#233; voc&#234; ativar seu salvamento. Auth Basic, cookies e op&#231;&#245;es avan&#231;adas precisam ser configurados manualmente.</p>
+        <p class="hint curl-import-error" id="curl-import-error" role="alert" hidden></p>
+      </div>
+      <div class="dialog-actions"><button class="button secondary" id="cancel-import-dialog" type="button">Cancelar</button><button class="button primary" id="create-curl-request" type="button">Abrir como rascunho</button></div>
+    </form>
+  </dialog>
+
   <dialog class="app-dialog" id="export-dialog">
     <form method="dialog" id="export-form">
       <div class="dialog-heading"><div><p class="eyebrow">INTERCÂMBIO</p><h2>Exportar coleção</h2><p class="dialog-description">Leve esta coleção para outro workspace.</p></div><button class="icon-button dialog-close" id="close-export-dialog" type="button" aria-label="Fechar">×</button></div>

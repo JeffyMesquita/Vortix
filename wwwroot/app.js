@@ -540,9 +540,9 @@ function resetEditorForNewWorkspaceTab(title){
   activeSaved=null;byId('request-title').textContent=title;method.value='GET';route.value='';body.value='';byId('headers').value='Accept: application/json';byId('bearer-token').value='';byId('allow-insecure-http').checked=false;byId('capture-response-variable').checked=false;byId('response-variable-name').value='token';byId('response-value-source').value='json';byId('response-json-path').value='access_token';byId('response-success-only').checked=true;byId('response-variable-result').hidden=true;updateResponseCaptureUi();setResponseTests([]);
   byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';baseUrlAuto=true;renderQueryParams([]);clearWriteConfirmation();updateGuard();renderBodyHighlight();updateJsonTools();byId('token-client-id').value='';byId('token-client-secret').value='';byId('token-helper').open=false;setEditorTab('params');
 }
-function createNewWorkspaceTab(){
-  if(workspaceTabs.length>=MAX_WORKSPACE_TABS){showToast('Limite de abas','Feche uma aba antes de abrir outra.','warning');return;}
-  syncActiveWorkspaceTab();const title=nextWorkspaceDraftTitle();activeWorkspaceTabId='';resetEditorForNewWorkspaceTab(title);const tab=createWorkspaceTabFromCurrent(title);if(tab)showToast('Nova aba','Rascunho pronto; salve a requisição numa coleção para reutilizar.','info');
+function createNewWorkspaceTab(notify=true){
+  if(workspaceTabs.length>=MAX_WORKSPACE_TABS){showToast('Limite de abas','Feche uma aba antes de abrir outra.','warning');return false;}
+  syncActiveWorkspaceTab();const title=nextWorkspaceDraftTitle();activeWorkspaceTabId='';resetEditorForNewWorkspaceTab(title);const tab=createWorkspaceTabFromCurrent(title);if(tab&&notify)showToast('Nova aba','Rascunho pronto; salve a requisi\u00e7\u00e3o numa cole\u00e7\u00e3o para reutilizar.','info');return !!tab;
 }
 function openCollectionRequestInTab(request,collectionId,folderId){
   const existing=workspaceTabs.find(tab=>tab.activeSaved?.id===request.id&&tab.collectionId===collectionId&&tab.folderId===folderId);
@@ -953,6 +953,24 @@ function normalizeImportedNode(source,keepBearer,depth=0,isRoot=false,enableCapt
       responseTests:enableCapture?RunnerLogic.normalizeResponseTests(request.responseTests).map(rule=>({...rule,id:newId()})):[]};
   });
   safe.folders=source.folders.map(folder=>normalizeImportedNode(folder,keepBearer,depth+1,false,enableCapture,allowInsecureHttp));return safe;
+}
+function openImportDialog(){byId('curl-import-error').hidden=true;byId('curl-import-error').textContent='';byId('curl-import-source').value='';byId('import-dialog').showModal();byId('curl-import-source').focus();}
+function openCurlRequestDraft(){
+  const error=byId('curl-import-error');error.hidden=true;error.textContent='';
+  try{
+    const imported=RunnerLogic.parseCurlCommand(byId('curl-import-source').value);
+    const urlParts=splitImportedUrl(imported.url),routeParts=RunnerLogic.splitRoute(urlParts.route);
+    if(routeParts.params.some(([name])=>isSensitiveName(name)))throw Error('URL cURL contem parametros sensiveis. Remova-os e use variaveis de ambiente.');
+    const safeRoute=sanitizeRoute(routeParts.route),safeBase=sanitizeBase(urlParts.baseUrl);
+    if(safeRoute.redacted||safeBase.redacted)throw Error('Remova credenciais e fragmentos da URL antes de importar.');
+    if(!createNewWorkspaceTab(false))return;
+    method.value=imported.method;byId('base-url').value=safeBase.value;baseUrlAuto=false;route.value=safeRoute.value;
+    renderQueryParams(routeParts.params);byId('headers').value=imported.headers.map(([name,value])=>`${name}: ${value}`).join('\n');body.value=imported.body;
+    byId('bearer-token').value=imported.bearerToken;if(imported.bearerToken)byId('save-token-history').checked=false;
+    byId('request-title').textContent=`cURL - ${imported.method} ${safeRoute.value||'/'}`;activeSaved=null;setEditorTab('params');
+    byId('import-dialog').close();updateGuard();updateCopyButtons();renderBodyHighlight();updateJsonTools();syncActiveWorkspaceTab(true);renderWorkspaceTabs();scheduleWorkspaceTabsPersist();
+    byId('curl-import-source').value='';showToast('cURL importado',imported.bearerToken?'Bearer importado apenas em memoria; salvamento opcional.':'Request aberta como rascunho.','success');
+  }catch(curlError){error.textContent=curlError.message||'Nao foi possivel importar o comando cURL.';error.hidden=false;}
 }
 async function importCollectionFile(event){
   const file=event.target.files?.[0];event.target.value='';if(!file)return;
@@ -1431,7 +1449,7 @@ function addEventListeners(){
   byId('run-collection').onclick=openRunnerDialog;byId('runner-form').addEventListener('submit',startRunnerFromForm);byId('close-runner').onclick=()=>runnerBusy?requestRunnerStop():byId('runner-dialog').close();byId('cancel-runner').onclick=()=>runnerBusy?requestRunnerStop():byId('runner-dialog').close();byId('stop-runner').onclick=requestRunnerStop;byId('rerun-failed').onclick=rerunRunnerFailures;byId('runner-dialog').addEventListener('cancel',event=>{if(runnerBusy){event.preventDefault();requestRunnerStop();}});
   byId('add-query-param').onclick=()=>{addQueryParamRow();syncActiveWorkspaceTab(true);};byId('add-response-test').onclick=()=>{addResponseTest();syncActiveWorkspaceTab(true);};
   byId('response-tests-list').addEventListener('input',()=>renderResponseTestResults([]));byId('response-tests-list').addEventListener('change',()=>renderResponseTestResults([]));
-  byId('add-collection').onclick=addCollection;byId('add-collection-heading').onclick=addCollection;byId('import-collection').onclick=()=>byId('import-collection-file').click();byId('import-collection-file').addEventListener('change',importCollectionFile);byId('export-collection').onclick=openExportDialog;byId('export-form').addEventListener('submit',exportCollection);byId('close-export-dialog').onclick=()=>byId('export-dialog').close();byId('cancel-export-dialog').onclick=()=>byId('export-dialog').close();byId('save-collection-request').onclick=openSaveDialog;byId('save-request-form').addEventListener('submit',saveCollectionRequest);byId('close-save-request').onclick=()=>byId('save-request-dialog').close();byId('cancel-save-request').onclick=()=>byId('save-request-dialog').close();
+  byId('add-collection').onclick=addCollection;byId('add-collection-heading').onclick=addCollection;byId('import-collection').onclick=openImportDialog;byId('browse-import-file').onclick=()=>{byId('import-dialog').close();byId('import-collection-file').click();};byId('close-import-dialog').onclick=()=>byId('import-dialog').close();byId('cancel-import-dialog').onclick=()=>byId('import-dialog').close();byId('create-curl-request').onclick=openCurlRequestDraft;byId('import-collection-file').addEventListener('change',importCollectionFile);byId('export-collection').onclick=openExportDialog;byId('export-form').addEventListener('submit',exportCollection);byId('close-export-dialog').onclick=()=>byId('export-dialog').close();byId('cancel-export-dialog').onclick=()=>byId('export-dialog').close();byId('save-collection-request').onclick=openSaveDialog;byId('save-request-form').addEventListener('submit',saveCollectionRequest);byId('close-save-request').onclick=()=>byId('save-request-dialog').close();byId('cancel-save-request').onclick=()=>byId('save-request-dialog').close();
   byId('export-workspace').onclick=exportWorkspaceBackup;byId('export-encrypted-workspace').onclick=exportEncryptedWorkspaceBackup;byId('restore-workspace').onclick=()=>byId('restore-workspace-file').click();byId('restore-workspace-file').addEventListener('change',restoreWorkspaceBackup);
   byId('protect-existing-secrets').onclick=protectExistingSecrets;
   byId('environment-form').addEventListener('submit',saveEnvironmentDraft);byId('close-environment').onclick=()=>{environmentDraft=[];byId('environment-dialog').close();};byId('cancel-environment').onclick=()=>{environmentDraft=[];byId('environment-dialog').close();};byId('manage-environments').onclick=openSettingsDialog;byId('settings-environments').onclick=()=>{byId('settings-dialog').close();openEnvironmentDialog();};byId('close-settings').onclick=()=>byId('settings-dialog').close();byId('close-settings-done').onclick=()=>byId('settings-dialog').close();byId('add-environment').onclick=addEnvironmentDraft;
