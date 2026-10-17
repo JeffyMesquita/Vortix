@@ -112,34 +112,54 @@ Evoluímos em fatias pequenas. Cada feature deve resolver um fluxo completo ante
 
 ### 8. OAuth 2.0
 
-Fazer depois de consolidar ambientes e herança, pois o fluxo exige armazenar tokens e tratar validade.
+**Status: Client Credentials e Authorization Code + PKCE implementados e validados; popup PKCE conferido visualmente com OAuth mock local.**
 
-- [ ] Começar por Client Credentials e Authorization Code com PKCE.
-- [ ] Configurar URLs, scopes e armazenamento local do token.
-- [ ] Atualizar ou pedir novo token quando expirar.
-- [ ] Nunca persistir client_secret sem consentimento explícito.
-- [ ] Testar com servidor OAuth local simulado; documentar callbacks e limites.
+#### Client Credentials
+
+- [x] Criar testes de formulário, autenticação Basic/body, expiração e erros antes da implementação.
+- [x] Enviar <code>grant_type=client_credentials</code> por <code>application/x-www-form-urlencoded</code>.
+- [x] Suportar <code>client_secret_basic</code> e <code>client_secret_post</code>; rejeitar query, duplicidade e métodos combinados.
+- [x] Isolar perfil sem segredo por ambiente; solicitar <code>client_secret</code> a cada envio e limpar o campo depois.
+- [x] Salvar <code>access_token</code> como <code>{{token}}</code> por opção e exibir <code>expires_in</code>.
+- [x] Testar com OAuth mock local; conferir armazenamento e ausência de segredo em SQLite.
+- [x] Atualizar README com exemplo, diagrama e limites do fluxo.
+
+#### Authorization Code + PKCE
+
+- [x] Usar nova aba de navegador e callback loopback restrito a <code>127.0.0.1</code>.
+- [x] Gerar <code>state</code>, <code>code_verifier</code> e <code>code_challenge</code> aleatórios com método S256.
+- [x] Validar state e callback específico por provedor; trocar o código com o <code>redirect_uri</code> exato.
+- [x] Persistir tokens somente com consentimento explícito e proteção local.
+- [x] Testar cancelamento, state inválido, timeout, callback de outro provedor e token exchange em mock local.
+- [x] Documentar cadastro da redirect URI, fluxo e limitações por provedor.
+- [x] Validar popup/callback PKCE e opções de consentimento de salvamento no navegador usando OAuth mock loopback.
 
 ### 9. Exemplos de resposta e mock local
 
+
 Permitir testar interface e fluxos sem atingir um serviço externo.
 
-- [ ] Salvar exemplos de resposta por request e status.
-- [ ] Simular respostas no modo de desenvolvimento.
-- [ ] Validar matching de método, rota e query.
-- [ ] Impedir que o mock vire um servidor acessível à rede sem configuração.
-- [ ] Adicionar exemplos para sucesso, validação e erro.
+- [x] Salvar exemplos nomeados por request, preservando status, headers filtrados e body após confirmação explícita.
+- [x] Aplicar limites de tamanho e quantidade; omitir headers de autenticação, cookies e segredos.
+- [x] Persistir exemplos com a coleção e preservá-los no formato Vortix JSON.
+- [x] Importar e exportar exemplos em Insomnia v4 e Postman v2.1, mantendo o vínculo com a request.
+- [x] Pedir confirmação antes de exportar bodies de resposta em JSON sem criptografia.
+- [x] Cobrir normalização, limites, imutabilidade e atualizar README e smoke check.
+- [x] Simular localmente um exemplo salvo sem fazer chamada HTTP nem iniciar servidor.
+- [x] Validar método, caminho e query da request; ordem de query não afeta o matching.
+- [x] Manter a simulação dentro da interface, sem listener ou porta de rede.
+- [x] Documentar exemplos de sucesso, validação e erro e cobrir os três status em testes.
 
 ### 10. Próximos refinamentos
 
 Só entram depois das features anteriores e dos testes de uso:
 
-- [ ] Busca global e filtros por método, status e pasta.
-- [ ] Histórico de respostas com limite configurável e sem guardar body sensível por padrão.
-- [ ] Comparação de respostas e duração.
-- [ ] Importação de mais formatos mediante teste de compatibilidade.
-- [ ] Schema GraphQL por introspecção e autocomplete, com confirmação antes de consultar endpoints externos.
+- [x] Busca global por texto e filtros combináveis por método, status de resposta salvo e coleção/pasta, incluindo subpastas.
+- [x] Histórico de respostas com retenção configurável, metadados e bodies desligados por padrão; bodies de token nunca são salvos.
+- [x] Comparação lado a lado de respostas do histórico: status, duração, headers filtrados e bodies salvos.
+- [x] Importar HTTPie CLI como formato adicional, sem executar o comando; filtrar credenciais e recusar arquivos/opções desconhecidas.
+- [x] Schema GraphQL por introspecção com confirmação explícita, cache em memória, browser de tipos e autocomplete.
 
 ## Regra de sequência
 
-Fechamos uma feature - testes, documentação e revisão - antes de iniciar a seguinte. A próxima execução começa por OAuth 2.0, com testes antes da implementação.
+Fechamos cada feature com teste, documentação e revisão. Busca, histórico, comparação, HTTPie, schema GraphQL e fluxo PKCE visual foram validados em ambiente local/mock.

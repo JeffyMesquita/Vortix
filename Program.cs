@@ -10,12 +10,75 @@ using System.Security.Cryptography;
 using Microsoft.AspNetCore.DataProtection;
 
 const long maxWorkspaceBackupBytes = 16 * 1024 * 1024;
+const string graphqlIntrospectionQuery = """
+    query VortixSchemaIntrospection {
+      __schema {
+        queryType { name }
+        mutationType { name }
+        subscriptionType { name }
+        types {
+          ...FullType
+        }
+      }
+    }
+    fragment FullType on __Type {
+      kind
+      name
+      description
+      fields(includeDeprecated: true) {
+        name
+        description
+        args { ...InputValue }
+        type { ...TypeRef }
+        isDeprecated
+        deprecationReason
+      }
+      inputFields { ...InputValue }
+      interfaces { ...TypeRef }
+      enumValues(includeDeprecated: true) {
+        name
+        description
+        isDeprecated
+        deprecationReason
+      }
+      possibleTypes { ...TypeRef }
+    }
+    fragment InputValue on __InputValue {
+      name
+      description
+      type { ...TypeRef }
+      defaultValue
+    }
+    fragment TypeRef on __Type {
+      kind
+      name
+      ofType {
+        kind
+        name
+        ofType {
+          kind
+          name
+          ofType {
+            kind
+            name
+            ofType { kind name ofType { kind name ofType { kind name } } }
+          }
+        }
+      }
+    }
+    """;
+var graphqlIntrospectionBody = JsonSerializer.Serialize(new { query = graphqlIntrospectionQuery, operationName = "VortixSchemaIntrospection" });
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 var port = builder.Configuration.GetValue("ApiStudio:Port", 51873);
 if (port is < 1 or > 65535)
 {
     throw new InvalidOperationException("ApiStudio:Port deve estar entre 1 e 65535.");
+}
+var pkceFlowTimeoutSeconds = builder.Configuration.GetValue("ApiStudio:OAuthPkceFlowTimeoutSeconds", 300);
+if (pkceFlowTimeoutSeconds is < 1 or > 600)
+{
+    throw new InvalidOperationException("ApiStudio:OAuthPkceFlowTimeoutSeconds deve estar entre 1 e 600.");
 }
 
 var databasePath = builder.Configuration["ApiStudio:DatabasePath"];
@@ -43,6 +106,7 @@ var app = builder.Build();
 var dataProtector = app.Services.GetRequiredService<IDataProtectionProvider>().CreateProtector("LocalDataStore.v1");
 var localDataStore = new LocalDataStore(databasePath, dataProtector);
 var cookieJarLocks = new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal);
+var oauthPkceFlows = new ConcurrentDictionary<string, OAuthPkceFlow>(StringComparer.Ordinal);
 await localDataStore.InitializeAsync();
 app.Use(async (context, next) =>
 {
@@ -54,7 +118,195 @@ app.Use(async (context, next) =>
 });
 app.UseDefaultFiles();
 app.UseStaticFiles();
-app.MapGet("/health", () => Results.Json(new { status = "ok", app = "ApiPublicacaoTester" }));
+app.MapGet("/health", () => Results.Json(new { status = "ok", app = "ApiPublicacaoTester", product = "VortixApiClient" }));
+app.MapPost("/api/oauth/pkce/redirect-uri", (HttpContext context, OAuthPkceRedirectPreviewRequest request) =>
+{
+    if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!TryParseOAuthEndpoint(request.AuthorizationUrl, out var endpoint, out var endpointError))
+        return Error(StatusCodes.Status400BadRequest, endpointError);
+    if (ContainsOAuthAuthorizationParameter(endpoint) || ContainsOAuthCredentialParameter(endpoint))
+        return Error(StatusCodes.Status400BadRequest, "Remova parâmetros OAuth ou credenciais da URL de autorização.");
+    return Results.Json(new { redirectUri = $"http://127.0.0.1:{port}/oauth/callback/{CreateOAuthProviderKey(endpoint)}" });
+});
+app.MapPost("/api/oauth/pkce/start", async (HttpContext context, OAuthPkceStartRequest request, CancellationToken cancellationToken) =>
+{
+    if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!TryParseOAuthEndpoint(request.AuthorizationUrl, out var authorizationEndpoint, out var endpointError))
+        return Error(StatusCodes.Status400BadRequest, endpointError);
+    if (!TryParseOAuthEndpoint(request.TokenUrl, out var tokenEndpoint, out endpointError))
+        return Error(StatusCodes.Status400BadRequest, endpointError);
+    var clientId = request.ClientId?.Trim() ?? string.Empty;
+    var scope = string.Join(' ', (request.Scope ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+    if (clientId.Length is 0 or > 512 || clientId.Contains('\r') || clientId.Contains('\n'))
+        return Error(StatusCodes.Status400BadRequest, "Informe um client_id válido.");
+    if (scope.Length > 4096 || scope.Contains('\r') || scope.Contains('\n'))
+        return Error(StatusCodes.Status400BadRequest, "O scope OAuth é inválido ou excede o limite.");
+    if (ContainsOAuthAuthorizationParameter(authorizationEndpoint) || ContainsOAuthCredentialParameter(authorizationEndpoint))
+        return Error(StatusCodes.Status400BadRequest, "Remova parâmetros OAuth duplicados da URL de autorização.");
+    if (ContainsOAuthCredentialParameter(tokenEndpoint))
+        return Error(StatusCodes.Status400BadRequest, "A URL do token endpoint não pode conter credenciais ou tokens.");
+
+    var now = DateTimeOffset.UtcNow;
+    foreach (var item in oauthPkceFlows)
+        if (item.Value.ExpiresAtUtc <= now) oauthPkceFlows.TryRemove(item.Key, out _);
+    if (oauthPkceFlows.Count >= 16)
+        return Error(StatusCodes.Status429TooManyRequests, "Já existem fluxos OAuth pendentes. Cancele um ou aguarde a expiração.");
+
+    var state = CreateOAuthRandomValue();
+    var verifier = CreateOAuthRandomValue();
+    var challenge = CreateOAuthCodeChallenge(verifier);
+    var providerKey = CreateOAuthProviderKey(authorizationEndpoint);
+    var redirectUri = $"http://127.0.0.1:{port}/oauth/callback/{providerKey}";
+    var authorizationUrl = await BuildOAuthAuthorizationUrlAsync(authorizationEndpoint, clientId, scope, redirectUri, state, challenge, cancellationToken);
+    var flow = new OAuthPkceFlow
+    {
+        State = state,
+        CodeVerifier = verifier,
+        ClientId = clientId,
+        ProviderKey = providerKey,
+        TokenEndpoint = tokenEndpoint,
+        RedirectUri = redirectUri,
+        ExpiresAtUtc = now.AddSeconds(pkceFlowTimeoutSeconds)
+    };
+    if (!oauthPkceFlows.TryAdd(state, flow))
+        return Error(StatusCodes.Status500InternalServerError, "Não foi possível iniciar o fluxo OAuth.");
+
+    return Results.Json(new { state, redirectUri, authorizationUrl, expiresAt = flow.ExpiresAtUtc });
+});
+app.MapGet("/oauth/callback/{providerKey}", async (HttpContext context, string providerKey, CancellationToken cancellationToken) =>
+{
+    if (!IsTrustedOAuthCallback(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var states = context.Request.Query["state"];
+    if (states.Count != 1 || string.IsNullOrWhiteSpace(states[0]) || states[0]!.Length > 128)
+        return Results.Redirect("/oauth/pkce/invalid");
+    if (!oauthPkceFlows.TryGetValue(states[0]!, out var flow) ||
+        !string.Equals(flow.ProviderKey, providerKey, StringComparison.Ordinal))
+        return Results.Redirect("/oauth/pkce/invalid");
+
+    var errors = context.Request.Query["error"];
+    var codes = context.Request.Query["code"];
+    if (errors.Count > 1 || codes.Count > 1 || (errors.Count > 0 && codes.Count > 0))
+        return Results.Redirect("/oauth/pkce/invalid");
+
+    string code = string.Empty;
+    string verifier = string.Empty;
+    lock (flow.SyncRoot)
+    {
+        if (flow.ExpiresAtUtc <= DateTimeOffset.UtcNow)
+        {
+            flow.Status = "expired";
+            flow.ClearSecrets();
+            return Results.Redirect("/oauth/pkce/complete");
+        }
+        if (flow.Status != "pending") return Results.Redirect("/oauth/pkce/invalid");
+        if (errors.Count == 1)
+        {
+            flow.Status = string.Equals(errors[0], "access_denied", StringComparison.Ordinal) ? "cancelled" : "error";
+            flow.ErrorMessage = flow.Status == "cancelled" ? "Autorização cancelada." : "O servidor de autorização retornou um erro.";
+            flow.CodeVerifier = string.Empty;
+            return Results.Redirect("/oauth/pkce/complete");
+        }
+        if (codes.Count != 1 || string.IsNullOrWhiteSpace(codes[0]) || codes[0]!.Length > 4096 ||
+            codes[0]!.Contains('\r') || codes[0]!.Contains('\n'))
+            return Results.Redirect("/oauth/pkce/invalid");
+        flow.Status = "exchanging";
+        code = codes[0]!;
+        verifier = flow.CodeVerifier;
+    }
+
+    try
+    {
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["code"] = code,
+            ["redirect_uri"] = flow.RedirectUri,
+            ["client_id"] = flow.ClientId,
+            ["code_verifier"] = verifier
+        });
+        using var tokenRequest = new HttpRequestMessage(HttpMethod.Post, flow.TokenEndpoint) { Content = content };
+        tokenRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        using var tokenResponse = await httpClient.SendAsync(tokenRequest, HttpCompletionOption.ResponseContentRead, cancellationToken);
+        var tokenBody = await tokenResponse.Content.ReadAsStringAsync(cancellationToken);
+        if (!tokenResponse.IsSuccessStatusCode)
+        {
+            SetOAuthPkceFlowError(flow, $"O token endpoint respondeu HTTP {(int)tokenResponse.StatusCode}.");
+            return Results.Redirect("/oauth/pkce/complete");
+        }
+        if (!TryParseOAuthPkceTokenResponse(tokenBody, out var accessToken, out var refreshToken, out var expiresIn))
+        {
+            SetOAuthPkceFlowError(flow, "A resposta do token endpoint não contém um access_token Bearer válido.");
+            return Results.Redirect("/oauth/pkce/complete");
+        }
+        lock (flow.SyncRoot)
+        {
+            if (flow.ExpiresAtUtc <= DateTimeOffset.UtcNow)
+            {
+                flow.Status = "expired";
+                flow.ClearSecrets();
+                return Results.Redirect("/oauth/pkce/complete");
+            }
+            flow.AccessToken = accessToken;
+            flow.RefreshToken = refreshToken;
+            flow.ExpiresIn = expiresIn;
+            flow.ObtainedAtUtc = DateTimeOffset.UtcNow;
+            flow.CodeVerifier = string.Empty;
+            flow.Status = "complete";
+        }
+        return Results.Redirect("/oauth/pkce/complete");
+    }
+    catch (OperationCanceledException) when (!context.RequestAborted.IsCancellationRequested)
+    {
+        SetOAuthPkceFlowError(flow, "Tempo limite ao trocar o código por um token.");
+        return Results.Redirect("/oauth/pkce/complete");
+    }
+    catch (HttpRequestException)
+    {
+        SetOAuthPkceFlowError(flow, "Falha de rede ou TLS no token endpoint.");
+        return Results.Redirect("/oauth/pkce/complete");
+    }
+    catch (JsonException)
+    {
+        SetOAuthPkceFlowError(flow, "A resposta do token endpoint não contém JSON válido.");
+        return Results.Redirect("/oauth/pkce/complete");
+    }
+});
+
+app.MapGet("/oauth/pkce/complete", (HttpContext context) =>
+{
+    if (!IsTrustedOAuthCallback(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    return OAuthPkceCallbackPage();
+});
+app.MapGet("/oauth/pkce/invalid", (HttpContext context) =>
+{
+    if (!IsTrustedOAuthCallback(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    return OAuthPkceInvalidCallbackPage();
+});
+app.MapGet("/api/oauth/pkce/status/{state}", (HttpContext context, string state) =>
+{
+    if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (state.Length is < 43 or > 128 || !oauthPkceFlows.TryGetValue(state, out var flow))
+        return Results.NotFound();
+    lock (flow.SyncRoot)
+    {
+        if (flow.ExpiresAtUtc <= DateTimeOffset.UtcNow && flow.Status is "pending" or "exchanging" or "complete")
+        {
+            flow.Status = "expired";
+            flow.ClearSecrets();
+        }
+        return flow.Status == "complete"
+            ? Results.Json(new { status = flow.Status, accessToken = flow.AccessToken, refreshToken = flow.RefreshToken, expiresIn = flow.ExpiresIn, obtainedAt = flow.ObtainedAtUtc })
+            : Results.Json(new { status = flow.Status, error = flow.ErrorMessage });
+    }
+});
+
+app.MapDelete("/api/oauth/pkce/status/{state}", (HttpContext context, string state) =>
+{
+    if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!oauthPkceFlows.TryRemove(state, out var flow)) return Results.NotFound();
+    lock (flow.SyncRoot) flow.ClearSecrets();
+    return Results.NoContent();
+});
 app.MapGet("/api/storage/{store}", async (HttpContext context, string store, string? key, CancellationToken cancellationToken) =>
 {
     if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -62,10 +314,13 @@ app.MapGet("/api/storage/{store}", async (HttpContext context, string store, str
     {
         if (key is null)
         {
-            return Results.Json(await localDataStore.ReadAllAsync(store, cancellationToken));
+            var records = await localDataStore.ReadAllAsync(store, cancellationToken);
+            if (localDataStore.ConsumeTokenCredentialModeRecoveryWarning()) context.Response.Headers["X-Api-Studio-Data-Recovery"] = "tokenCredentialMode";
+            return Results.Json(records);
         }
 
         var value = await localDataStore.ReadAsync(store, key, cancellationToken);
+        if (localDataStore.ConsumeTokenCredentialModeRecoveryWarning()) context.Response.Headers["X-Api-Studio-Data-Recovery"] = "tokenCredentialMode";
         return value.HasValue ? Results.Json(value.Value) : Results.Text("null", "application/json");
     }
     catch (ArgumentException)
@@ -76,7 +331,9 @@ app.MapGet("/api/storage/{store}", async (HttpContext context, string store, str
 app.MapGet("/api/storage/workspace", async (HttpContext context, CancellationToken cancellationToken) =>
 {
     if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
-    return Results.Json(await localDataStore.ReadWorkspaceAsync(cancellationToken));
+    var workspace = await localDataStore.ReadWorkspaceAsync(cancellationToken);
+    if (localDataStore.ConsumeTokenCredentialModeRecoveryWarning()) context.Response.Headers["X-Api-Studio-Data-Recovery"] = "tokenCredentialMode";
+    return Results.Json(workspace);
 });app.MapPost("/api/storage/workspace/restore", async (HttpContext context, CancellationToken cancellationToken) =>
 {
     if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -97,7 +354,20 @@ app.MapGet("/api/storage/workspace", async (HttpContext context, CancellationTok
     {
         return Results.Json(new { error = "Backup inválido ou incompatível." }, statusCode: StatusCodes.Status400BadRequest);
     }
-});app.MapPost("/api/storage/{store}", async (HttpContext context, string store, JsonElement value, CancellationToken cancellationToken) =>
+});app.MapPost("/api/storage/history/trim", async (HttpContext context, JsonElement value, CancellationToken cancellationToken) =>
+{
+    if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (value.ValueKind != JsonValueKind.Object ||
+        !value.TryGetProperty("limit", out var limitElement) ||
+        limitElement.ValueKind != JsonValueKind.Number || !limitElement.TryGetInt32(out var limit) || limit is < 1 or > 5000)
+    {
+        return Results.Json(new { error = "O limite do histórico deve estar entre 1 e 5000." }, statusCode: StatusCodes.Status400BadRequest);
+    }
+    var removed = await localDataStore.RetainHistoryAsync(limit, cancellationToken);
+    return Results.Json(new { limit, removed });
+});
+
+app.MapPost("/api/storage/{store}", async (HttpContext context, string store, JsonElement value, CancellationToken cancellationToken) =>
 {
     if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     try
@@ -156,6 +426,35 @@ app.MapDelete("/api/storage/{store}", async (HttpContext context, string store, 
         return StorageError();
     }
 });
+app.MapPost("/api/graphql/introspection", async (HttpContext context, ApiCall request) =>
+{
+    if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (request is null || string.IsNullOrWhiteSpace(request.BaseUrl) || string.IsNullOrWhiteSpace(request.Route))
+        return Error(StatusCodes.Status400BadRequest, "Informe o endpoint GraphQL antes de consultar o schema.");
+
+    // This endpoint always sends the fixed read-only introspection query; client-supplied methods and bodies are ignored.
+    var introspectionCall = new ApiCall
+    {
+        BaseUrl = request.BaseUrl,
+        Route = request.Route,
+        Method = "POST",
+        Headers = request.Headers,
+        AuthType = request.AuthType,
+        BearerToken = request.BearerToken,
+        BasicUsername = request.BasicUsername,
+        BasicPassword = request.BasicPassword,
+        ApiKeyName = request.ApiKeyName,
+        ApiKeyLocation = request.ApiKeyLocation,
+        ApiKeyValue = request.ApiKeyValue,
+        EnvironmentId = request.EnvironmentId,
+        BodyMode = "graphql",
+        Body = graphqlIntrospectionBody,
+        ConfirmTestData = true,
+        TestDataPhrase = "TESTE",
+        AllowInsecureHttp = request.AllowInsecureHttp
+    };
+    return await HandleRequest(context, introspectionCall, httpClient, localDataStore, cookieJarLocks, port);
+});
 app.MapPost("/api/request", (HttpContext context, ApiCall call) => HandleRequest(context, call, httpClient, localDataStore, cookieJarLocks, port));
 await app.RunAsync();
 
@@ -169,7 +468,7 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
     if (call is null || string.IsNullOrWhiteSpace(call.BaseUrl) || call.BaseUrl.Length > 2048 ||
         string.IsNullOrWhiteSpace(call.Route) || call.Route.Length > 4096 || (call.Body?.Length ?? 0) > 900_000 ||
         (call.Headers?.Length ?? 0) > 32_000 || (call.BearerToken?.Length ?? 0) > 8192 ||
-        (call.TokenClientId?.Length ?? 0) > 512 || (call.TokenClientSecret?.Length ?? 0) > 8192 || (call.AuthType?.Length ?? 0) > 16 || (call.BasicUsername?.Length ?? 0) > 1024 || (call.BasicPassword?.Length ?? 0) > 8192 || (call.ApiKeyName?.Length ?? 0) > 128 || (call.ApiKeyLocation?.Length ?? 0) > 16 || (call.ApiKeyValue?.Length ?? 0) > 8192 || (call.BodyMode?.Length ?? 0) > 16 || (call.EnvironmentId?.Length ?? 0) > 128 || call.EnvironmentId?.Contains('\r') == true || call.EnvironmentId?.Contains('\n') == true)
+        (call.TokenClientId?.Length ?? 0) > 512 || (call.TokenClientSecret?.Length ?? 0) > 8192 || (call.TokenFlow?.Length ?? 0) > 64 || (call.AuthType?.Length ?? 0) > 16 || (call.BasicUsername?.Length ?? 0) > 1024 || (call.BasicPassword?.Length ?? 0) > 8192 || (call.ApiKeyName?.Length ?? 0) > 128 || (call.ApiKeyLocation?.Length ?? 0) > 16 || (call.ApiKeyValue?.Length ?? 0) > 8192 || (call.BodyMode?.Length ?? 0) > 16 || (call.EnvironmentId?.Length ?? 0) > 128 || call.EnvironmentId?.Contains('\r') == true || call.EnvironmentId?.Contains('\n') == true)
     {
         return Error(StatusCodes.Status400BadRequest, "Revise URL, rota e tamanho dos campos.");
     }
@@ -261,20 +560,52 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
     }
 
     var isTokenRequest = call.ConfirmTokenRequest;
+    var tokenFlow = call.TokenFlow?.Trim() ?? string.Empty;
+    var isOAuth2ClientCredentials = string.Equals(tokenFlow, "oauth2-client-credentials", StringComparison.Ordinal);
+    if (tokenFlow.Length > 0 && !isOAuth2ClientCredentials) return Error(StatusCodes.Status400BadRequest, "Fluxo de token não suportado.");
+    if (isOAuth2ClientCredentials && !isTokenRequest) return Error(StatusCodes.Status400BadRequest, "Confirme o fluxo OAuth antes de solicitar credenciais.");
 
     if (isTokenRequest)
     {
-        if (method != "POST" || bodyMode != "json" || !string.IsNullOrEmpty(body) ||
-            call.TokenCredentialMode is not ("body" or "query") ||
-            !IsValidTokenFieldName(call.TokenClientIdField) ||
-            !IsValidTokenFieldName(call.TokenClientSecretField) ||
-            string.Equals(call.TokenClientIdField, call.TokenClientSecretField, StringComparison.OrdinalIgnoreCase))
+        if (isOAuth2ClientCredentials)
         {
-            return Error(StatusCodes.Status400BadRequest, "Revise o método, modo e nomes dos campos de credenciais.");
+            if (method != "POST" || bodyMode != "urlencoded" || string.IsNullOrWhiteSpace(body) || authType is not ("none" or "basic"))
+                return Error(StatusCodes.Status400BadRequest, "OAuth Client Credentials exige POST application/x-www-form-urlencoded.");
+            if (contentTypeHeader is not null)
+            {
+                var declaredContentType = contentTypeHeader[(contentTypeHeader.IndexOf(':') + 1)..].Trim();
+                if (!MediaTypeHeaderValue.TryParse(declaredContentType, out var tokenContentType) ||
+                    !string.Equals(tokenContentType.MediaType, "application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase))
+                    return Error(StatusCodes.Status400BadRequest, "OAuth Client Credentials exige Content-Type application/x-www-form-urlencoded.");
+            }
+            if (!TryGetFormField(body, "grant_type", out var grantType) || grantType != "client_credentials")
+                return Error(StatusCodes.Status400BadRequest, "O formulário OAuth precisa conter grant_type=client_credentials.");
+            var hasFormClientId = TryGetFormField(body, "client_id", out var formClientId);
+            var hasFormClientSecret = TryGetFormField(body, "client_secret", out var formClientSecret);
+            if (authType == "basic")
+            {
+                if (ContainsFormField(body, "client_id") || ContainsFormField(body, "client_secret"))
+                    return Error(StatusCodes.Status400BadRequest, "Use somente um método de autenticação do cliente OAuth.");
+            }
+            else if (!hasFormClientId || string.IsNullOrWhiteSpace(formClientId) || !hasFormClientSecret || string.IsNullOrEmpty(formClientSecret))
+            {
+                return Error(StatusCodes.Status400BadRequest, "OAuth client_secret_post exige client_id e client_secret no formulário.");
+            }
         }
-        if (string.IsNullOrWhiteSpace(tokenClientId) || string.IsNullOrWhiteSpace(tokenClientSecret))
+        else
         {
-            return Error(StatusCodes.Status400BadRequest, "Informe os dois valores de credencial.");
+            if (method != "POST" || bodyMode != "json" || !string.IsNullOrEmpty(body) ||
+                call.TokenCredentialMode is not ("body" or "query") ||
+                !IsValidTokenFieldName(call.TokenClientIdField) ||
+                !IsValidTokenFieldName(call.TokenClientSecretField) ||
+                string.Equals(call.TokenClientIdField, call.TokenClientSecretField, StringComparison.OrdinalIgnoreCase))
+            {
+                return Error(StatusCodes.Status400BadRequest, "Revise o método, modo e nomes dos campos de credenciais.");
+            }
+            if (string.IsNullOrWhiteSpace(tokenClientId) || string.IsNullOrWhiteSpace(tokenClientSecret))
+            {
+                return Error(StatusCodes.Status400BadRequest, "Informe os dois valores de credencial.");
+            }
         }
     } else if (IsWriteMethod(method))
     {
@@ -323,7 +654,7 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
     }
 
     var targetText = baseUri.AbsoluteUri.TrimEnd('/') + "/" + route.TrimStart('/');
-    if (isTokenRequest && call.TokenCredentialMode == "query")
+    if (isTokenRequest && !isOAuth2ClientCredentials && call.TokenCredentialMode == "query")
     {
         var separator = targetText.Contains('?') ? "&" : "?";
         targetText += separator + Uri.EscapeDataString(call.TokenClientIdField) + "=" + Uri.EscapeDataString(tokenClientId.Trim()) +
@@ -334,6 +665,11 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
         return Error(StatusCodes.Status400BadRequest, "URL final inválida.");
     }
 
+    if (isOAuth2ClientCredentials &&
+        (ContainsQueryParameter(targetUri, "client_id") || ContainsQueryParameter(targetUri, "client_secret")))
+    {
+        return Error(StatusCodes.Status400BadRequest, "Credenciais OAuth nunca podem ser enviadas na URL.");
+    }
     if (authType == "apikey" && apiKeyLocation == "query")
     {
         if (ContainsQueryParameter(targetUri, apiKeyName))
@@ -366,7 +702,7 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
         var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(basicUsername + ":" + basicPassword));
         request.Headers.Authorization = new AuthenticationHeaderValue("Basic", encoded);
     }
-    if (isTokenRequest && call.TokenCredentialMode == "body")
+    if (isTokenRequest && !isOAuth2ClientCredentials && call.TokenCredentialMode == "body")
     {
         var tokenCredentials = JsonSerializer.Serialize(new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -759,6 +1095,50 @@ static bool IsValidTokenFieldName(string? value) =>
     value is { Length: > 0 and <= 128 } && char.IsAsciiLetter(value[0]) &&
     value.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-' or '.');
 
+static bool ContainsFormField(string form, string fieldName)
+{
+    foreach (var pair in form.Split('&', StringSplitOptions.RemoveEmptyEntries))
+    {
+        var separator = pair.IndexOf('=');
+        var rawName = separator < 0 ? pair : pair[..separator];
+        try
+        {
+            var name = Uri.UnescapeDataString(rawName.Replace('+', ' '));
+            if (string.Equals(name, fieldName, StringComparison.Ordinal)) return true;
+        }
+        catch (UriFormatException)
+        {
+            return false;
+        }
+    }
+    return false;
+}
+static bool TryGetFormField(string form, string fieldName, out string value)
+{
+    value = string.Empty;
+    var found = false;
+    foreach (var pair in form.Split('&', StringSplitOptions.RemoveEmptyEntries))
+    {
+        var separator = pair.IndexOf('=');
+        var rawName = separator < 0 ? pair : pair[..separator];
+        string name;
+        string candidate;
+        try
+        {
+            name = Uri.UnescapeDataString(rawName.Replace('+', ' '));
+            candidate = Uri.UnescapeDataString((separator < 0 ? string.Empty : pair[(separator + 1)..]).Replace('+', ' '));
+        }
+        catch (UriFormatException)
+        {
+            return false;
+        }
+        if (!string.Equals(name, fieldName, StringComparison.Ordinal)) continue;
+        if (found) return false;
+        value = candidate;
+        found = true;
+    }
+    return found;
+}
 static bool IsValidApiKeyHeaderName(string value) =>
     value.Length is > 0 and <= 128 &&
     value.All(character =>
@@ -790,6 +1170,144 @@ static bool IsLoopbackHost(string host) =>
     string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
     (IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address));
 
+static bool TryParseOAuthEndpoint(string? value, out Uri endpoint, out string error)
+{
+    endpoint = null!;
+    error = "Informe uma URL absoluta HTTP ou HTTPS para o endpoint OAuth.";
+    var text = value?.Trim() ?? string.Empty;
+    if (text.Length is 0 or > 2048 || !Uri.TryCreate(text, UriKind.Absolute, out var parsed) ||
+        parsed.Scheme is not ("http" or "https") || parsed.UserInfo.Length > 0 || parsed.Fragment.Length > 0)
+        return false;
+    if (parsed.Scheme == Uri.UriSchemeHttp && !IsLoopbackHost(parsed.Host))
+    {
+        error = "Endpoints OAuth remotos exigem HTTPS.";
+        return false;
+    }
+    endpoint = parsed;
+    return true;
+}
+
+static bool ContainsOAuthAuthorizationParameter(Uri uri) =>
+    new[] { "response_type", "client_id", "redirect_uri", "state", "scope", "code_challenge", "code_challenge_method" }
+        .Any(name => ContainsQueryParameter(uri, name));
+
+static bool ContainsOAuthCredentialParameter(Uri uri)
+{
+    foreach (var pair in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+    {
+        var separator = pair.IndexOf('=');
+        var rawName = separator < 0 ? pair : pair[..separator];
+        string name;
+        try { name = Uri.UnescapeDataString(rawName.Replace('+', ' ')); }
+        catch (UriFormatException) { return true; }
+        if (System.Text.RegularExpressions.Regex.IsMatch(name, "authorization|auth|bearer|token|secret|password|credential|api[-_]?key|client_id|code|verifier", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+            return true;
+    }
+    return false;
+}
+
+static string CreateOAuthRandomValue() =>
+    Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+static string CreateOAuthCodeChallenge(string verifier) =>
+    Convert.ToBase64String(SHA256.HashData(Encoding.ASCII.GetBytes(verifier))).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+static async Task<string> BuildOAuthAuthorizationUrlAsync(
+    Uri endpoint,
+    string clientId,
+    string scope,
+    string redirectUri,
+    string state,
+    string challenge,
+    CancellationToken cancellationToken)
+{
+    var parameters = new List<KeyValuePair<string, string>>
+    {
+        new("response_type", "code"),
+        new("client_id", clientId),
+        new("redirect_uri", redirectUri),
+        new("state", state),
+        new("code_challenge", challenge),
+        new("code_challenge_method", "S256")
+    };
+    if (scope.Length > 0) parameters.Add(new("scope", scope));
+    using var content = new FormUrlEncodedContent(parameters);
+    var query = await content.ReadAsStringAsync(cancellationToken);
+    var builder = new UriBuilder(endpoint);
+    var existingQuery = builder.Query.TrimStart('?');
+    builder.Query = existingQuery.Length == 0 ? query : existingQuery + "&" + query;
+    return builder.Uri.AbsoluteUri;
+}
+
+static bool IsTrustedOAuthCallback(HttpContext context, int port)
+{
+    var remoteAddress = context.Connection.RemoteIpAddress;
+    return remoteAddress is not null && IPAddress.IsLoopback(remoteAddress) &&
+        string.Equals(context.Request.Host.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase) &&
+        context.Request.Host.Port == port;
+}
+
+static string CreateOAuthProviderKey(Uri endpoint)
+{
+    var digest = SHA256.HashData(Encoding.UTF8.GetBytes(endpoint.AbsoluteUri));
+    return Convert.ToBase64String(digest[..16]).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+}
+
+static IResult OAuthPkceCallbackPage() =>
+    Results.Content("<!doctype html><html lang=\"pt-BR\"><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>Vortix · OAuth</title><body><main><h1>Fluxo OAuth encerrado</h1><p>Volte ao Vortix para conferir o resultado. Esta aba pode ser fechada.</p></main></body></html>", "text/html; charset=utf-8", Encoding.UTF8);
+
+static IResult OAuthPkceInvalidCallbackPage() =>
+    Results.Content("<!doctype html><html lang=\"pt-BR\"><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>Vortix · OAuth</title><body><main><h1>Callback rejeitado</h1><p>Confira a redirect URI cadastrada e tente uma nova autorização.</p></main></body></html>", "text/html; charset=utf-8", Encoding.UTF8);
+
+static void SetOAuthPkceFlowError(OAuthPkceFlow flow, string message)
+{
+    lock (flow.SyncRoot)
+    {
+        flow.Status = "error";
+        flow.ErrorMessage = message;
+        flow.CodeVerifier = string.Empty;
+        flow.AccessToken = string.Empty;
+        flow.RefreshToken = string.Empty;
+    }
+}
+
+static bool TryParseOAuthPkceTokenResponse(
+    string body,
+    out string accessToken,
+    out string refreshToken,
+    out long? expiresIn)
+{
+    accessToken = string.Empty;
+    refreshToken = string.Empty;
+    expiresIn = null;
+    using var document = JsonDocument.Parse(body);
+    var root = document.RootElement;
+    if (root.ValueKind != JsonValueKind.Object ||
+        !root.TryGetProperty("access_token", out var accessTokenValue) ||
+        accessTokenValue.ValueKind != JsonValueKind.String)
+        return false;
+    accessToken = accessTokenValue.GetString()?.Trim() ?? string.Empty;
+    if (accessToken.Length is 0 or > 8192 || accessToken.Contains('\r') || accessToken.Contains('\n'))
+        return false;
+    if (!root.TryGetProperty("token_type", out var tokenTypeValue) ||
+        tokenTypeValue.ValueKind != JsonValueKind.String ||
+        !string.Equals(tokenTypeValue.GetString(), "Bearer", StringComparison.OrdinalIgnoreCase))
+        return false;
+    if (root.TryGetProperty("refresh_token", out var refreshTokenValue))
+    {
+        if (refreshTokenValue.ValueKind != JsonValueKind.String) return false;
+        refreshToken = refreshTokenValue.GetString() ?? string.Empty;
+        if (refreshToken.Length > 8192 || refreshToken.Contains('\r') || refreshToken.Contains('\n')) return false;
+    }
+    if (root.TryGetProperty("expires_in", out var expiresValue))
+    {
+        if (expiresValue.ValueKind != JsonValueKind.Number || !expiresValue.TryGetInt64(out var seconds) ||
+            seconds <= 0 || seconds > 3153600000)
+            return false;
+        expiresIn = seconds;
+    }
+    return true;
+}
 static bool TryApplyHeaders(string text, HttpRequestMessage request, out string error)
 {
     error = "Cabeçalho inválido. Use uma linha Nome: valor por cabeçalho.";
@@ -894,7 +1412,7 @@ sealed class ApiCall
     public string BearerToken { get; init; } = string.Empty;
     public string Headers { get; init; } = string.Empty;
     /// <summary>Gets or sets the request body format.</summary>
-    /// <value>One of <c>json</c>, <c>text</c>, <c>xml</c>, <c>urlencoded</c>, or <c>multipart</c>; empty preserves JSON defaults.</value>
+    /// <value>One of <c>json</c>, <c>text</c>, <c>xml</c>, <c>urlencoded</c>, <c>multipart</c>, or <c>graphql</c>; empty preserves JSON defaults.</value>
     public string BodyMode { get; init; } = "json";
     public string Body { get; init; } = string.Empty;
     public List<MultipartField>? MultipartFields { get; init; } = [];
@@ -903,9 +1421,84 @@ sealed class ApiCall
     public bool ConfirmTokenRequest { get; init; }
     public string TokenClientId { get; init; } = string.Empty;
     public string TokenClientSecret { get; init; } = string.Empty;
+    /// <summary>Gets or sets the guarded OAuth token grant flow.</summary>
+    /// <value><c>oauth2-client-credentials</c> for the standard Client Credentials grant; otherwise empty.</value>
+    public string TokenFlow { get; init; } = string.Empty;
     public string TokenCredentialMode { get; init; } = "body";
     public string TokenClientIdField { get; init; } = "client_id";
     public string TokenClientSecretField { get; init; } = "client_secret";
     public bool AllowInsecureHttp { get; init; }
+}
 
+internal sealed record OAuthPkceRedirectPreviewRequest
+{
+    /// <summary>Gets or sets the OAuth authorization endpoint used to preview its registered loopback redirect URI.</summary>
+    public string AuthorizationUrl { get; init; } = string.Empty;
+}
+internal sealed record OAuthPkceStartRequest
+{
+    /// <summary>Gets or sets the OAuth authorization endpoint.</summary>
+    public string AuthorizationUrl { get; init; } = string.Empty;
+
+    /// <summary>Gets or sets the OAuth token endpoint.</summary>
+    public string TokenUrl { get; init; } = string.Empty;
+
+    /// <summary>Gets or sets the registered public client identifier.</summary>
+    public string ClientId { get; init; } = string.Empty;
+
+    /// <summary>Gets or sets the optional space-delimited OAuth scopes.</summary>
+    public string Scope { get; init; } = string.Empty;
+}
+
+internal sealed class OAuthPkceFlow
+{
+    /// <summary>Gets the synchronization lock for this transient flow.</summary>
+    public object SyncRoot { get; } = new();
+
+    /// <summary>Gets or sets the one-time anti-forgery state value.</summary>
+    public string State { get; init; } = string.Empty;
+
+    /// <summary>Gets or sets the one-time PKCE verifier retained only in memory.</summary>
+    public string CodeVerifier { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the public OAuth client identifier.</summary>
+    public string ClientId { get; init; } = string.Empty;
+
+    /// <summary>Gets or sets the provider-specific callback path key.</summary>
+    public string ProviderKey { get; init; } = string.Empty;
+
+    /// <summary>Gets or sets the validated token endpoint.</summary>
+    public Uri TokenEndpoint { get; init; } = new("http://127.0.0.1");
+
+    /// <summary>Gets or sets the exact loopback redirect URI used by this flow.</summary>
+    public string RedirectUri { get; init; } = string.Empty;
+
+    /// <summary>Gets or sets the expiration time for this pending flow.</summary>
+    public DateTimeOffset ExpiresAtUtc { get; init; }
+
+    /// <summary>Gets or sets the flow state exposed to the local status endpoint.</summary>
+    public string Status { get; set; } = "pending";
+
+    /// <summary>Gets or sets a safe user-facing failure message.</summary>
+    public string ErrorMessage { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the access token held temporarily until the user chooses whether to save it.</summary>
+    public string AccessToken { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the optional refresh token held temporarily until the user chooses whether to save it.</summary>
+    public string RefreshToken { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the token lifetime in seconds when provided by the authorization server.</summary>
+    public long? ExpiresIn { get; set; }
+
+    /// <summary>Gets or sets the time when the authorization server returned the tokens.</summary>
+    public DateTimeOffset? ObtainedAtUtc { get; set; }
+
+    /// <summary>Clears token and verifier material retained by this flow.</summary>
+    public void ClearSecrets()
+    {
+        CodeVerifier = string.Empty;
+        AccessToken = string.Empty;
+        RefreshToken = string.Empty;
+    }
 }

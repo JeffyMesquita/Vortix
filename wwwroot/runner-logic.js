@@ -78,6 +78,57 @@
     const query=String(fields?.graphqlQuery||''),variables=String(fields?.graphqlVariables||''),operationName=String(fields?.graphqlOperationName||'').trim();
     return{mimeType:'application/graphql',text:buildGraphqlBody(query,variables,operationName)};
   }
+  function graphqlTypeSignature(reference, depth = 0) {
+    if (!reference || depth > 12) return 'Unknown';
+    if (reference.kind === 'NON_NULL') return graphqlTypeSignature(reference.ofType, depth + 1) + '!';
+    if (reference.kind === 'LIST') return '[' + graphqlTypeSignature(reference.ofType, depth + 1) + ']';
+    return String(reference.name || 'Unknown');
+  }
+
+  function graphqlNamedType(reference) {
+    let current = reference, depth = 0;
+    while (current?.ofType && depth++ < 12) current = current.ofType;
+    return String(current?.name || 'Unknown');
+  }
+
+  function parseGraphqlSchemaResponse(responseText, status = 200) {
+    const httpStatus = Number(status);
+    if (!Number.isInteger(httpStatus) || httpStatus < 200 || httpStatus >= 300) throw Error('Endpoint GraphQL respondeu HTTP ' + (Number.isFinite(httpStatus) ? httpStatus : 0) + '.');
+    const source = String(responseText ?? '');
+    if (source.length > 5 * 1024 * 1024) throw Error('Schema GraphQL ultrapassa o limite de 5 MB.');
+    let document;
+    try { document = JSON.parse(source); }
+    catch { throw Error('Resposta de introspecção GraphQL não é JSON válido.'); }
+    if (!document || typeof document !== 'object' || Array.isArray(document)) throw Error('Resposta de introspecção GraphQL inválida.');
+    if (Array.isArray(document.errors) && document.errors.length) throw Error('A API retornou erros ao consultar introspecção GraphQL.');
+    const schema = document.data?.__schema;
+    if (!schema || !Array.isArray(schema.types) || schema.types.length > 2000) throw Error('Resposta não contém um schema GraphQL válido.');
+    const validName = value => typeof value === 'string' && /^[_A-Za-z][_0-9A-Za-z]*$/.test(value);
+    const types = schema.types.filter(type => type && validName(type.name) && !type.name.startsWith('__')).map(type => {
+      const rawFields = Array.isArray(type.fields) ? type.fields : Array.isArray(type.inputFields) ? type.inputFields : [];
+      const fields = rawFields.slice(0, 2000).filter(field => field && validName(field.name)).map(field => ({
+        name: field.name,
+        description: String(field.description || '').slice(0, 500),
+        returnType: graphqlTypeSignature(field.type),
+        typeName: graphqlNamedType(field.type),
+        args: (Array.isArray(field.args) ? field.args : []).filter(arg => arg && validName(arg.name)).map(arg => ({ name: arg.name, type: graphqlTypeSignature(arg.type), typeName: graphqlNamedType(arg.type) }))
+      }));
+      const enumValues = (Array.isArray(type.enumValues) ? type.enumValues : []).filter(value => value && validName(value.name)).map(value => ({ name: value.name, description: String(value.description || '').slice(0, 500) }));
+      return { name: type.name, kind: String(type.kind || ''), description: String(type.description || '').slice(0, 1000), fields, enumValues };
+    });
+    const queryType = String(schema.queryType?.name || '');
+    if (!queryType || !types.some(type => type.name === queryType && type.fields.length)) throw Error('Schema GraphQL não contém um tipo Query com campos.');
+    return { queryType, mutationType: String(schema.mutationType?.name || ''), subscriptionType: String(schema.subscriptionType?.name || ''), types };
+  }
+
+  function suggestGraphqlFields(schema, typeName, prefix, limit = 12) {
+    const type = schema?.types?.find(item => item.name === typeName);
+    const term = String(prefix || '').trim().toLowerCase();
+    const maximum = Number.isInteger(Number(limit)) ? Math.max(1, Math.min(50, Math.floor(Number(limit)))) : 12;
+    if (!type || !term) return [];
+    return type.fields.filter(field => field.name.toLowerCase().startsWith(term)).slice(0, maximum);
+  }
+
   function normalizeGraphqlImportBody(body){
     const source=body?.graphql;
     if(source&&typeof source==='object'){
@@ -93,16 +144,17 @@
   const reservedNames = new Set(['__proto__', 'prototype', 'constructor']);
   const maxDataSets = 100;
 
-  function flattenRequests(node, ancestors = [], depth = 0, folderId = '', inheritedAuthScopes = []) {
+  function flattenRequests(node, ancestors = [], depth = 0, folderId = '', inheritedAuthScopes = [], folderIds = []) {
     if (depth > 20) throw Error('A coleção ultrapassa 20 níveis de pastas.');
     const currentPath = [...ancestors, String(node?.name || '').trim()].filter(Boolean);
     const path = currentPath.join(' / ');
+    const currentFolderIds = depth === 0 ? folderIds : [...folderIds, String(node?.id || folderId || '')].filter(Boolean);
     const authScopes = node?.auth && typeof node.auth === 'object' && !Array.isArray(node.auth)
       ? [...inheritedAuthScopes, { id: String(node.id || ''), name: String(node.name || ''), auth: node.auth }]
       : inheritedAuthScopes;
-    const result = (node?.requests || []).map(request => ({ request, path, folderId, authScopes }));
+    const result = (node?.requests || []).map(request => ({ request, path, folderId, folderIds: currentFolderIds, authScopes }));
     for (const folder of node?.folders || []) {
-      result.push(...flattenRequests(folder, currentPath, depth + 1, String(folder?.id || ''), authScopes));
+      result.push(...flattenRequests(folder, currentPath, depth + 1, String(folder?.id || ''), authScopes, currentFolderIds));
     }
     return result;
   }
@@ -111,23 +163,33 @@
     return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   }
 
-  function searchRequests(collections, query, limit = 30) {
+  function searchRequests(collections, query, limit = 30, filters = {}) {
     const term = normalizeSearchText(query).trim();
-    if (!term) return [];
+    const methodFilter = String(filters?.method || '').trim().toUpperCase();
+    const statusFilter = filters?.status == null || String(filters.status).trim() === '' ? null : Number(filters.status);
+    const collectionFilter = String(filters?.collectionId || '');
+    const folderFilter = String(filters?.folderId || '');
+    const hasFilters = !!(methodFilter || statusFilter !== null || collectionFilter || folderFilter);
+    if (!term && !hasFilters) return [];
     const requestedLimit = Number.isFinite(Number(limit)) ? Math.floor(Number(limit)) : 30;
     const maxResults = Math.max(1, Math.min(100, requestedLimit));
     const results = [];
     for (const collection of collections || []) {
+      if (collectionFilter && String(collection?.id || '') !== collectionFilter) continue;
       for (const entry of flattenRequests(collection)) {
         const { request } = entry;
+        if (methodFilter && String(request?.method || 'GET').toUpperCase() !== methodFilter) continue;
+        if (statusFilter !== null && (!Number.isInteger(statusFilter) || !(request?.responseExamples || []).some(example => Number(example?.status) === statusFilter))) continue;
+        if (folderFilter && !(entry.folderIds || [entry.folderId]).includes(folderFilter)) continue;
         const searchable = normalizeSearchText([collection?.name, entry.path, request?.method, request?.name, request?.route].join(' '));
-        if (!searchable.includes(term)) continue;
+        if (term && !searchable.includes(term)) continue;
         results.push({ ...entry, collectionId: String(collection?.id || ''), collectionName: String(collection?.name || '') });
         if (results.length >= maxResults) return results;
       }
     }
     return results;
   }
+
   const maxWorkspaceTabs = 12;
 
   function normalizeTokenRequestConfig(source = {}) {
@@ -144,6 +206,112 @@
     }
     if (!validField(clientIdField) || !validField(clientSecretField) || clientIdField.toLowerCase() === clientSecretField.toLowerCase()) throw Error('Informe nomes válidos e diferentes para os campos de credencial.');
     return { route, clientIdField, clientSecretField, credentialMode };
+  }
+
+  function oauthUrlHasCredential(value) {
+    const source = String(value || '');
+    if (source.includes('#') || /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i.test(source)) return true;
+    const queryIndex = source.indexOf('?');
+    if (queryIndex < 0) return false;
+    const query = source.slice(queryIndex + 1);
+    return [...new URLSearchParams(query).keys()].some(name => /authorization|auth|bearer|token|secret|password|credential|api[-_]?key|client_id/i.test(name));
+  }
+  function normalizeOAuthClientCredentialsConfig(source = {}) {
+    const tokenUrl = String(source?.tokenUrl || '').trim().slice(0, 2048);
+    const clientId = String(source?.clientId || '').slice(0, 512);
+    const scope = String(source?.scope || '').trim().split(/\s+/).filter(Boolean).join(' ').slice(0, 4096);
+    const clientAuthMethod = source?.clientAuthMethod === 'client_secret_post' ? 'client_secret_post' : 'client_secret_basic';
+    if (source?.clientAuthMethod && !['client_secret_basic', 'client_secret_post'].includes(source.clientAuthMethod))
+      throw Error('Método de autenticação OAuth inválido.');
+    if (tokenUrl && oauthUrlHasCredential(tokenUrl))
+      throw Error('Segredos e credenciais OAuth não podem ficar na URL.');
+    return { tokenUrl, clientId, scope, clientAuthMethod };
+  }
+
+  function normalizeOAuthPkceConfig(source = {}) {
+    const authorizationUrl = String(source?.authorizationUrl || '').trim();
+    const tokenUrl = String(source?.tokenUrl || '').trim();
+    const clientId = String(source?.clientId || '').trim();
+    const scope = String(source?.scope || '').trim().split(/\s+/).filter(Boolean).join(' ');
+    if (authorizationUrl.length > 2048 || tokenUrl.length > 2048 || clientId.length > 512 || scope.length > 4096)
+      throw Error('A configuração OAuth excede os limites permitidos.');
+    if ((authorizationUrl && oauthUrlHasCredential(authorizationUrl)) || (tokenUrl && oauthUrlHasCredential(tokenUrl)))
+      throw Error('Segredos e credenciais OAuth não podem ficar nas URLs.');
+    return { authorizationUrl, tokenUrl, clientId, scope };
+  }
+
+  function buildOAuthClientCredentialsRequest(source = {}) {
+    const tokenUrl = String(source?.tokenUrl || '').trim();
+    if (!tokenUrl || tokenUrl.length > 2048 || oauthUrlHasCredential(tokenUrl))
+      throw Error('Informe uma URL absoluta válida para o endpoint OAuth.');
+    let endpoint;
+    try { endpoint = new URL(tokenUrl); }
+    catch { throw Error('Informe uma URL absoluta HTTP ou HTTPS para o endpoint OAuth.'); }
+    if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.hash)
+      throw Error('O endpoint OAuth deve usar HTTP ou HTTPS, sem credenciais ou fragmento.');
+    const allowInsecureHttp = source.allowInsecureHttp === true;
+    const insecureOrigin = remoteHttpOrigin(endpoint.origin);
+    if (insecureOrigin && !allowInsecureHttp)
+      throw Error('HTTP fora de localhost exige autorização explícita; HTTPS é recomendado.');
+    const clientId = String(source?.clientId || '');
+    const clientSecret = String(source?.clientSecret || '');
+    if (!clientId.trim() || clientId.length > 512) throw Error('Informe um client_id válido.');
+    if (!clientSecret || clientSecret.length > 8192) throw Error('Informe o client_secret (segredo do cliente).');
+    const clientAuthMethod = source?.clientAuthMethod || 'client_secret_basic';
+    if (!['client_secret_basic', 'client_secret_post'].includes(clientAuthMethod))
+      throw Error('Método de autenticação OAuth inválido.');
+    const scope = String(source?.scope || '').trim().split(/\s+/).filter(Boolean).join(' ');
+    if (scope.length > 4096 || /[\r\n]/.test(scope)) throw Error('O scope OAuth é inválido ou excede o limite.');
+    const body = new URLSearchParams();
+    body.set('grant_type', 'client_credentials');
+    if (scope) body.set('scope', scope);
+    const formEncode = value => new URLSearchParams([['value', value]]).toString().slice('value='.length);
+    let authType = 'none', basicUsername = '', basicPassword = '';
+    if (clientAuthMethod === 'client_secret_basic') {
+      basicUsername = formEncode(clientId);
+      basicPassword = formEncode(clientSecret);
+      if (basicUsername.length > 1024) throw Error('client_id excede o limite para autenticação Basic.');
+      authType = 'basic';
+    } else {
+      body.set('client_id', clientId);
+      body.set('client_secret', clientSecret);
+    }
+    return {
+      baseUrl: endpoint.origin, route: endpoint.pathname + endpoint.search, method: 'POST',
+      bodyMode: 'urlencoded', body: body.toString(), headers: 'Accept: application/json',
+      authType, basicUsername, basicPassword, confirmTestData: false, testDataPhrase: '',
+      confirmTokenRequest: true, tokenFlow: 'oauth2-client-credentials', tokenRequest: true,
+      tokenClientId: '', tokenClientSecret: '', tokenCredentialMode: 'body',
+      tokenClientIdField: 'client_id', tokenClientSecretField: 'client_secret',
+      allowInsecureHttp, saveBearerToken: false
+    };
+  }
+
+  function parseOAuthTokenResponse(raw, status, now = Date.now()) {
+    const responseStatus = Number(status);
+    if (!Number.isInteger(responseStatus) || responseStatus < 200 || responseStatus >= 300)
+      throw Error('O endpoint OAuth respondeu HTTP ' + (Number.isFinite(responseStatus) ? responseStatus : 0) + '.');
+    let value;
+    try { value = JSON.parse(String(raw ?? '')); }
+    catch { throw Error('A resposta do endpoint OAuth não contém JSON válido.'); }
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw Error('A resposta OAuth precisa ser um objeto JSON.');
+    const accessToken = typeof value.access_token === 'string' ? value.access_token.trim() : '';
+    if (!accessToken || accessToken.length > 8192 || /[\r\n]/.test(accessToken))
+      throw Error('A resposta OAuth não contém um access_token válido.');
+    const tokenType = typeof value.token_type === 'string' ? value.token_type.trim() : '';
+    if (tokenType.toLowerCase() !== 'bearer')
+      throw Error('O Vortix aceita tokens OAuth do tipo Bearer nesta etapa.');
+    let expiresIn = null, expiresAt = null;
+    if (Object.hasOwn(value, 'expires_in')) {
+      const seconds = Number(value.expires_in);
+      if (!Number.isSafeInteger(seconds) || seconds <= 0 || seconds > 3153600000)
+        throw Error('O campo expires_in da resposta OAuth é inválido.');
+      expiresIn = seconds;
+      expiresAt = Number(now) + seconds * 1000;
+      if (!Number.isSafeInteger(expiresAt)) throw Error('O vencimento do token OAuth excede o limite.');
+    }
+    return { accessToken, tokenType: 'Bearer', expiresIn, expiresAt };
   }
 
   function normalizeWorkspaceTabs(saved) {
@@ -231,8 +399,8 @@
     return resolved;
   }
 
-  function tokenizeCurlCommand(source) {
-    if (typeof source !== 'string' || source.length > 1024 * 1024) throw Error('Comando cURL inválido ou maior que 1 MB.');
+  function tokenizeShellCommand(source, format) {
+    if (typeof source !== 'string' || source.length > 1024 * 1024) throw Error(`Comando ${format} inválido ou maior que 1 MB.`);
     const input = source.trim().replace(/\\\r?\n[ \t]*/g, ' ').replace(/`\r?\n[ \t]*/g, ' ').replace(/\^\r?\n[ \t]*/g, ' ');
     const tokens = [];
     let token = '', quote = '', active = false;
@@ -248,13 +416,13 @@
       if (/\s/.test(character)) { if (active) { tokens.push(token); token = ''; active = false; } continue; }
       token += character; active = true;
     }
-    if (quote) throw Error('Aspas não fechadas no comando cURL.');
+    if (quote) throw Error(`Aspas não fechadas no comando ${format}.`);
     if (active) tokens.push(token);
     return tokens;
   }
 
   function parseCurlCommand(source) {
-    const tokens = tokenizeCurlCommand(source);
+    const tokens = tokenizeShellCommand(source, 'cURL');
     if (!tokens.length || !/^curl(?:\.exe)?$/i.test(tokens[0])) throw Error('Cole um comando iniciado por curl.');
     const headers = [], data = [];
     let url = '', method = '', bearerToken = '', dataType = '', headOnly = false, jsonMode = false;
@@ -319,6 +487,108 @@
     const hasHeader = name => headers.some(([headerName]) => headerName.toLowerCase() === name);
     if (data.length && !hasHeader('content-type')) headers.push(['Content-Type', jsonMode ? 'application/json' : 'application/x-www-form-urlencoded']);
     if (jsonMode && !hasHeader('accept')) headers.push(['Accept', 'application/json']);
+    return { method: effectiveMethod, url: parsedUrl.href, headers, body, bearerToken };
+  }
+
+  function parseHttpieCommand(source) {
+    const tokens = tokenizeShellCommand(source, 'HTTPie');
+    if (!tokens.length || !/^https?(?:\.exe)?$/i.test(tokens[0])) throw Error('Cole um comando iniciado por http ou https.');
+    const defaultScheme = tokens[0].toLowerCase().startsWith('https') ? 'https' : 'http';
+    const headers = [], query = [], bodyFields = Object.create(null);
+    let url = '', method = '', formMode = false, bearerToken = '';
+    const sensitiveName = name => /auth|bearer|token|secret|password|passwd|senha|credential|cookie|api[-_.]?key|private[-_.]?key/i.test(String(name || ''));
+    const addHeader = raw => {
+      const colon = raw.indexOf(':');
+      if (colon < 1) throw Error('Header HTTPie inválido.');
+      const name = raw.slice(0, colon).trim(), value = raw.slice(colon + 1).trim();
+      if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || /[\r\n]/.test(value)) throw Error('Header HTTPie inválido.');
+      if (/^authorization$/i.test(name) && /^Bearer\s+\S[\s\S]*$/i.test(value)) {
+        if (bearerToken) throw Error('O comando HTTPie contém mais de um token Bearer.');
+        bearerToken = value.replace(/^Bearer\s+/i, '');
+        return;
+      }
+      if (sensitiveName(name)) throw Error('Header sensível não suportado pela importação HTTPie; configure Auth manualmente.');
+      headers.push([name, value]);
+    };
+    const addBodyField = (name, value) => {
+      if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(name) || ['__proto__','prototype','constructor'].includes(name.toLowerCase())) throw Error('Nome de campo HTTPie inválido.');
+      if (sensitiveName(name)) throw Error('Campo sensível não suportado pela importação HTTPie; configure Auth manualmente.');
+      if (Object.hasOwn(bodyFields, name)) throw Error('Campo repetido não suportado pela importação HTTPie.');
+      Object.defineProperty(bodyFields, name, { value, enumerable: true, writable: true, configurable: true });
+    };
+    for (let index = 1; index < tokens.length; index++) {
+      const argument = tokens[index];
+      if (argument === '--form' || argument === '-f') { formMode = true; continue; }
+      if (argument === '--json' || argument === '-j') { formMode = false; continue; }
+      if (argument === '--auth' || argument === '-a' || argument.startsWith('--auth=') || argument.startsWith('-a=')) throw Error('Auth Basic do comando HTTPie não é importada; configure Auth manualmente.');
+      if (argument === '--auth-type' || argument.startsWith('--auth-type=') || argument === '--session' || argument.startsWith('--session=')) throw Error('Opções de Auth/sessão HTTPie não são importadas; configure Auth manualmente.');
+      if (argument.startsWith('-')) throw Error('Opção HTTPie não suportada: ' + argument.split('=', 1)[0] + '.');
+      if (!url) {
+        if (!method && /^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/i.test(argument)) { method = argument.toUpperCase(); continue; }
+        url = argument;
+        continue;
+      }
+      const jsonSeparator = argument.indexOf(':=');
+      if (jsonSeparator > 0) {
+        if (formMode) throw Error('Campos JSON não podem ser misturados com --form.');
+        const name = argument.slice(0, jsonSeparator), rawValue = argument.slice(jsonSeparator + 2);
+        if (rawValue.startsWith('@')) throw Error('Body por arquivo não suportado; anexe o arquivo manualmente.');
+        let value;
+        try { value = JSON.parse(rawValue); }
+        catch { throw Error('Valor JSON inválido no comando HTTPie.'); }
+        addBodyField(name, value);
+        continue;
+      }
+      const equals = argument.indexOf('='), colon = argument.indexOf(':');
+      if (colon > 0 && (equals < 0 || colon < equals)) { addHeader(argument); continue; }
+      const querySeparator = argument.indexOf('==');
+      if (querySeparator > 0 && querySeparator === equals) {
+        const name = argument.slice(0, querySeparator), value = argument.slice(querySeparator + 2);
+        if (sensitiveName(name)) throw Error('Parâmetro sensível não suportado pela importação HTTPie; use variável de ambiente.');
+        query.push([name, value]);
+        continue;
+      }
+      if (equals > 0) {
+        const name = argument.slice(0, equals), value = argument.slice(equals + 1);
+        if (value.startsWith('@') || name.includes('@')) throw Error('Body por arquivo não suportado; anexe o arquivo manualmente.');
+        addBodyField(name, value);
+        continue;
+      }
+      if (/^[^:@=]+@/.test(argument) || argument.startsWith('@')) throw Error('Body por arquivo não suportado; anexe o arquivo manualmente.');
+      if (argument.includes(':')) { addHeader(argument); continue; }
+      throw Error('Item de request HTTPie não suportado.');
+    }
+    if (!url) throw Error('URL não encontrada no comando HTTPie.');
+    const urlText = /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : `${defaultScheme}://${url}`;
+    let parsedUrl;
+    try { parsedUrl = new URL(urlText); } catch { throw Error('Informe uma URL HTTP ou HTTPS válida no comando HTTPie.'); }
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw Error('A URL precisa usar HTTP ou HTTPS.');
+    if (parsedUrl.username || parsedUrl.password) throw Error('Remova credenciais embutidas na URL antes de importar.');
+    if (parsedUrl.hash) throw Error('Remova o fragmento da URL antes de importar.');
+    for (const [name] of parsedUrl.searchParams) if (sensitiveName(name)) throw Error('Parâmetro sensível não suportado pela importação HTTPie; use variável de ambiente.');
+    for (const [name, value] of query) parsedUrl.searchParams.append(name, value);
+    const fieldNames = Object.keys(bodyFields);
+    const effectiveMethod = method || (fieldNames.length ? 'POST' : 'GET');
+    if (!['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(effectiveMethod)) throw Error('Método HTTP não suportado pelo Vortix.');
+    if (fieldNames.length && ['GET','HEAD','OPTIONS'].includes(effectiveMethod)) throw Error('O comando HTTPie envia body com método que não aceita body no Vortix.');
+    const hasHeader = name => headers.some(([headerName]) => headerName.toLowerCase() === name);
+    let body = '';
+    if (fieldNames.length) {
+      if (formMode) {
+        const params = new URLSearchParams();
+        for (const name of fieldNames) {
+          const value = bodyFields[name];
+          if (value !== null && typeof value === 'object') throw Error('--form aceita somente valores de texto simples.');
+          params.append(name, String(value ?? ''));
+        }
+        body = params.toString();
+        if (!hasHeader('content-type')) headers.push(['Content-Type', 'application/x-www-form-urlencoded']);
+      } else {
+        body = JSON.stringify(bodyFields, null, 2);
+        if (!hasHeader('content-type')) headers.push(['Content-Type', 'application/json']);
+      }
+    }
+    if (fieldNames.length && !formMode && !hasHeader('accept')) headers.push(['Accept', 'application/json']);
     return { method: effectiveMethod, url: parsedUrl.href, headers, body, bearerToken };
   }
 
@@ -566,6 +836,265 @@
     return value;
   }
 
+  const defaultHistoryLimit = 500;
+  const maxHistoryResponseBody = 850000;
+
+  function normalizeHistorySettings(source = {}) {
+    const requestedLimit = Number(source?.limit);
+    const limit = Number.isInteger(requestedLimit) && requestedLimit >= 1 && requestedLimit <= 5000 ? requestedLimit : defaultHistoryLimit;
+    return { limit, saveResponseBody: source?.saveResponseBody === true };
+  }
+
+  function normalizeHistoryResponseHeaders(source) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return {};
+    const headers = {};
+    for (const [name, rawValues] of Object.entries(source)) {
+      const key = String(name || '').trim();
+      if (!key || /auth|cookie|token|secret|password|passwd|credential|api[-_.]?key|private[-_.]?key/i.test(key)) continue;
+      const values = (Array.isArray(rawValues) ? rawValues : [rawValues]).map(value => String(value ?? ''));
+      if (values.length) Object.defineProperty(headers, key, { value: values, enumerable: true, writable: true, configurable: true });
+    }
+    return headers;
+  }
+
+  function createResponseHistorySnapshot(result, durationMs, settings = {}) {
+    const preferences = normalizeHistorySettings(settings);
+    const status = Number(result?.status);
+    const rawBody = String(result?.body ?? '');
+    const bodyRequested = preferences.saveResponseBody && settings?.tokenRequest !== true;
+    const bodySaved = bodyRequested && rawBody.length <= maxHistoryResponseBody;
+    const duration = Number(durationMs);
+    return {
+      status: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
+      reason: String(result?.reason || '').slice(0, 256),
+      durationMs: Number.isFinite(duration) ? Math.max(0, Math.round(duration)) : 0,
+      headers: normalizeHistoryResponseHeaders(result?.headers),
+      bodySaved,
+      ...(bodyRequested && !bodySaved ? { bodyOmitted: 'size-limit' } : {}),
+      ...(bodySaved ? { body: rawBody } : {})
+    };
+  }
+
+  function compareHistoryResponses(leftEntry, rightEntry) {
+    const normalize = entry => {
+      const response = entry?.response;
+      if (!response || typeof response !== 'object') throw Error('Cada registro precisa conter uma resposta salva.');
+      const tokenRequest = entry.tokenRequest === true;
+      const bodySaved = !tokenRequest && response.bodySaved === true && typeof response.body === 'string';
+      const status = Number(response.status);
+      return {
+        id: String(entry.id || ''),
+        method: String(entry.method || 'GET').toUpperCase(),
+        route: String(entry.route || ''),
+        savedAt: String(entry.savedAt || ''),
+        tokenRequest,
+        status: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
+        reason: String(response.reason || ''),
+        durationMs: Number.isFinite(Number(response.durationMs)) ? Math.max(0, Math.round(Number(response.durationMs))) : 0,
+        headers: normalizeHistoryResponseHeaders(response.headers),
+        bodySaved,
+        body: bodySaved ? String(response.body) : ''
+      };
+    };
+    const left = normalize(leftEntry), right = normalize(rightEntry);
+    const leftNames = new Map(Object.keys(left.headers).map(name => [name.toLowerCase(), name]));
+    const rightNames = new Map(Object.keys(right.headers).map(name => [name.toLowerCase(), name]));
+    const headerNames = [...new Set([...leftNames.keys(), ...rightNames.keys()])].sort();
+    const values = (headers, names, key) => headers[names.get(key)] || [];
+    const sameValues = (a, b) => a.length === b.length && a.every((value, index) => value === b[index]);
+    const headerChanges = headerNames.flatMap(key => {
+      const a = values(left.headers, leftNames, key), b = values(right.headers, rightNames, key);
+      return sameValues(a, b) ? [] : [{ name: leftNames.get(key) || rightNames.get(key), left: [...a], right: [...b] }];
+    });
+    const bodyComparable = left.bodySaved && right.bodySaved;
+    return {
+      left,
+      right,
+      statusChanged: left.status !== right.status,
+      durationDeltaMs: right.durationMs - left.durationMs,
+      headerChanges,
+      bodyComparable,
+      bodyChanged: bodyComparable ? left.body !== right.body : null
+    };
+  }
+
+  function retainNewestHistoryEntries(entries, limit) {
+    const maximum = normalizeHistorySettings({ limit }).limit;
+    return (Array.isArray(entries) ? entries : [])
+      .map((entry, index) => ({ entry, index, timestamp: Date.parse(entry?.savedAt || '') }))
+      .sort((left, right) => (Number.isFinite(right.timestamp) ? right.timestamp : -Infinity) - (Number.isFinite(left.timestamp) ? left.timestamp : -Infinity) || left.index - right.index)
+      .slice(0, maximum)
+      .map(item => item.entry);
+  }
+
+  function normalizeResponseExamples(responseExamples) {
+    if (responseExamples == null) return [];
+    if (!Array.isArray(responseExamples) || responseExamples.length > 20)
+      throw Error('Cada request aceita até 20 exemplos de resposta.');
+    const ids = new Set();
+    return responseExamples.map((source, index) => {
+      const label = 'O exemplo ' + (index + 1);
+      if (!source || typeof source !== 'object' || Array.isArray(source))
+        throw Error(label + ' está inválido.');
+      const id = String(source.id || '').trim();
+      const name = String(source.name || '').trim();
+      const status = Number(source.status);
+      const body = String(source.body ?? '');
+      const savedAt = String(source.savedAt || '').trim().slice(0, 64);
+      if (!id || id.length > 128 || ids.has(id)) throw Error('O ID de ' + label.toLowerCase() + ' é inválido ou repetido.');
+      if (!name || name.length > 100) throw Error('O nome de ' + label.toLowerCase() + ' precisa ter de 1 a 100 caracteres.');
+      if (!Number.isInteger(status) || status < 100 || status > 599)
+        throw Error(label + ' precisa ter um status HTTP entre 100 e 599.');
+      if (body.length > 1_000_000) throw Error('O body de ' + label.toLowerCase() + ' ultrapassa 1.000.000 caracteres.');
+      const sourceHeaders = source.headers == null ? {} : source.headers;
+      if (!sourceHeaders || typeof sourceHeaders !== 'object' || Array.isArray(sourceHeaders))
+        throw Error('Os headers de ' + label.toLowerCase() + ' estão inválidos.');
+      const entries = Object.entries(sourceHeaders);
+      if (entries.length > 100) throw Error(label + ' ultrapassa 100 headers.');
+      const headers = {};
+      let totalHeaderLength = 0;
+      for (const [rawName, rawValues] of entries) {
+        const headerName = String(rawName).trim();
+        if (!/^[!#$%&'*+.^_|~0-9A-Za-z-]{1,256}$/.test(headerName))
+          throw Error('O nome de header de ' + label.toLowerCase() + ' está inválido.');
+        if (/authorization|cookie|token|secret|password|api[-_]?key/i.test(headerName)) continue;
+        const values = Array.isArray(rawValues) ? rawValues : [rawValues];
+        if (values.length > 100) throw Error('O header ' + headerName + ' de ' + label.toLowerCase() + ' tem valores demais.');
+        const normalizedValues = values.map(value => {
+          const text = String(value ?? '');
+          if (text.length > 4096 || /[\r\n]/.test(text)) throw Error('O header ' + headerName + ' de ' + label.toLowerCase() + ' está inválido.');
+          totalHeaderLength += headerName.length + text.length;
+          if (totalHeaderLength > 32_000) throw Error('Os headers de ' + label.toLowerCase() + ' ultrapassam 32.000 caracteres.');
+          return text;
+        });
+        Object.defineProperty(headers, headerName, { value: normalizedValues, enumerable: true, writable: true, configurable: true });
+      }
+      ids.add(id);
+      return { id, name, status, headers, body, savedAt };
+    });
+  }
+
+  function addResponseExample(responseExamples, example) {
+    const current = normalizeResponseExamples(responseExamples);
+    if (current.length >= 20) throw Error('Cada request aceita até 20 exemplos de resposta.');
+    const added = normalizeResponseExamples([example])[0];
+    if (current.some(item => item.id === added.id)) throw Error('Este exemplo já existe.');
+    return [...current, added];
+  }
+  function appendResponseExampleToRequest(request, example) {
+    if (!request || typeof request !== 'object' || Array.isArray(request))
+      throw Error('A request salva está inválida.');
+    return { ...request, responseExamples: addResponseExample(request.responseExamples, example) };
+  }
+  function responseHeadersFromImport(source, format) {
+    const raw = format === 'postman' ? source.header : source.headers;
+    const headers = {};
+    const append = (name, value) => {
+      const key = String(name || '').trim();
+      if (!key) return;
+      const values = headers[key] || [];
+      Object.defineProperty(headers, key, { value: [...values, String(value ?? '')], enumerable: true, writable: true, configurable: true });
+    };
+    if (Array.isArray(raw)) {
+      for (const header of raw) {
+        if (typeof header === 'string') {
+          const separator = header.indexOf(':');
+          if (separator > 0) append(header.slice(0, separator), header.slice(separator + 1).trim());
+        } else if (header && typeof header === 'object') {
+          const name = header.key ?? header.name;
+          const values = Array.isArray(header.value) ? header.value : [header.value];
+          for (const value of values) append(name, value);
+        }
+      }
+    } else if (typeof raw === 'string') {
+      for (const line of raw.split(/\r?\n/)) {
+        const separator = line.indexOf(':');
+        if (separator > 0) append(line.slice(0, separator), line.slice(separator + 1).trim());
+      }
+    } else if (raw && typeof raw === 'object') {
+      for (const [name, rawValues] of Object.entries(raw)) {
+        for (const value of Array.isArray(rawValues) ? rawValues : [rawValues]) append(name, value);
+      }
+    }
+    return headers;
+  }
+
+  function importResponseExamples(sources, format, createId, savedAt) {
+    if (sources == null) return [];
+    if (!Array.isArray(sources) || sources.length > 20) throw Error('Cada request aceita até 20 exemplos de resposta.');
+    if (!['postman', 'insomnia'].includes(format)) throw Error('Formato de exemplos de resposta inválido.');
+    if (typeof createId !== 'function') throw Error('É necessário criar um ID para cada exemplo importado.');
+    return normalizeResponseExamples(sources.map((source, index) => {
+      if (!source || typeof source !== 'object' || Array.isArray(source)) throw Error('O exemplo importado ' + (index + 1) + ' está inválido.');
+      const candidate = format === 'postman' ? source.code ?? source.status : source.statusCode ?? source.code ?? source.status;
+      let status = Number(candidate);
+      if (!Number.isInteger(status)) {
+        const match = String(source.status ?? source.statusMessage ?? '').match(/(?:^|\D)([1-5]\d\d)(?:\D|$)/);
+        status = match ? Number(match[1]) : status;
+      }
+      const rawBody = source.body;
+      const body = typeof rawBody === 'string' ? rawBody : rawBody == null ? '' : JSON.stringify(rawBody);
+      return {
+        id: String(createId()),
+        name: String(source.name || 'HTTP ' + status).trim(),
+        status,
+        headers: responseHeadersFromImport(source, format),
+        body: body ?? '',
+        savedAt: String(savedAt || '')
+      };
+    }));
+  }
+
+  function buildPostmanResponseExamples(responseExamples) {
+    return normalizeResponseExamples(responseExamples).map(example => ({
+      name: example.name,
+      status: String(example.status),
+      code: example.status,
+      header: Object.entries(example.headers).flatMap(([key, values]) => values.map(value => ({ key, value, type: 'text' }))),
+      body: example.body
+    }));
+  }
+
+  function responseExampleToInsomniaResource(source, resourceId, requestId, url, timestamp = Date.now()) {
+    const example = normalizeResponseExamples([source])[0];
+    const headers = Object.entries(example.headers).flatMap(([name, values]) => values.map(value => ({ name, value })));
+    const contentType = Object.entries(example.headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1]?.[0] || 'text/plain';
+    const created = Number.isFinite(Number(timestamp)) ? Number(timestamp) : Date.now();
+    return {
+      _id: String(resourceId),
+      _type: 'response',
+      parentId: String(requestId),
+      name: example.name,
+      statusCode: example.status,
+      url: String(url || ''),
+      headers,
+      body: example.body,
+      mimeType: contentType,
+      created,
+      modified: created
+    };
+  }
+  function responseExampleRequestMatches(current, saved) {
+    if (!current || !saved || typeof current !== 'object' || typeof saved !== 'object') return false;
+    if (String(current.method || '').toUpperCase() !== String(saved.method || '').toUpperCase()) return false;
+    const currentRoute = splitRoute(current.route);
+    const savedRoute = splitRoute(saved.route);
+    if (currentRoute.route !== savedRoute.route) return false;
+    const sortPairs = pairs => pairs.map(([name, value]) => [String(name), String(value)]).sort((left, right) => {
+      if (left[0] !== right[0]) return left[0] < right[0] ? -1 : 1;
+      if (left[1] !== right[1]) return left[1] < right[1] ? -1 : 1;
+      return 0;
+    });
+    return JSON.stringify(sortPairs(currentRoute.params)) === JSON.stringify(sortPairs(savedRoute.params));
+  }
+
+  function buildResponseExampleMock(current, saved, exampleId) {
+    if (!responseExampleRequestMatches(current, saved))
+      throw Error('A resposta mock exige o mesmo método, path e query da request salva.');
+    const example = normalizeResponseExamples(saved.responseExamples).find(item => item.id === String(exampleId));
+    if (!example) throw Error('O exemplo de resposta não existe nesta request salva.');
+    return { status: example.status, reason: 'Local mock', headers: example.headers, body: example.body };
+  }
   function normalizeResponseTests(responseTests) {
     if (responseTests == null) return [];
     if (!Array.isArray(responseTests) || responseTests.length > 20) throw Error('Informe até 20 testes de resposta.');
@@ -869,5 +1398,5 @@
     catch { throw Error('O conteúdo descriptografado não é um backup válido do Vortix.'); }
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, normalizeGraphqlImportBody, normalizeTokenRequestConfig, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

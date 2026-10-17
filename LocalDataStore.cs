@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.DataProtection;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -14,6 +15,7 @@ internal sealed class LocalDataStore
     private const string LegacyProtectedPrefix = "APISTUDIO:DPAPI:v1:";
     private readonly string _connectionString;
     private readonly IDataProtector _protector;
+    private int _tokenCredentialModeRecoveryWarning;
 
     public LocalDataStore(string databasePath, IDataProtector protector)
     {
@@ -30,6 +32,9 @@ internal sealed class LocalDataStore
 
     public string DatabasePath { get; }
 
+    /// <summary>Consumes the warning raised when an unreadable token transport preference uses the safe default.</summary>
+    /// <returns><see langword="true" /> if a read used the recovery default; otherwise, <see langword="false" />.</returns>
+    public bool ConsumeTokenCredentialModeRecoveryWarning() => Interlocked.Exchange(ref _tokenCredentialModeRecoveryWarning, 0) != 0;
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = new SqliteConnection(_connectionString);
@@ -328,7 +333,16 @@ internal sealed class LocalDataStore
             if (!protect)
             {
                 changed = true;
-                return _protector.Unprotect(value[protectedPrefix.Length..]);
+                try
+                {
+                    return _protector.Unprotect(value[protectedPrefix.Length..]);
+                }
+                catch (CryptographicException) when (name.Equals("tokenCredentialMode", StringComparison.OrdinalIgnoreCase))
+                {
+                    // This transport preference is not a secret; body is the safe default when its old key is unavailable.
+                    Interlocked.Exchange(ref _tokenCredentialModeRecoveryWarning, 1);
+                    return "body";
+                }
             }
             return value;
         }
@@ -347,6 +361,7 @@ internal sealed class LocalDataStore
     private static bool IsSensitiveName(string name)
     {
         var compact = new string(name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        if (compact == "tokencredentialmode") return false;
         return new[] { "authorization", "auth", "bearer", "token", "secret", "password", "passwd", "basicusername", "senha", "credential", "cookie", "apikey", "privatekey" }
             .Any(part => compact.Contains(part, StringComparison.Ordinal));
     }
@@ -383,6 +398,30 @@ internal sealed class LocalDataStore
         command.Parameters.AddWithValue("$store", store);
         command.Parameters.AddWithValue("$key", key);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>Removes the oldest history records while keeping the newest entries.</summary>
+    /// <param name="limit">A maximum number of records to retain, from 1 to 5000.</param>
+    /// <param name="cancellationToken">A token that cancels the operation.</param>
+    /// <returns>The number of removed records.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The requested limit is outside the supported range.</exception>
+    public async Task<int> RetainHistoryAsync(int limit, CancellationToken cancellationToken = default)
+    {
+        if (limit is < 1 or > 5000) throw new ArgumentOutOfRangeException(nameof(limit));
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE FROM api_studio_data
+            WHERE store = $store AND record_key NOT IN (
+                SELECT record_key FROM api_studio_data
+                WHERE store = $store
+                ORDER BY json_extract(json, '$.savedAt') DESC, record_key DESC
+                LIMIT $limit
+            )
+            """;
+        command.Parameters.AddWithValue("$store", "history");
+        command.Parameters.AddWithValue("$limit", limit);
+        return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task ClearAsync(string store, CancellationToken cancellationToken = default)
