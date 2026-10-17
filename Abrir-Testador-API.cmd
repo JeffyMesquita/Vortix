@@ -1,10 +1,3 @@
 @echo off
-setlocal
-where dotnet >nul 2>nul
-if errorlevel 1 (
-  echo .NET 8 nao encontrado. Instale/valide o runtime antes de abrir esta ferramenta.
-  pause
-  exit /b 1
-)
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Abrir-Testador-API.ps1"
-if errorlevel 1 pause
+call "%~dp0VortixApiClient.cmd" %*
+exit /b %errorlevel%

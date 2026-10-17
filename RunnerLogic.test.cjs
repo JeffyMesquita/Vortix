@@ -131,6 +131,57 @@ test('rejects cURL destinations outside HTTP and HTTPS', () => {
   assert.throws(() => parseCurlCommand('curl https://user:password@api.example.test/data'), /credenciais.*URL/i);
 });
 
+test('parses a quoted HTTPie GET without executing it and separates Bearer Auth', () => {
+  const { parseHttpieCommand } = runnerLogic();
+  const parsed = parseHttpieCommand('https GET api.example.test/v1/users search==Ana Accept:application/json Cache-Control:max-age=30 Authorization:"Bearer {{token}}"');
+  assert.equal(parsed.method, 'GET');
+  assert.equal(parsed.url, 'https://api.example.test/v1/users?search=Ana');
+  assert.deepEqual(parsed.headers, [['Accept', 'application/json'], ['Cache-Control', 'max-age=30']]);
+  assert.equal(parsed.bearerToken, '{{token}}');
+  assert.equal(parsed.body, '');
+});
+
+test('parses HTTPie JSON and form fields into supported request bodies', () => {
+  const { parseHttpieCommand } = runnerLogic();
+  const json = parseHttpieCommand('http POST https://api.example.test/v1/users name=Ana age:=42 active:=true');
+  assert.equal(json.method, 'POST');
+  assert.deepEqual(JSON.parse(json.body), { name: 'Ana', age: 42, active: true });
+  assert.deepEqual(json.headers, [['Content-Type', 'application/json'], ['Accept', 'application/json']]);
+  const form = parseHttpieCommand('http --form POST https://api.example.test/v1/search term=hello');
+  assert.equal(form.body, 'term=hello');
+  assert.deepEqual(form.headers, [['Content-Type', 'application/x-www-form-urlencoded']]);
+});
+
+test('rejects HTTPie Basic Auth, sensitive fields, file references, and unsafe URLs without echoing values', () => {
+  const { parseHttpieCommand } = runnerLogic();
+  assert.equal(typeof parseHttpieCommand, 'function');
+  for (const command of [
+    'http --auth user:very-secret https://api.example.test',
+    'http POST https://api.example.test token=very-secret',
+    'http POST https://api.example.test file@private.json',
+    'http https://user:very-secret@api.example.test/path'
+  ]) assert.throws(() => parseHttpieCommand(command), error => {
+    assert.doesNotMatch(error.message, /very-secret|private\.json/);
+    return true;
+  });
+});
+
+test('command import dialog exposes the HTTPie parser option', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.ok(html.includes('id="command-import-format"'));
+  assert.ok(html.includes('<option value="httpie">HTTPie</option>'));
+  assert.ok(app.includes('RunnerLogic.parseHttpieCommand'));
+});
+
+test('README documents safe HTTPie import syntax and limits', () => {
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+  assert.ok(readme.includes('### Importar HTTPie'));
+  assert.ok(readme.includes('page==1'));
+  assert.ok(readme.includes('--form'));
+  assert.ok(readme.includes('nunca executa o comando'));
+});
+
 test('flattens a collection in visual order with nested folder paths', () => {
   const { flattenRequests } = runnerLogic();
   const collection = {
@@ -347,6 +398,23 @@ test('workspace groups global appearance controls in settings', () => {
   assert.match(html, /id="settings-environments"/);
 });
 
+test('quick search filters by method, saved response status, and descendant folder with an empty query', () => {
+  const { searchRequests } = runnerLogic();
+  const collection = {
+    id: 'orders', name: 'Orders',
+    requests: [{ id: 'root-200', name: 'List', method: 'GET', route: '/orders', responseExamples: [{ status: 200 }] }],
+    folders: [{ id: 'read-folder', name: 'Read', requests: [
+      { id: 'read-404', name: 'Missing', method: 'GET', route: '/orders/missing', responseExamples: [{ status: 404 }] },
+      { id: 'create-201', name: 'Create', method: 'POST', route: '/orders', responseExamples: [{ status: 201 }] }
+    ], folders: [{ id: 'nested-folder', name: 'Nested', requests: [
+      { id: 'nested-404', name: 'Nested missing', method: 'GET', route: '/orders/nested/missing', responseExamples: [{ status: 404 }] }
+    ], folders: [] }] }]
+  };
+  const filtered = searchRequests([collection], '', 30, { method: 'GET', status: '404', collectionId: 'orders', folderId: 'read-folder' });
+  assert.deepEqual(filtered.map(item => item.request.id), ['read-404', 'nested-404']);
+  const create = searchRequests([collection], '', 30, { method: 'POST', status: '201', collectionId: 'orders', folderId: 'read-folder' });
+  assert.deepEqual(create.map(item => item.request.id), ['create-201']);
+});
 test('quick search finds nested requests by accent-insensitive text and keeps their collection path', () => {
   const { searchRequests } = runnerLogic();
   const collection = {
@@ -374,6 +442,123 @@ test('quick search is reachable from the sidebar and exposes an accessible resul
   assert.match(html, /id="quick-open-query"/);
   assert.match(html, /id="quick-open-results"/);
 });
+test('README documents quick search filters and keyboard controls', () => {
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+  assert.ok(readme.includes('## Busca rápida'));
+  assert.ok(readme.includes('Ctrl+K'));
+  assert.ok(readme.includes('status salvo'));
+  assert.ok(readme.includes('subpastas'));
+});
+
+test('response history defaults to metadata and filters sensitive headers before optional body capture', () => {
+  const { normalizeHistorySettings, createResponseHistorySnapshot } = runnerLogic();
+  assert.deepEqual(normalizeHistorySettings(), { limit: 500, saveResponseBody: false });
+  const result = { status: 201, reason: 'Created', headers: {
+    'Content-Type': ['application/json'], 'X-Trace': ['trace-1'],
+    Authorization: ['Bearer hidden'], 'X-Auth': ['hidden'], 'Set-Cookie': ['session=hidden'], 'X-Api-Key': ['hidden'], 'X-Private-Key': ['hidden']
+  }, body: '{"id":42}' };
+  const metadata = createResponseHistorySnapshot(result, 17.6, normalizeHistorySettings());
+  assert.deepEqual(metadata, { status: 201, reason: 'Created', durationMs: 18, headers: {
+    'Content-Type': ['application/json'], 'X-Trace': ['trace-1']
+  }, bodySaved: false });
+  const optedIn = createResponseHistorySnapshot(result, 17.6, normalizeHistorySettings({ limit: 250, saveResponseBody: true }));
+  assert.equal(optedIn.body, '{"id":42}');
+  assert.equal(optedIn.bodySaved, true);
+});
+
+test('history never saves token response bodies even when body saving is enabled', () => {
+  const { normalizeHistorySettings, createResponseHistorySnapshot } = runnerLogic();
+  const result = { status: 200, reason: 'OK', headers: {}, body: '{"access_token":"secret-token"}' };
+  const settings = { ...normalizeHistorySettings({ limit: 250, saveResponseBody: true }), tokenRequest: true };
+  const snapshot = createResponseHistorySnapshot(result, 12, settings);
+  assert.equal(snapshot.bodySaved, false);
+  assert.equal(Object.hasOwn(snapshot, 'body'), false);
+});
+
+test('history retention keeps the newest entries within the configured limit', () => {
+  const { retainNewestHistoryEntries } = runnerLogic();
+  const entries = [
+    { id: 'old', savedAt: '2026-01-01T00:00:00Z' },
+    { id: 'newest', savedAt: '2026-03-01T00:00:00Z' },
+    { id: 'middle', savedAt: '2026-02-01T00:00:00Z' }
+  ];
+  assert.deepEqual(retainNewestHistoryEntries(entries, 2).map(entry => entry.id), ['newest', 'middle']);
+  assert.equal(entries.length, 3, 'retention must not mutate the source array');
+});
+
+test('dialogs account for global zoom when fitting within the viewport', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'wwwroot', 'style.css'), 'utf8');
+  assert.ok(css.includes('max-height: min(820px, calc(100dvh / var(--ui-scale, 1) - 32px));'), 'dialog height must account for global UI zoom');
+});
+
+test('history settings expose a retention limit and opt-in response bodies', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.match(html, /id="history-retention-limit"/);
+  assert.match(html, /id="history-save-response-body"/);
+  assert.match(html, /Bodies de resposta ficam desativados por padrão/);
+  assert.ok(app.includes("key:'historyPreferences'"));
+  assert.ok(app.includes('/api/storage/history/trim'));
+  assert.ok(app.includes('RunnerLogic.createResponseHistorySnapshot'));
+});
+
+test('history response entries can reopen a saved response in the response viewer', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.ok(app.includes('showHistoryResponse'));
+  assert.ok(app.includes('history-response-status'));
+  assert.ok(app.includes('Resposta restaurada do histórico'));
+  assert.ok(app.includes("entry.tokenRequest?'Body de resposta de token removido por segurança.'"));
+});
+
+test('README documents response history retention, privacy, and token exclusions', () => {
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+  assert.ok(readme.includes('## Histórico de respostas'));
+  assert.ok(readme.includes('500 requests'));
+  assert.match(readme, /token.*nunca.*guardados/);
+  assert.ok(readme.includes('HistoryRetention.test.ps1'));
+});
+
+test('response footer distinguishes temporary, saved, and restored responses', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.ok(html.includes('id="response-persistence-note"'));
+  assert.ok(app.includes('Resposta salva no histórico'));
+  assert.ok(app.includes('Resposta recuperada do histórico'));
+});
+
+test('compares response history status, duration, headers, and opt-in bodies safely', () => {
+  const { compareHistoryResponses } = runnerLogic();
+  const left = { id: 'left', method: 'GET', route: '/items', response: { status: 200, reason: 'OK', durationMs: 90, headers: { 'Content-Type': ['application/json'], 'X-Version': ['1'], Authorization: ['Bearer left-secret'] }, bodySaved: true, body: '{"id":1}' } };
+  const right = { id: 'right', method: 'GET', route: '/items', response: { status: 201, reason: 'Created', durationMs: 40, headers: { 'content-type': ['application/json'], 'X-Version': ['2'], Authorization: ['Bearer right-secret'] }, bodySaved: true, body: '{"id":2}' } };
+  const result = compareHistoryResponses(left, right);
+  assert.equal(result.statusChanged, true);
+  assert.equal(result.durationDeltaMs, -50);
+  assert.deepEqual(result.headerChanges, [{ name: 'X-Version', left: ['1'], right: ['2'] }]);
+  assert.equal(result.bodyComparable, true);
+  assert.equal(result.bodyChanged, true);
+  assert.doesNotMatch(JSON.stringify(result), /left-secret|right-secret/);
+  const token = compareHistoryResponses({ ...left, tokenRequest: true }, right);
+  assert.equal(token.bodyComparable, false);
+  assert.equal(token.left.body, '');
+});
+
+test('history exposes an accessible response comparison dialog', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.ok(html.includes('id="compare-history-responses"'));
+  assert.ok(html.includes('id="history-compare-dialog"'));
+  assert.ok(app.includes('RunnerLogic.compareHistoryResponses'));
+  assert.ok(app.includes('openHistoryComparison'));
+});
+
+test('README explains how to compare two response history entries', () => {
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+  assert.ok(readme.includes('Comparar respostas'));
+  assert.ok(readme.includes('Marque duas respostas'));
+  assert.ok(readme.includes('duração'));
+  assert.ok(readme.includes('body não foi guardado'));
+});
+
 test('workspace tabs discard invalid and duplicate records and select the newest when active tab is missing', () => {
   const { normalizeWorkspaceTabs } = runnerLogic();
   const state = normalizeWorkspaceTabs({ activeId: 'missing', tabs: [
@@ -618,6 +803,54 @@ test('GraphQL body builder validates variables and omits empty optional properti
   assert.throws(() => prepareSavedRequest({ method: 'GET', route: '/graphql', bodyMode: 'graphql', graphqlQuery: '{ ping }' }, {}, {}, true), /POST/i);
 });
 
+test('parses an introspected GraphQL schema and suggests fields by selected type', () => {
+  const { parseGraphqlSchemaResponse, suggestGraphqlFields } = runnerLogic();
+  const payload = { data: { __schema: {
+    queryType: { name: 'Query' }, mutationType: { name: 'Mutation' }, subscriptionType: null,
+    types: [
+      { kind: 'OBJECT', name: 'Query', description: 'Root query', fields: [
+        { name: 'user', description: 'Find user', args: [{ name: 'id', type: { kind: 'NON_NULL', name: null, ofType: { kind: 'SCALAR', name: 'ID', ofType: null } } }], type: { kind: 'NON_NULL', name: null, ofType: { kind: 'OBJECT', name: 'User', ofType: null } } },
+        { name: 'health', description: null, args: [], type: { kind: 'SCALAR', name: 'String', ofType: null } }
+      ] },
+      { kind: 'OBJECT', name: 'User', fields: [{ name: 'name', args: [], type: { kind: 'SCALAR', name: 'String', ofType: null } }] },
+      { kind: 'OBJECT', name: '__Schema', fields: [] }
+    ]
+  } } };
+  const schema = parseGraphqlSchemaResponse(JSON.stringify(payload), 200);
+  assert.equal(schema.queryType, 'Query');
+  assert.equal(schema.types.some(type => type.name === '__Schema'), false);
+  assert.equal(schema.types.find(type => type.name === 'Query').fields[0].returnType, 'User!');
+  assert.equal(schema.types.find(type => type.name === 'Query').fields[0].args[0].type, 'ID!');
+  assert.deepEqual(suggestGraphqlFields(schema, 'Query', 'us').map(field => field.name), ['user']);
+});
+
+test('rejects failed or malformed GraphQL introspection responses without echoing server payloads', () => {
+  const { parseGraphqlSchemaResponse } = runnerLogic();
+  assert.throws(() => parseGraphqlSchemaResponse('{"errors":[{"message":"private-response-detail"}]}', 200), error => {
+    assert.match(error.message, /introspecção/i);
+    assert.doesNotMatch(error.message, /private-response-detail/);
+    return true;
+  });
+  assert.throws(() => parseGraphqlSchemaResponse('{}', 200), /schema/i);
+  assert.throws(() => parseGraphqlSchemaResponse('{}', 401), /HTTP 401/i);
+});
+
+test('GraphQL editor exposes a schema loader, type selector, and autocomplete region', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  for (const id of ['graphql-load-schema', 'graphql-schema-type', 'graphql-autocomplete']) assert.ok(html.includes('id="' + id + '"'));
+  assert.ok(app.includes("'/api/graphql/introspection'"));
+  assert.ok(app.includes('RunnerLogic.parseGraphqlSchemaResponse'));
+  assert.ok(app.includes('confirmWithDialog'));
+});
+
+test('README documents schema introspection confirmation, memory-only cache, and endpoint test', () => {
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+  assert.ok(readme.includes('### Schema, confirmação e autocomplete'));
+  assert.ok(readme.includes('O schema fica somente em memória'));
+  assert.ok(readme.includes('GraphqlIntrospection.test.ps1'));
+});
+
 test('GraphQL editor exposes query, JSON variables, and operation name controls', () => {
   const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
   for (const id of ['graphql-query', 'graphql-variables', 'graphql-operation-name']) assert.ok(html.includes('id="' + id + '"'), 'missing GraphQL field: ' + id);
@@ -783,4 +1016,426 @@ test('history restores environment and clears stale collection scope before reso
   const renderEnvironment = apply.indexOf('renderEnvironmentSelect()');
   const resolveAuth = apply.indexOf('applyAuthFields(entry)');
   assert.ok(resetScope >= 0 && restoreEnvironment > resetScope && renderEnvironment > restoreEnvironment && resolveAuth > renderEnvironment);
+});
+
+test('OAuth Client Credentials builds a form request with RFC-encoded Basic credentials', () => {
+  const { buildOAuthClientCredentialsRequest } = runnerLogic();
+  const request = buildOAuthClientCredentialsRequest({
+    tokenUrl: 'https://identity.example.test/oauth/token?tenant=blue',
+    clientId: 'client:app one', clientSecret: 's:cret value&', scope: 'read:items   write:items',
+    clientAuthMethod: 'client_secret_basic'
+  });
+  const encodeCredential = value => new URLSearchParams([['value', value]]).toString().slice('value='.length);
+  assert.equal(request.baseUrl, 'https://identity.example.test');
+  assert.equal(request.route, '/oauth/token?tenant=blue');
+  assert.equal(request.method, 'POST');
+  assert.equal(request.bodyMode, 'urlencoded');
+  assert.equal(request.body, 'grant_type=client_credentials&scope=read%3Aitems+write%3Aitems');
+  assert.equal(request.authType, 'basic');
+  assert.equal(request.basicUsername, encodeCredential('client:app one'));
+  assert.equal(request.basicPassword, encodeCredential('s:cret value&'));
+  assert.equal(request.confirmTokenRequest, true);
+  assert.equal(request.tokenFlow, 'oauth2-client-credentials');
+  assert.equal(request.tokenClientSecret, '');
+  assert.equal(request.allowInsecureHttp, false);
+});
+
+test('OAuth Client Credentials supports client_secret_post without putting credentials in URL', () => {
+  const { buildOAuthClientCredentialsRequest } = runnerLogic();
+  const request = buildOAuthClientCredentialsRequest({
+    tokenUrl: 'https://identity.example.test/connect/token',
+    clientId: 'client id', clientSecret: 'secret&value', scope: '', clientAuthMethod: 'client_secret_post'
+  });
+  const fields = Object.fromEntries(new URLSearchParams(request.body));
+  assert.deepEqual(fields, { grant_type: 'client_credentials', client_id: 'client id', client_secret: 'secret&value' });
+  assert.equal(request.authType, 'none');
+  assert.equal(request.basicPassword, '');
+  assert.equal(request.route, '/connect/token');
+});
+
+test('OAuth Client Credentials validates endpoint security and client settings', () => {
+  const { buildOAuthClientCredentialsRequest } = runnerLogic();
+  const valid = { tokenUrl: 'https://identity.example.test/token', clientId: 'id', clientSecret: 'secret' };
+  assert.throws(() => buildOAuthClientCredentialsRequest({ ...valid, tokenUrl: 'ftp://identity.example.test/token' }), /HTTP|HTTPS/i);
+  assert.throws(() => buildOAuthClientCredentialsRequest({ ...valid, tokenUrl: 'https://user:pass@identity.example.test/token' }), /credenciais|URL/i);
+  assert.throws(() => buildOAuthClientCredentialsRequest({ ...valid, tokenUrl: 'https://identity.example.test/token#fragment' }), /fragmento|URL/i);
+  assert.throws(() => buildOAuthClientCredentialsRequest({ ...valid, tokenUrl: 'http://identity.example.test/token' }), /HTTP|TLS/i);
+  assert.doesNotThrow(() => buildOAuthClientCredentialsRequest({ ...valid, tokenUrl: 'http://identity.example.test/token', allowInsecureHttp: true }));
+  assert.doesNotThrow(() => buildOAuthClientCredentialsRequest({ ...valid, tokenUrl: 'http://localhost:4321/token' }));
+  assert.throws(() => buildOAuthClientCredentialsRequest({ ...valid, clientAuthMethod: 'query' }), /autentica/i);
+  assert.throws(() => buildOAuthClientCredentialsRequest({ ...valid, clientSecret: '' }), /segredo/i);
+});
+
+test('OAuth token response stores only a valid Bearer token and expiration metadata', () => {
+  const { parseOAuthTokenResponse } = runnerLogic();
+  const result = parseOAuthTokenResponse(JSON.stringify({ access_token: 'access-secret-value', token_type: 'bEaReR', expires_in: 3600, refresh_token: 'must-not-be-kept' }), 200, 1000);
+  assert.deepEqual(result, { accessToken: 'access-secret-value', tokenType: 'Bearer', expiresIn: 3600, expiresAt: 3601000 });
+  assert.throws(() => parseOAuthTokenResponse('{"error":"invalid_client"}', 401), /HTTP 401/i);
+  assert.throws(() => parseOAuthTokenResponse('not json', 200), /JSON/i);
+  assert.throws(() => parseOAuthTokenResponse('{"token_type":"Bearer"}', 200), /access_token/i);
+  assert.throws(() => parseOAuthTokenResponse('{"access_token":"secret","token_type":"Basic"}', 200), /Bearer/i);
+  assert.throws(() => parseOAuthTokenResponse('{"access_token":"secret","token_type":"Bearer","expires_in":-1}', 200), /expires_in/i);
+});
+
+test('OAuth Client Credentials UI, storage isolation, and backend token-flow contract exist', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const program = fs.readFileSync(path.join(__dirname, 'Program.cs'), 'utf8');
+  for (const id of ['oauth2-token-url', 'oauth2-client-id', 'oauth2-client-secret', 'oauth2-scope', 'oauth2-client-auth-method', 'oauth2-request-token', 'oauth2-token-status']) assert.ok(html.includes('id="' + id + '"'), 'missing OAuth field: ' + id);
+  assert.ok(app.includes('buildOAuthClientCredentialsRequest'));
+  assert.ok(app.includes('parseOAuthTokenResponse'));
+  assert.ok(app.includes("oauth2TokenConfigStorageKey()"), 'OAuth settings must be environment-scoped');
+  assert.ok(program.includes('oauth2-client-credentials'), 'the local proxy must recognize the guarded OAuth flow');
+});
+test('OAuth profile persistence is environment-ready and never includes the client secret', () => {
+  const { normalizeOAuthClientCredentialsConfig } = runnerLogic();
+  const config = normalizeOAuthClientCredentialsConfig({
+    tokenUrl: '{{identityUrl}}/oauth/token', clientId: '{{clientId}}', scope: 'read   write',
+    clientAuthMethod: 'client_secret_post', clientSecret: 'must-not-persist'
+  });
+  assert.deepEqual(config, {
+    tokenUrl: '{{identityUrl}}/oauth/token', clientId: '{{clientId}}', scope: 'read write',
+    clientAuthMethod: 'client_secret_post'
+  });
+  assert.equal(Object.hasOwn(config, 'clientSecret'), false);
+  assert.throws(() => normalizeOAuthClientCredentialsConfig({ clientAuthMethod: 'query' }), /autentica/i);
+});
+test('OAuth settings reject client credentials embedded in the token URL before persistence', () => {
+  const { normalizeOAuthClientCredentialsConfig, buildOAuthClientCredentialsRequest } = runnerLogic();
+  const tokenUrl = 'https://identity.example.test/oauth/token?client_secret=cleartext';
+  assert.throws(() => normalizeOAuthClientCredentialsConfig({ tokenUrl }), /URL|credenciais/i);
+  assert.throws(() => buildOAuthClientCredentialsRequest({ tokenUrl, clientId: 'id', clientSecret: 'secret' }), /URL|credenciais/i);
+});
+test('OAuth client_secret is excluded from workspace draft tracking and token history', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const snapshotStart = app.indexOf('function tokenHistorySnapshot(request){');
+  const snapshotEnd = app.indexOf('function loadHistoryEntry', snapshotStart);
+  const snapshot = app.slice(snapshotStart, snapshotEnd);
+  const trackingStart = app.indexOf('trackDraft=event=>');
+  const trackingEnd = app.indexOf(';editorColumn.addEventListener', trackingStart);
+  const tracking = app.slice(trackingStart, trackingEnd);
+  assert.ok(snapshot.includes("body:''"));
+  assert.ok(snapshot.includes("basicPassword:!oauth&&request.authType==='basic'"));
+  assert.ok(tracking.includes("'oauth2-client-secret'"), 'secret input must not persist in workspace drafts');
+});
+test('README documents OAuth Client Credentials with a local diagram and limits', () => {
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+  const diagram = path.join(__dirname, 'docs', 'images', 'vortix-oauth-client-credentials.svg');
+  assert.ok(readme.includes('vortix-oauth-client-credentials.svg'));
+  assert.ok(readme.includes('grant_type=client_credentials'));
+  assert.ok(readme.includes('expires_in'));
+  assert.ok(readme.includes('Authorization Code') && readme.includes('PKCE'));
+  assert.ok(readme.includes('rfc6749'));
+  assert.ok(fs.existsSync(diagram));
+  assert.match(fs.readFileSync(diagram, 'utf8'), /<svg[\s\S]*aria-labelledby=/);
+});
+test('OAuth Authorization Code PKCE UI requires explicit consent to save tokens', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const program = fs.readFileSync(path.join(__dirname, 'Program.cs'), 'utf8');
+  for (const id of ['oauth-pkce-authorization-url', 'oauth-pkce-token-url', 'oauth-pkce-client-id', 'oauth-pkce-scope', 'oauth-pkce-redirect-uri', 'oauth-pkce-save-access-token', 'oauth-pkce-save-refresh-token', 'oauth-pkce-flow-status', 'oauth-pkce-start']) {
+    assert.ok(html.includes('id="' + id + '"'), 'missing PKCE UI field: ' + id);
+  }
+  for (const id of ['oauth-pkce-save-access-token', 'oauth-pkce-save-refresh-token']) {
+    const input = html.match(new RegExp('<input[^>]*id="' + id + '"[^>]*>'));
+    assert.ok(input, 'missing token persistence consent control: ' + id);
+    assert.equal(/\bchecked\b/.test(input[0]), false, id + ' must require an explicit opt-in.');
+  }
+  assert.equal(html.includes('id="oauth-pkce-client-secret"'), false, 'public PKCE flow must not ask for a client secret.');
+  assert.ok(app.includes('/api/oauth/pkce/start'));
+  assert.ok(app.includes('/api/oauth/pkce/status/'));
+  const pkceStart = app.indexOf('async function requestOAuthAuthorizationCodeToken(){');
+  const pkceEnd = app.indexOf('function cancelOAuthPkceAuthorization', pkceStart);
+  assert.ok(pkceStart >= 0 && pkceEnd > pkceStart);
+  assert.ok(app.slice(pkceStart, pkceEnd).includes("byId('save-token-history').checked=false"), 'PKCE tokens must not leak into request drafts without explicit save consent.');
+  assert.ok(app.includes('oauthPkceConfigStorageKey'));
+  const cancelStart = app.indexOf('function cancelOAuthPkceAuthorization(){');
+  const cancelEnd = app.indexOf('}', cancelStart);
+  assert.ok(cancelStart >= 0 && cancelEnd > cancelStart);
+  assert.ok(app.slice(cancelStart, cancelEnd).includes('oauthPkceCancelRequested'), 'Cancel must stop polling.');
+  assert.ok(app.includes("'/api/oauth/pkce/status/'+encodeURIComponent(state),'DELETE'"), 'Cancel must clear the server-side flow.');
+  assert.ok(program.includes('/oauth/callback/{providerKey}'));
+});
+test('OAuth PKCE profile is environment-ready and excludes secrets', () => {
+  const { normalizeOAuthPkceConfig } = runnerLogic();
+  const config = normalizeOAuthPkceConfig({
+    authorizationUrl: '{{identityUrl}}/authorize', tokenUrl: '{{identityUrl}}/token',
+    clientId: '{{clientId}}', scope: 'read   write', clientSecret: 'must-not-persist'
+  });
+  assert.deepEqual(config, {
+    authorizationUrl: '{{identityUrl}}/authorize', tokenUrl: '{{identityUrl}}/token',
+    clientId: '{{clientId}}', scope: 'read write'
+  });
+  assert.equal(Object.hasOwn(config, 'clientSecret'), false);
+  assert.throws(() => normalizeOAuthPkceConfig({ authorizationUrl: 'https://id.example.test/auth?client_secret=cleartext' }), /URL|credenciais/i);
+  assert.throws(() => normalizeOAuthPkceConfig({ tokenUrl: 'https://id.example.test/token?refresh_token=cleartext' }), /URL|credenciais/i);
+});
+test('README documents PKCE redirect setup, consent, constraints, and flow diagram', () => {
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+  const diagramPath = path.join(__dirname, 'docs', 'images', 'vortix-oauth-authorization-code-pkce.svg');
+  assert.ok(readme.includes('vortix-oauth-authorization-code-pkce.svg'));
+  assert.match(readme, /Authorization Code.*PKCE/i);
+  assert.ok(readme.includes('127.0.0.1'));
+  assert.ok(readme.includes('code_challenge_method=S256'));
+  assert.ok(readme.includes('{{refresh_token}}'));
+  assert.ok(readme.includes('rfc7636') && readme.includes('rfc8252') && readme.includes('rfc9700'));
+  assert.ok(fs.existsSync(diagramPath));
+  assert.match(fs.readFileSync(diagramPath, 'utf8'), /<svg[\s\S]*aria-labelledby=/);
+});
+
+test('normalizes saved response examples and removes credential-bearing response headers', () => {
+  const { normalizeResponseExamples } = runnerLogic();
+  const examples = normalizeResponseExamples([{
+    id: 'example-200',
+    name: 'Lista vazia',
+    status: 200,
+    headers: {
+      'Content-Type': ['application/json'],
+      'X-Request-Id': ['trace-42'],
+      'Set-Cookie': ['session=secret'],
+      Authorization: ['Bearer secret']
+    },
+    body: '{"items":[]}',
+    savedAt: '2026-10-15T12:00:00.000Z'
+  }]);
+  assert.deepEqual(examples, [{
+    id: 'example-200',
+    name: 'Lista vazia',
+    status: 200,
+    headers: {
+      'Content-Type': ['application/json'],
+      'X-Request-Id': ['trace-42']
+    },
+    body: '{"items":[]}',
+    savedAt: '2026-10-15T12:00:00.000Z'
+  }]);
+});
+
+test('appends response examples without mutating the request and enforces limits', () => {
+  const { normalizeResponseExamples, addResponseExample } = runnerLogic();
+  const existing = [{
+    id: 'example-200',
+    name: 'Sucesso',
+    status: 200,
+    headers: {},
+    body: '{"id":42}',
+    savedAt: '2026-10-15T12:00:00.000Z'
+  }];
+  const added = addResponseExample(existing, {
+    id: 'example-201',
+    name: 'Criado',
+    status: 201,
+    headers: {},
+    body: '{"id":43}',
+    savedAt: '2026-10-15T12:01:00.000Z'
+  });
+  assert.equal(existing.length, 1);
+  assert.deepEqual(added.map(example => example.status), [200, 201]);
+  assert.throws(() => normalizeResponseExamples([{ id: 'bad', name: 'Inválido', status: 99, headers: {}, body: '' }]), /status/i);
+  assert.throws(() => normalizeResponseExamples([{ id: 'large', name: 'Body grande', status: 200, headers: {}, body: 'x'.repeat(1_000_001) }]), /body|limite/i);
+  const tooMany = Array.from({ length: 21 }, (_, index) => ({
+    id: 'example-' + index, name: 'Exemplo ' + index, status: 200, headers: {}, body: '', savedAt: ''
+  }));
+  assert.throws(() => normalizeResponseExamples(tooMany), /20/);
+  const full = tooMany.slice(0, 20);
+  assert.throws(() => addResponseExample(full, { id: 'last', name: 'Limite', status: 200, headers: {}, body: '', savedAt: '' }), /20/);
+});
+
+test('adds a saved response example without changing the request or previous examples', () => {
+  const { appendResponseExampleToRequest } = runnerLogic();
+  const request = {
+    id: 'request-1',
+    name: 'Buscar item',
+    route: '/items/42',
+    responseExamples: [{
+      id: 'example-200',
+      name: 'Encontrado',
+      status: 200,
+      headers: { 'Content-Type': ['application/json'] },
+      body: '{"id":42}',
+      savedAt: '2026-10-15T12:00:00.000Z'
+    }]
+  };
+  const updated = appendResponseExampleToRequest(request, {
+    id: 'example-404',
+    name: 'Não encontrado',
+    status: 404,
+    headers: { 'Content-Type': ['application/json'] },
+    body: '{"error":"not_found"}',
+    savedAt: '2026-10-15T12:01:00.000Z'
+  });
+  assert.notEqual(updated, request);
+  assert.equal(updated.route, '/items/42');
+  assert.deepEqual(updated.responseExamples.map(example => example.status), [200, 404]);
+  assert.deepEqual(request.responseExamples.map(example => example.status), [200]);
+});
+
+test('local response examples match method, path, and query independent of query order', () => {
+  const { responseExampleRequestMatches } = runnerLogic();
+  const saved = { method: 'GET', route: '/items/42?tag=blue&tag=green' };
+  assert.equal(responseExampleRequestMatches({ method: 'get', route: '/items/42?tag=green&tag=blue' }, saved), true);
+  assert.equal(responseExampleRequestMatches({ method: 'POST', route: '/items/42?tag=blue&tag=green' }, saved), false);
+  assert.equal(responseExampleRequestMatches({ method: 'GET', route: '/items/43?tag=blue&tag=green' }, saved), false);
+  assert.equal(responseExampleRequestMatches({ method: 'GET', route: '/items/42?tag=blue&tag=red' }, saved), false);
+});
+
+test('builds a local mock response only from an example on the matching saved request', () => {
+  const { buildResponseExampleMock } = runnerLogic();
+  const request = { method: 'GET', route: '/items/42?tag=blue', responseExamples: [{
+    id: 'example-404', name: 'Not found', status: 404,
+    headers: { 'Content-Type': ['application/json'] }, body: '{"error":"missing"}', savedAt: ''
+  }] };
+  assert.deepEqual(buildResponseExampleMock({ method: 'GET', route: '/items/42?tag=blue' }, request, 'example-404'), {
+    status: 404, reason: 'Local mock', headers: { 'Content-Type': ['application/json'] }, body: '{"error":"missing"}'
+  });
+  assert.throws(() => buildResponseExampleMock({ method: 'GET', route: '/items/42?tag=red' }, request, 'example-404'), /método, path e query/i);
+  assert.throws(() => buildResponseExampleMock({ method: 'GET', route: '/items/42?tag=blue' }, request, 'missing'), /exemplo/i);
+});
+
+test('surfaces one warning when an unreadable non-secret token mode uses the safe default', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.ok(app.includes('X-Api-Studio-Data-Recovery'));
+  assert.ok(app.includes('tokenModeRecoveryWarned'));
+  assert.ok(app.includes('Preferência de credenciais recuperada'));
+});
+test('local mock replays success, validation, and server-error examples', () => {
+  const { buildResponseExampleMock } = runnerLogic();
+  const saved = { method: 'POST', route: '/users', responseExamples: [
+    { id: 'success', name: 'Created', status: 201, headers: {}, body: '{"id":42}', savedAt: '' },
+    { id: 'validation', name: 'Invalid input', status: 400, headers: {}, body: '{"error":"validation_error"}', savedAt: '' },
+    { id: 'server-error', name: 'Server error', status: 500, headers: {}, body: '{"error":"internal_error"}', savedAt: '' }
+  ] };
+  const current = { method: 'POST', route: '/users' };
+  assert.deepEqual(['success', 'validation', 'server-error'].map(id => buildResponseExampleMock(current, saved, id).status), [201, 400, 500]);
+});
+test('local mock UI uses saved examples and does not invoke the API path', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const start = app.indexOf('function simulateSavedResponseExample(');
+  const end = app.indexOf('function updateCopyButtons(', start);
+  assert.ok(start >= 0 && end > start, 'local simulation handler should be defined beside response-example actions');
+  const handler = app.slice(start, end);
+  assert.ok(handler.includes('RunnerLogic.buildResponseExampleMock'));
+  assert.ok(handler.includes('...saved'), 'the matching saved request must carry its responseExamples into the mock selector');
+  assert.doesNotMatch(handler, /fetch\s*\(|executeApiRequest|performApiRequest/);
+  assert.ok(app.includes('simulateSavedResponseExample(example.id)'));
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+  assert.ok(readme.includes('Simular local'));
+  assert.match(readme, /n[aã]o cria servidor de mock/i);
+});
+test('toast close button remains clickable without blocking the workspace', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'wwwroot', 'style.css'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.ok(/\.toast-region\s*\{[^}]*pointer-events:\s*none/.test(css), 'empty toast area should remain click-through');
+  assert.ok(/\.toast\s*\{[^}]*pointer-events:\s*auto/.test(css), 'toast card must accept clicks for its close button');
+  assert.ok(app.includes('close.onclick=()=>dismissToast(id)'));
+});
+test('imports Postman response examples and filters sensitive headers', () => {
+  const { importResponseExamples } = runnerLogic();
+  const examples = importResponseExamples([{
+    name: 'Criado',
+    code: 201,
+    status: '201 Created',
+    header: [
+      { key: 'Content-Type', value: 'application/json' },
+      { key: 'Set-Cookie', value: 'sid=secret' },
+      { key: 'X-Trace', value: 'trace-1' }
+    ],
+    body: '{"id":42}'
+  }], 'postman', () => 'postman-example', '2026-10-15T12:00:00.000Z');
+  assert.deepEqual(examples, [{
+    id: 'postman-example', name: 'Criado', status: 201,
+    headers: { 'Content-Type': ['application/json'], 'X-Trace': ['trace-1'] },
+    body: '{"id":42}', savedAt: '2026-10-15T12:00:00.000Z'
+  }]);
+});
+
+test('imports Insomnia v4 response resources as saved examples', () => {
+  const { importResponseExamples } = runnerLogic();
+  const examples = importResponseExamples([{
+    _type: 'response', name: 'Não encontrado', statusCode: 404,
+    headers: [{ name: 'Content-Type', value: 'application/json' }, { name: 'Authorization', value: 'Bearer secret' }],
+    body: '{"error":"missing"}'
+  }], 'insomnia', () => 'insomnia-example', '2026-10-15T12:01:00.000Z');
+  assert.deepEqual(examples, [{
+    id: 'insomnia-example', name: 'Não encontrado', status: 404,
+    headers: { 'Content-Type': ['application/json'] },
+    body: '{"error":"missing"}', savedAt: '2026-10-15T12:01:00.000Z'
+  }]);
+});
+
+test('exports saved response examples in Postman v2.1 response shape', () => {
+  const { buildPostmanResponseExamples } = runnerLogic();
+  assert.deepEqual(buildPostmanResponseExamples([{
+    id: 'example-201', name: 'Criado', status: 201,
+    headers: { 'Content-Type': ['application/json'], 'X-Trace': ['trace-1', 'trace-2'] },
+    body: '{"id":42}', savedAt: '2026-10-15T12:00:00.000Z'
+  }]), [{
+    name: 'Criado', status: '201', code: 201,
+    header: [
+      { key: 'Content-Type', value: 'application/json', type: 'text' },
+      { key: 'X-Trace', value: 'trace-1', type: 'text' },
+      { key: 'X-Trace', value: 'trace-2', type: 'text' }
+    ],
+    body: '{"id":42}'
+  }]);
+});
+
+test('exports saved response examples as linked Insomnia v4 resources', () => {
+  const { responseExampleToInsomniaResource } = runnerLogic();
+  const resource = responseExampleToInsomniaResource({
+    id: 'example-404', name: 'Não encontrado', status: 404,
+    headers: { 'Content-Type': ['application/json'] },
+    body: '{"error":"missing"}', savedAt: '2026-10-15T12:00:00.000Z'
+  }, '__response_1__', '__request_1__', 'https://api.example.test/items/42', 123);
+  assert.equal(resource._type, 'response');
+  assert.equal(resource._id, '__response_1__');
+  assert.equal(resource.parentId, '__request_1__');
+  assert.equal(resource.statusCode, 404);
+  assert.equal(resource.name, 'Não encontrado');
+  assert.equal(resource.body, '{"error":"missing"}');
+  assert.deepEqual(resource.headers, [{ name: 'Content-Type', value: 'application/json' }]);
+});
+
+test('collection adapters wire saved response examples through Postman and Insomnia', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.ok(app.includes('RunnerLogic.buildPostmanResponseExamples'));
+  assert.ok(app.includes('RunnerLogic.responseExampleToInsomniaResource'));
+  assert.ok(app.includes('RunnerLogic.importResponseExamples'));
+  assert.ok(app.includes('collectionHasResponseExamples'));
+});
+test('project artifacts use VortixApiClient names while preserving existing storage keys', () => {
+  for (const file of ['VortixApiClient.csproj', 'VortixApiClient.ps1', 'VortixApiClient.cmd', 'Test-VortixApiClient.ps1']) {
+    assert.ok(fs.existsSync(path.join(__dirname, file)), 'missing renamed project artifact: ' + file);
+  }
+  assert.equal(fs.existsSync(path.join(__dirname, 'ApiPublicacaoTester.csproj')), false, 'old project file should be retired');
+  const compatibilityFiles = ['Abrir-Testador-API.cmd', 'Abrir-Testador-API.ps1', 'Validar-Testador.ps1'];
+  for (const file of compatibilityFiles) {
+    assert.ok(fs.existsSync(path.join(__dirname, file)), 'missing legacy compatibility wrapper: ' + file);
+  }
+  assert.match(fs.readFileSync(path.join(__dirname, 'Abrir-Testador-API.cmd'), 'utf8'), /VortixApiClient\.cmd/);
+  assert.match(fs.readFileSync(path.join(__dirname, 'Abrir-Testador-API.ps1'), 'utf8'), /VortixApiClient\.ps1/);
+  assert.match(fs.readFileSync(path.join(__dirname, 'Validar-Testador.ps1'), 'utf8'), /Test-VortixApiClient\.ps1/);
+  const program = fs.readFileSync(path.join(__dirname, 'Program.cs'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.match(program, /app = "ApiPublicacaoTester"/, 'existing health app field must remain compatible');
+  assert.match(program, /product = "VortixApiClient"/, 'new Vortix product identifier must be exposed');
+  const launcher = fs.readFileSync(path.join(__dirname, 'VortixApiClient.ps1'), 'utf8');
+  const smoke = fs.readFileSync(path.join(__dirname, 'Test-VortixApiClient.ps1'), 'utf8');
+  assert.match(launcher, /product -eq 'VortixApiClient'/);
+  assert.match(launcher, /app -eq 'ApiPublicacaoTester'/);
+  assert.match(smoke, /product -ne 'VortixApiClient'/);
+  assert.match(program, /internal sealed record OAuthPkceRedirectPreviewRequest/);
+  assert.match(program, /internal sealed record OAuthPkceStartRequest/);
+  assert.match(program, /"ApiPublicacaoTester", "api-studio\.sqlite"/, 'existing SQLite path must stay compatible');
+  assert.match(program, /SetApplicationName\("ApiPublicacaoTester"\)/, 'existing protected data must remain decryptable');
+  assert.match(app, /DB_NAME = 'ApiPublicacaoTester'/, 'legacy IndexedDB migration source must remain discoverable');
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+  assert.ok(readme.includes('VortixApiClient.csproj'));
+  assert.match(readme, /wrappers de compatibilidade/i);
+  assert.match(readme, /ApiPublicacaoTester\/api-studio\.sqlite/);
+  assert.match(readme, /Data Protection.*ApiPublicacaoTester/);
+});
+test('OAuth authorization mock declares its form parser once', () => {
+  const mock = fs.readFileSync(path.join(__dirname, 'OAuthAuthorizationServer.test.ps1'), 'utf8');
+  assert.equal((mock.match(/function Get-FormMap/g) || []).length, 1);
 });

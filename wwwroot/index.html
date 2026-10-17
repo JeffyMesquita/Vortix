@@ -32,7 +32,7 @@
             <button class="icon-button small-icon quick-open-trigger" id="quick-open-button" type="button" aria-label="Buscar requisição" title="Buscar requisição (Ctrl+K)">
               <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
             </button>
-            <button class="icon-button small-icon" id="import-collection" type="button" aria-label="Importar coleção, OpenAPI JSON ou cURL" title="Importar coleção JSON, OpenAPI JSON ou comando cURL">⇩</button>
+            <button class="icon-button small-icon" id="import-collection" type="button" aria-label="Importar coleção, OpenAPI JSON, cURL ou HTTPie" title="Importar coleção JSON, OpenAPI JSON ou comando cURL/HTTPie">⇩</button>
             <button class="icon-button small-icon" id="export-collection" type="button" aria-label="Exportar coleção selecionada" title="Exportar coleção selecionada">⇧</button>
             <button class="icon-button small-icon" id="run-collection" type="button" aria-label="Executar coleção ou pasta selecionada" title="Runner da seleção">▶</button>
             <button class="icon-button small-icon" id="add-collection-heading" type="button" aria-label="Adicionar coleção" title="Adicionar coleção">＋</button>
@@ -45,8 +45,9 @@
 
       <details class="history-panel side-section" id="history-panel">
         <summary><span>Histórico</span><span class="history-count" id="history-count">0</span></summary>
-        <p class="history-hint">Requests anteriores salvas neste computador.</p>
+        <p class="history-hint">Responses salvas neste computador. Marque duas para comparar.</p>
         <div class="history-list" id="request-history"></div>
+        <button class="text-button history-compare-button" id="compare-history-responses" type="button" disabled hidden>Comparar respostas</button>
         <button class="text-button history-clear" id="clear-history" type="button" disabled>Limpar histórico</button>
       </details>
 
@@ -127,8 +128,18 @@
               <p class="hint">Arquivos não são persistidos. Ao reabrir a request, selecione-os novamente. Limite total por envio: 10 MB.</p>
             </div>
             <div id="graphql-editor" class="graphql-editor" hidden>
+              <div class="graphql-schema-toolbar">
+                <button class="button secondary" id="graphql-load-schema" type="button">Carregar schema</button>
+                <label for="graphql-schema-type">Tipo para sugestões<select id="graphql-schema-type" aria-label="Tipo GraphQL para sugestões" disabled><option value="">Schema não carregado</option></select></label>
+              </div>
+              <p class="hint graphql-schema-status" id="graphql-schema-status" role="status">O schema só é consultado após confirmação; os dados ficam nesta sessão.</p>
               <div class="graphql-editor-heading"><label for="graphql-query">Query</label><span class="language-badge">GRAPHQL</span></div>
-              <textarea id="graphql-query" rows="12" spellcheck="false" autocomplete="off" placeholder="query GetUser($id: ID!) {&#10;  user(id: $id) { id name }&#10;}" aria-label="Query GraphQL"></textarea>
+              <textarea id="graphql-query" rows="12" spellcheck="false" autocomplete="off" placeholder="query GetUser($id: ID!) {&#10;  user(id: $id) { id name }&#10;}" aria-label="Query GraphQL" aria-autocomplete="list" aria-controls="graphql-autocomplete"></textarea>
+              <div id="graphql-autocomplete" class="graphql-autocomplete" role="listbox" aria-label="Sugestões GraphQL" hidden></div>
+              <details id="graphql-schema-browser" class="graphql-schema-browser" hidden>
+                <summary>Campos do tipo <span id="graphql-schema-fields-type"></span></summary>
+                <div id="graphql-schema-fields" class="graphql-schema-fields"></div>
+              </details>
               <div class="graphql-operation-row"><label for="graphql-operation-name">Operation Name <span class="hint">opcional</span></label><input id="graphql-operation-name" type="text" autocomplete="off" placeholder="GetUser"></div>
               <div class="graphql-variables-panel">
                 <div class="graphql-variables-heading"><label for="graphql-variables">Variables (JSON)</label><button class="text-button" id="format-graphql-variables" type="button">Identar</button></div>
@@ -200,6 +211,47 @@
               <p class="hint">Depois, use <code>{{token}}</code> em Params, body ou URL base. Novos tokens usam prote&ccedil;&atilde;o local; migre registros antigos em Configura&ccedil;&otilde;es.</p>
               <button class="button secondary" id="request-token" type="button" disabled>Obter token</button>
             </details>
+            <details class="token-helper oauth2-helper" id="oauth2-helper">
+              <summary>OAuth 2.0 · Client Credentials</summary>
+              <p class="hint">Use para integração serviço a serviço. O segredo é pedido a cada envio e nunca entra no perfil, no histórico ou na URL.</p>
+              <div class="oauth2-fields">
+                <div class="oauth2-wide"><label for="oauth2-token-url">URL do endpoint de token</label><input id="oauth2-token-url" type="text" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://identity.example.com/oauth/token"></div>
+                <div><label for="oauth2-client-id">Client ID</label><input id="oauth2-client-id" type="text" maxlength="512" autocomplete="off" spellcheck="false"></div>
+                <div><label for="oauth2-client-secret">Client secret</label><input id="oauth2-client-secret" type="password" maxlength="8192" autocomplete="new-password" spellcheck="false"></div>
+                <div class="oauth2-wide"><label for="oauth2-scope">Scopes</label><input id="oauth2-scope" type="text" maxlength="4096" autocomplete="off" spellcheck="false" placeholder="read:items write:items"><p class="hint">Separe scopes por espaço. O campo é opcional.</p></div>
+                <div class="oauth2-wide"><label for="oauth2-client-auth-method">Autenticação do cliente</label><select id="oauth2-client-auth-method"><option value="client_secret_basic">HTTP Basic (padrão)</option><option value="client_secret_post">Credenciais no formulário</option></select></div>
+              </div>
+              <label class="check-row token-environment-option" for="oauth2-allow-insecure-http"><input id="oauth2-allow-insecure-http" type="checkbox"><span>Permitir HTTP sem TLS neste endpoint remoto.</span></label>
+              <p class="warning-text">HTTP remoto expõe client_secret e token na rede. Prefira HTTPS; HTTP local é permitido.</p>
+              <label class="check-row token-environment-option" for="oauth2-save-token-environment"><input id="oauth2-save-token-environment" type="checkbox" checked><span>Salvar access token como <code>{{token}}</code> no ambiente ativo.</span></label>
+              <p class="hint">Perfil (URL, client ID e scopes) é salvo por ambiente. Client secret fica só na memória. O token salvo usa proteção local.</p>
+              <p class="oauth2-token-status" id="oauth2-token-status" role="status" aria-live="polite" data-state="info">Nenhum token OAuth salvo neste ambiente.</p>
+              <button class="button secondary" id="oauth2-request-token" type="button" disabled>Obter token OAuth</button>
+            </details>
+            <details class="token-helper oauth2-helper" id="oauth-pkce-helper">
+              <summary>OAuth 2.0 · Authorization Code + PKCE</summary>
+              <p class="hint">Use quando a API acessa dados em nome de um usuário. O Vortix abre o provedor em outra aba, usa PKCE S256 e recebe o retorno por loopback. Este fluxo público não pede <code>client_secret</code>.</p>
+              <div class="oauth2-fields">
+                <div class="oauth2-wide"><label for="oauth-pkce-authorization-url">URL de autorização</label><input id="oauth-pkce-authorization-url" type="text" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://identity.example.com/oauth/authorize"></div>
+                <div class="oauth2-wide"><label for="oauth-pkce-token-url">URL do endpoint de token</label><input id="oauth-pkce-token-url" type="text" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://identity.example.com/oauth/token"></div>
+                <div><label for="oauth-pkce-client-id">Client ID público</label><input id="oauth-pkce-client-id" type="text" maxlength="512" autocomplete="off" spellcheck="false"></div>
+                <div><label for="oauth-pkce-scope">Scopes</label><input id="oauth-pkce-scope" type="text" maxlength="4096" autocomplete="off" spellcheck="false" placeholder="read:items write:items"></div>
+              </div>
+              <div class="oauth-pkce-redirect">
+                <label for="oauth-pkce-redirect-uri">Redirect URI para cadastrar no provedor</label>
+                <div class="oauth-pkce-redirect-controls">
+                  <input id="oauth-pkce-redirect-uri" type="text" readonly autocomplete="off" aria-label="Redirect URI exata">
+                  <button class="button secondary compact-button" id="oauth-pkce-redirect-copy" type="button" disabled>Copiar</button>
+                </div>
+              </div>
+              <p class="hint">Cadastre a URI exata mostrada. O Vortix só recebe callback em <code>127.0.0.1</code>; HTTP remoto é bloqueado. O provedor precisa aceitar Authorization Code com PKCE S256.</p>
+              <label class="check-row token-environment-option" for="oauth-pkce-save-access-token"><input id="oauth-pkce-save-access-token" type="checkbox"><span>Salvar access token como <code>{{token}}</code> no ambiente ativo.</span></label>
+              <label class="check-row token-environment-option" for="oauth-pkce-save-refresh-token"><input id="oauth-pkce-save-refresh-token" type="checkbox"><span>Salvar refresh token como <code>{{refresh_token}}</code> se o provedor retornar.</span></label>
+              <p class="hint">Os tokens ficam só em memória até você marcar cada opção. Valores salvos usam proteção local; renovação automática ainda não está disponível.</p>
+              <p class="oauth2-token-status" id="oauth-pkce-flow-status" role="status" aria-live="polite" data-state="info">Informe a URL de autorização para calcular a redirect URI exata.</p>
+              <button class="button secondary" id="oauth-pkce-start" type="button" disabled>Autorizar no navegador</button>
+              <button class="button secondary compact-button" id="oauth-pkce-cancel" type="button" hidden>Cancelar autorização</button>
+            </details>
           </div>
           <div class="tab-panel scripts-panel" data-editor-panel="scripts" hidden>
             <div class="panel-heading">
@@ -260,8 +312,23 @@ insomnia.environment.set("token", body.access_token);</code></pre>
         <section class="response-column" aria-labelledby="response-title">
           <div class="response-topline">
             <div><p class="eyebrow">RESPOSTA</p><h1 id="response-title">Resultado</h1></div>
-            <span id="response-status" class="status idle">Aguardando envio</span>
+            <div class="response-title-actions">
+              <button class="copy-button" id="save-response-example" type="button" disabled title="Salva esta resposta na request da coleção">Salvar exemplo</button>
+              <span id="response-status" class="status idle">Aguardando envio</span>
+            </div>
           </div>
+          <p id="response-example-save-hint" class="hint response-example-save-hint" role="status"></p>
+          <form id="response-example-save-form" class="response-example-save" hidden>
+            <div class="response-example-save-main">
+              <label for="response-example-name">Nome do exemplo</label>
+              <input id="response-example-name" name="name" type="text" maxlength="100" required autocomplete="off" placeholder="Ex.: Item encontrado">
+            </div>
+            <div class="response-example-save-actions">
+              <button class="primary" type="submit">Salvar exemplo</button>
+              <button class="copy-button" id="cancel-response-example-save" type="button">Cancelar</button>
+            </div>
+            <p class="hint">O body fica salvo na coleção local e pode conter dados sensíveis.</p>
+          </form>
           <div class="response-section">
             <div class="output-heading"><h2>Cabeçalhos</h2><button class="copy-button" id="copy-headers" type="button" disabled>Copiar</button></div>
             <pre id="response-headers" class="output empty">A resposta aparecerá aqui.</pre>
@@ -288,11 +355,15 @@ insomnia.environment.set("token", body.access_token);</code></pre>
               <div id="response-tree" class="response-json-tree" hidden></div>
             </div>
           </div>
+          <details id="response-examples-panel" class="response-examples-panel" hidden>
+            <summary>Exemplos salvos <span id="response-examples-count" class="response-examples-count">0</span></summary>
+            <div id="response-examples-list" class="response-example-list"></div>
+          </details>
           <section class="response-tests-output" id="response-tests-output" aria-labelledby="response-tests-output-title" hidden>
             <div class="output-heading"><h2 id="response-tests-output-title">Testes da resposta</h2><strong id="response-tests-summary"></strong></div>
             <ul id="response-tests-results" class="response-tests-results" aria-live="polite"></ul>
           </section>
-          <div class="response-footer"><span class="response-indicator"></span>Resposta temporária · não armazenada</div>
+          <div class="response-footer"><span class="response-indicator"></span><span id="response-persistence-note">Resposta temporária · não armazenada</span></div>
         </section>
       </div>
       <footer class="app-footer">Dados ficam num SQLite local. Novos segredos usam proteção de dados; baixe backup e migre os antigos em Configurações. Backup simples gera JSON sem criptografia; use a opção protegida para transportar o workspace.</footer>
@@ -306,8 +377,15 @@ insomnia.environment.set("token", body.access_token);</code></pre>
         <input id="quick-open-query" type="search" role="combobox" aria-label="Buscar por nome, método, rota ou coleção" aria-autocomplete="list" aria-controls="quick-open-results" aria-expanded="false" autocomplete="off" placeholder="Buscar requisição...">
         <kbd>Esc</kbd>
       </div>
+      <div class="quick-open-filters" role="group" aria-label="Filtros da busca">
+        <label class="quick-open-filter"><span>Método</span><select id="quick-open-method-filter" aria-label="Filtrar por método">
+          <option value="">Todos os métodos</option><option>GET</option><option>HEAD</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>OPTIONS</option>
+        </select></label>
+        <label class="quick-open-filter"><span>Status salvo</span><select id="quick-open-status-filter" aria-label="Filtrar por status de resposta"><option value="">Todos os status</option></select></label>
+        <label class="quick-open-filter"><span>Coleção ou pasta</span><select id="quick-open-scope-filter" aria-label="Filtrar por coleção ou pasta"><option value="">Todas as coleções e pastas</option></select></label>
+      </div>
       <div class="quick-open-results" id="quick-open-results" role="listbox" aria-label="Requisições salvas"></div>
-      <div class="quick-open-footer"><span>Digite para filtrar. Use as setas e Enter para abrir.</span><span class="quick-open-shortcut"><kbd>Ctrl</kbd><kbd>K</kbd></span></div>
+      <div class="quick-open-footer"><span>Digite para buscar ou combine filtros. Use as setas e Enter para abrir.</span><span class="quick-open-shortcut"><kbd>Ctrl</kbd><kbd>K</kbd></span></div>
     </div>
   </dialog>
   <dialog class="app-dialog" id="save-request-dialog">
@@ -322,7 +400,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
 
   <dialog class="app-dialog settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
     <form method="dialog">
-      <div class="dialog-heading"><div><h2 id="settings-title">Configurações</h2><p class="dialog-description">Ajuste aparência e legibilidade do workspace.</p></div><button class="icon-button dialog-close" id="close-settings" type="button" aria-label="Fechar configurações">×</button></div>
+      <div class="dialog-heading"><div><h2 id="settings-title">Configurações</h2><p class="dialog-description">Ajuste aparência, legibilidade e retenção local.</p></div><button class="icon-button dialog-close" id="close-settings" type="button" aria-label="Fechar configurações">×</button></div>
       <section class="settings-section" aria-labelledby="settings-appearance-title">
         <h3 id="settings-appearance-title">Aparência</h3>
         <div class="settings-grid">
@@ -338,6 +416,19 @@ insomnia.environment.set("token", body.access_token);</code></pre>
           </div>
           <p class="hint">Atalhos: Ctrl++ aumenta, Ctrl+- diminui e Ctrl+0 restaura.</p>
         </div>
+      </section>
+      <section class="settings-section settings-history-section" aria-labelledby="settings-history-title">
+        <h3 id="settings-history-title">Histórico de respostas</h3>
+        <div class="history-settings-controls">
+          <label for="history-retention-limit">Limite de requests
+            <select id="history-retention-limit" aria-label="Limite do histórico">
+              <option value="50">50 requests</option><option value="100">100 requests</option><option value="250">250 requests</option>
+              <option value="500" selected>500 requests</option><option value="1000">1000 requests</option><option value="2500">2500 requests</option>
+            </select>
+          </label>
+          <label class="check-row" for="history-save-response-body"><input id="history-save-response-body" type="checkbox"><span>Salvar body de resposta</span></label>
+        </div>
+        <p class="hint history-body-setting-note">Bodies de resposta ficam desativados por padrão. Ao ativar, ficam protegidos no SQLite. Desativar não apaga bodies já salvos; limpe o histórico para removê-los. Bodies de token nunca são guardados.</p>
       </section>
       <section class="settings-section settings-environment-section" aria-labelledby="settings-environments-title">
         <div><h3 id="settings-environments-title">Ambientes</h3><p class="hint">Separe variáveis de desenvolvimento, homologação e produção.</p></div>
@@ -431,17 +522,19 @@ insomnia.environment.set("token", body.access_token);</code></pre>
     </form>
   </dialog>
 
-  <dialog class="app-dialog curl-import-dialog" id="import-dialog" aria-labelledby="import-title">
+  <dialog class="app-dialog command-import-dialog" id="import-dialog" aria-labelledby="import-title">
     <form method="dialog">
-      <div class="dialog-heading"><div><p class="eyebrow">INTERCAMBIO</p><h2 id="import-title">Importar requisici&#227;o</h2><p class="dialog-description">Cole um comando cURL ou importe uma cole&#231;&#227;o/OpenAPI em JSON.</p></div><button class="icon-button dialog-close" id="close-import-dialog" type="button" aria-label="Fechar">&times;</button></div>
+      <div class="dialog-heading"><div><p class="eyebrow">INTERCAMBIO</p><h2 id="import-title">Importar requisici&#227;o</h2><p class="dialog-description">Cole um comando cURL ou HTTPie, ou importe uma cole&#231;&#227;o/OpenAPI em JSON.</p></div><button class="icon-button dialog-close" id="close-import-dialog" type="button" aria-label="Fechar">&times;</button></div>
       <div class="dialog-scroll">
-        <button class="button secondary" id="browse-import-file" type="button">Escolher arquivo JSON (cole&#231;&#227;o ou OpenAPI)</button>
-        <label for="curl-import-source">Comando cURL</label>
-        <textarea id="curl-import-source" rows="8" maxlength="1048576" spellcheck="false" placeholder="curl --request GET &quot;https://api.example.com/v1/users&quot; --header &quot;Accept: application/json&quot;"></textarea>
-        <p class="hint">O comando ser&#225; analisado localmente, nunca executado. O Bearer importado fica apenas em mem&#243;ria at&#233; voc&#234; ativar seu salvamento. Auth Basic, cookies e op&#231;&#245;es avan&#231;adas precisam ser configurados manualmente.</p>
-        <p class="hint curl-import-error" id="curl-import-error" role="alert" hidden></p>
+        <button class="button secondary" id="browse-import-file" type="button">Escolher arquivo JSON (coleção ou OpenAPI)</button>
+        <label for="command-import-format">Formato do comando</label>
+        <select id="command-import-format"><option value="curl">cURL</option><option value="httpie">HTTPie</option></select>
+        <label id="command-import-label" for="command-import-source">Comando cURL</label>
+        <textarea id="command-import-source" rows="8" maxlength="1048576" spellcheck="false" placeholder="curl --request GET &quot;https://api.example.com/v1/users&quot; --header &quot;Accept: application/json&quot;"></textarea>
+        <p class="hint">O comando cURL ou HTTPie é analisado localmente e nunca executado. O Bearer importado fica apenas em memória até você ativar seu salvamento. Auth Basic, arquivos, cookies, sessões e opções não suportadas precisam ser configurados manualmente.</p>
+        <p class="hint command-import-error" id="command-import-error" role="alert" hidden></p>
       </div>
-      <div class="dialog-actions"><button class="button secondary" id="cancel-import-dialog" type="button">Cancelar</button><button class="button primary" id="create-curl-request" type="button">Abrir como rascunho</button></div>
+      <div class="dialog-actions"><button class="button secondary" id="cancel-import-dialog" type="button">Cancelar</button><button class="button primary" id="create-imported-request" type="button">Abrir como rascunho</button></div>
     </form>
   </dialog>
 
@@ -479,6 +572,28 @@ insomnia.environment.set("token", body.access_token);</code></pre>
         <button class="button secondary" id="action-dialog-cancel" type="button">Cancelar</button>
         <button class="button primary" id="action-dialog-confirm" type="submit">Confirmar</button>
       </div>
+    </form>
+  </dialog>
+  <dialog class="app-dialog history-compare-dialog" id="history-compare-dialog" aria-labelledby="history-compare-title">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">COMPARAÇÃO</p><h2 id="history-compare-title">Comparar respostas</h2><p class="dialog-description">A comparação é somente leitura e não altera o histórico.</p></div>
+        <button class="icon-button dialog-close" id="close-history-compare" type="button" aria-label="Fechar comparação">×</button>
+      </div>
+      <p class="history-compare-summary" id="history-compare-summary" role="status"></p>
+      <div class="history-compare-grid">
+        <section class="history-compare-side" aria-labelledby="history-compare-left-title">
+          <h3 id="history-compare-left-title"></h3><p id="history-compare-left-meta" class="hint"></p>
+          <h4>Cabeçalhos</h4><pre id="history-compare-left-headers"></pre>
+          <h4>Body</h4><pre id="history-compare-left-body"></pre>
+        </section>
+        <section class="history-compare-side" aria-labelledby="history-compare-right-title">
+          <h3 id="history-compare-right-title"></h3><p id="history-compare-right-meta" class="hint"></p>
+          <h4>Cabeçalhos</h4><pre id="history-compare-right-headers"></pre>
+          <h4>Body</h4><pre id="history-compare-right-body"></pre>
+        </section>
+      </div>
+      <div class="dialog-actions"><button class="button primary" id="close-history-compare-done" type="button">Concluído</button></div>
     </form>
   </dialog>
 </body>

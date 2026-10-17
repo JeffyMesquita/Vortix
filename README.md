@@ -20,16 +20,22 @@
 - [Requisitos](#requisitos)
 - [Início rápido](#início-rápido)
 - [Primeiro fluxo](#primeiro-fluxo)
+- [Busca rápida](#busca-rápida)
 - [Autenticação](#autenticação)
   - [Auth herdada por coleção e pasta](#auth-herdada-por-coleção-e-pasta)
+  - [OAuth 2.0 Client Credentials](#oauth-20-client-credentials)
+  - [Authorization Code with PKCE](#authorization-code-with-pkce)
 - [Modos de body](#modos-de-body)
 - [Multipart form-data](#multipart-form-data)
 - [GraphQL](#graphql)
+  - [Schema, confirmação e autocomplete](#schema-confirmação-e-autocomplete)
 - [Importar cURL](#importar-curl)
+  - [Importar HTTPie](#importar-httpie)
 - [Importar OpenAPI JSON](#importar-openapi-json)
 - [Ambientes e variáveis](#ambientes-e-variáveis)
 - [Scripts, testes e Runner](#scripts-testes-e-runner)
 - [Importação e exportação](#importação-e-exportação)
+- [Histórico de respostas](#histórico-de-respostas)
 - [Persistência e backups](#persistência-e-backups)
 - [Segurança](#segurança)
 - [Configuração](#configuração)
@@ -51,15 +57,17 @@ A aplicação escuta somente em loopback e foi pensada para uso em computador de
 
 - **Editor de requests:** GET, HEAD, POST, PUT, PATCH, DELETE e OPTIONS; URL base, rota, Params, Headers, body JSON/texto/XML/form URL-encoded/Multipart/GraphQL e Auth Bearer, Basic ou API Key.
 - **Coleções:** coleções, pastas e subpastas para organizar requests.
+- **Busca rápida:** encontre requests por texto ou filtre por método, status salvo e coleção/pasta usando `Ctrl+K`.
 - **Ambientes:** variáveis próprias e Cookie jar isolado por ambiente, com substituição por templates como <code>{{baseUrl}}</code> e <code>{{token}}</code>.
-- **Abas e histórico:** até 12 requests abertas; abas, histórico, coleções, ambientes e preferências ficam salvos localmente.
-- **Resposta:** visualização Pretty, Árvore ou Raw, cópia de cabeçalhos e body, busca de texto e resposta temporária.
+- **Abas e histórico:** até 12 requests abertas; requests, status, duração e cabeçalhos filtrados ficam no SQLite. Bodies de resposta são opcionais e desativados por padrão.
+- **Resposta:** visualização Pretty, Árvore ou Raw, cópia de cabeçalhos e body, busca, exemplos nomeados por request e simulação local sem chamar a API.
 - **Captura de variáveis:** salve um campo JSON da resposta ou o texto completo no ambiente ativo.
+- **OAuth 2.0:** Client Credentials e Authorization Code com PKCE S256; tokens salvos por ambiente com consentimento e proteção local.
 - **Testes de resposta:** valide status HTTP, existência de campo JSON, igualdade ou presença de texto.
 - **Runner:** execute requests de uma coleção ou pasta em sequência, com conjuntos de dados, intervalo, parada por falha e repetição das falhas.
 - **Temas e fontes:** Dracula, Monokai, One Dark, Nord, Solarized Dark e GitHub Dark; Fira Code, JetBrains Mono, Cascadia Code, Cascadia Mono e IBM Plex Mono.
 - **Editor JSON:** destaque de sintaxe e formatação com indentação de dois espaços.
-- **Intercâmbio:** Vortix JSON, Insomnia v4, Postman Collection v2.1, cURL e OpenAPI 3 em JSON.
+- **Intercâmbio:** Vortix JSON, Insomnia v4, Postman Collection v2.1, cURL, HTTPie, OpenAPI 3 em JSON.
 - **Backups:** exportação simples em JSON ou arquivo protegido por senha.
 
 Requests novas começam vazias. A URL base e os demais valores vêm do ambiente e da configuração que você criar.
@@ -80,15 +88,17 @@ A interface não exige npm nem framework JavaScript.
 Na pasta do projeto, execute:
 
 ~~~powershell
-.\Abrir-Testador-API.cmd
+.\VortixApiClient.cmd
 ~~~
 
 O iniciador reutiliza uma instância Vortix que já responda no health check. Caso não exista, inicia o servidor e abre o navegador.
 
+Os atalhos antigos Abrir-Testador-API.cmd, Abrir-Testador-API.ps1 e Validar-Testador.ps1 continuam disponíveis como wrappers de compatibilidade para os novos nomes Vortix.
+
 ### Outros sistemas ou execução manual
 
 ~~~sh
-dotnet run --project ./ApiPublicacaoTester.csproj --no-launch-profile
+dotnet run --project ./VortixApiClient.csproj --no-launch-profile
 ~~~
 
 Abra:
@@ -104,6 +114,8 @@ http://127.0.0.1:51873/health
 ~~~
 
 O servidor usa a porta 51873 por padrão. Consulte [Configuração](#configuração) para alterá-la.
+
+O endpoint <code>/health</code> preserva <code>app: ApiPublicacaoTester</code> para clientes antigos e informa <code>product: VortixApiClient</code> como identidade atual.
 
 ## Primeiro fluxo
 
@@ -126,6 +138,18 @@ Exemplo:
 
 Escolha **Body** para selecionar JSON, texto, XML ou form URL-encoded. O modo define o Content-Type padrão; um header Content-Type informado manualmente o sobrescreve.
 
+
+## Busca rápida
+
+Pressione `Ctrl+K` (ou `Cmd+K` no macOS) para abrir a busca global. Digite parte do nome, método, rota, coleção ou caminho da pasta; a busca ignora diferenças de acentuação. Use as setas para navegar e `Enter` para abrir a request em uma aba.
+
+Os filtros podem ser combinados e também funcionam sem texto:
+
+- **Método:** GET, HEAD, POST, PUT, PATCH, DELETE ou OPTIONS.
+- **Status salvo:** status HTTP encontrado nos exemplos de resposta salvos nas coleções.
+- **Coleção ou pasta:** limita a busca à coleção escolhida; uma pasta inclui também suas subpastas.
+
+O status vem dos exemplos já salvos; a busca não envia requests nem altera o histórico. A lista mostra até 30 resultados por vez.
 
 ## Modos de body
 
@@ -226,7 +250,15 @@ Variables precisam ser um objeto JSON. Se o campo ficar vazio, a propriedade <co
 
 O intercâmbio Postman Collection v2.1 usa o body GraphQL. Insomnia v4 recebe o envelope JSON de query. Importação e exportação preservam query, variables e operationName. Veja as referências oficiais de [GraphQL no Postman](https://learning.postman.com/docs/use/send-requests/protocols/graphql/graphql-http) e [GraphQL no Insomnia](https://developer.konghq.com/insomnia/graphql/).
 
-Esta fatia não busca schema por introspecção nem oferece autocomplete. A request continua agnóstica: informe o endpoint GraphQL da API que você estiver usando.
+### Schema, confirmação e autocomplete
+
+No body GraphQL, informe URL base, rota, Auth e Params da API; clique **Carregar schema**. O Vortix mostra a URL e pede confirmação antes de qualquer consulta, inclusive em localhost. Envia somente uma query de introspecção read-only por POST; query/variables que você esteja editando não são enviadas. O endpoint usa Auth e Cookie jar do ambiente ativo. HTTP remoto continua bloqueado sem autorização na request.
+
+O schema fica somente em memória: não entra no histórico, coleções ou SQLite. Se a API aceitar introspecção, escolha um tipo no seletor para navegar seus campos. Digite o prefixo de um campo na query e use as setas/Enter para completar; clicar em um campo do browser também o insere na posição atual do cursor. Alterar endpoint, ambiente, Params, Headers ou Auth invalida o schema carregado; consulte novamente. APIs que desativam introspecção retornam erro sem expor o body da resposta no toast.
+
+`GraphqlIntrospection.test.ps1` valida o proxy com um mock GraphQL em loopback. O teste confirma que o servidor envia somente a query fixa de introspecção, encaminha Auth e não adiciona a consulta ao histórico. Não usa endpoint externo.
+
+A request continua agnóstica: informe o endpoint GraphQL da API que você estiver usando.
 
 ### Métodos e proteção de gravação
 
@@ -299,13 +331,62 @@ Exemplo simplificado do JSON Vortix:
 
 O token fica no padrão da coleção, não é copiado para cada request nem para o histórico. O histórico guarda a referência da coleção/pasta e o ambiente da chamada, para reabrir Auth herdada no mesmo escopo. Se `{{token}}` varia entre ambientes, o Vortix resolve o valor do ambiente ativo ao enviar ou executar no Runner. Requests personalizadas continuam guardando seus próprios campos conforme a opção de salvamento.
 
+### OAuth 2.0 Client Credentials
+
+<p align="center">
+  <img src="docs/images/vortix-oauth-client-credentials.svg" alt="Fluxo OAuth Client Credentials, com segredo temporário e token isolado por ambiente" width="100%">
+</p>
+
+Use este fluxo para integração serviço a serviço, quando o cliente obtém acesso em nome próprio. Na aba <strong>Auth</strong>, abra <strong>OAuth 2.0 · Client Credentials</strong>, informe a URL completa do token endpoint, Client ID e scopes, e escolha a autenticação do cliente. O segredo é solicitado a cada envio.
+
+O Vortix envia <code>POST</code> com <code>application/x-www-form-urlencoded</code>, <code>grant_type=client_credentials</code> e o scope opcional. <strong>HTTP Basic</strong> é o padrão; escolha <strong>Credenciais no formulário</strong> quando o servidor exigir <code>client_secret_post</code>. O segredo nunca vai na URL, no perfil salvo, nas abas ou no histórico. O perfil sem segredo é salvo por ambiente.
+
+Exemplo de body para o método <code>client_secret_basic</code>:
+
+~~~http
+POST https://identity.example.com/oauth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&scope=read+write
+~~~
+
+Com <code>client_secret_post</code>, o formulário também contém <code>client_id</code> e <code>client_secret</code>. Os dois métodos não podem ser combinados. O Vortix aceita resposta JSON com <code>access_token</code> e <code>token_type: Bearer</code>; quando houver <code>expires_in</code>, mostra o vencimento. O token salvo opcionalmente como <code>{{token}}</code> fica no ambiente ativo com proteção local. Para request com Auth própria, o campo Bearer recebe o token; com herança ativa, o escopo herdado permanece.
+
+A renovação é manual: solicite outro token quando o status indicar expiração. O Vortix não guarda <code>refresh_token</code>, não renova em segundo plano e não adiciona parâmetros proprietários como <code>audience</code>. O fluxo interativo <strong>Authorization Code with PKCE</strong> está descrito abaixo. Consulte o <a href="https://www.rfc-editor.org/rfc/rfc6749">RFC 6749, seções 4.4 e 5.1</a>.
+### Authorization Code with PKCE
+
+<p align="center">
+  <img src="docs/images/vortix-oauth-authorization-code-pkce.svg" alt="Fluxo Authorization Code com PKCE S256, retorno loopback e gravação consentida de tokens" width="100%">
+</p>
+
+Use este fluxo quando a API precisa agir em nome de um usuário. Na aba **Auth**, abra **OAuth 2.0 · Authorization Code + PKCE** e informe a URL de autorização, URL do token endpoint, Client ID público e scopes. O fluxo **não aceita nem pede <code>client_secret</code>**.
+
+Antes de autorizar, copie a **Redirect URI** exibida e cadastre exatamente esse valor no provedor. A URI usa <code>http://127.0.0.1:&lt;porta&gt;/oauth/callback/&lt;identificador-do-provedor&gt;</code>; a porta corresponde à instância local do Vortix e o caminho identifica a URL de autorização configurada. Se mudar URL, tenant ou porta, copie e cadastre a nova URI. Abra o Vortix por <code>http://127.0.0.1:&lt;porta&gt;</code>; acesso pelo endereço da rede local não recebe callbacks OAuth.
+
+Ao clicar **Autorizar no navegador**, o Vortix gera <code>state</code> e <code>code_verifier</code> aleatórios, calcula <code>code_challenge</code> com <code>S256</code>, envia <code>code_challenge_method=S256</code> e abre o provedor em outra aba. Depois do login e consentimento, o provedor retorna o código ao callback loopback. O servidor valida <code>state</code>, caminho do provedor e prazo; então envia <code>grant_type=authorization_code</code>, <code>client_id</code>, o mesmo <code>redirect_uri</code>, <code>code</code> e <code>code_verifier</code> ao token endpoint. O verifier nunca aparece na URL de autorização, no histórico ou no SQLite.
+
+Exemplo simplificado do token exchange:
+
+~~~http
+POST https://identity.example.com/oauth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code&code=<codigo-de-uso-unico>&client_id=<client-id>&redirect_uri=<redirect-uri-exata>&code_verifier=<verifier-temporario>
+~~~
+
+As opções **Salvar access token** e **Salvar refresh token** vêm desmarcadas. Marque cada uma antes de iniciar para gravar <code>{{token}}</code> e/ou <code>{{refresh_token}}</code> no ambiente ativo. O Vortix protege os valores no SQLite com ASP.NET Core Data Protection. Sem consentimento, os tokens ficam apenas em memória durante o fluxo e são descartados ao terminar. Refresh token não é renovado automaticamente; a variável pode ser reutilizada manualmente. O botão **Cancelar autorização** invalida o fluxo local; se a aba do provedor permanecer aberta, feche-a. O callback redireciona para uma página limpa sem código ou state na URL final.
+
+Os endpoints OAuth remotos precisam usar HTTPS. HTTP é aceito somente em loopback, para testes locais. O provedor deve aceitar Authorization Code para cliente público, PKCE <code>S256</code> e uma redirect URI loopback registrada com correspondência exata. Provedores que exigem <code>client_secret</code>, não aceitam loopback ou só oferecem outro grant não funcionam neste fluxo. O Vortix não valida <code>id_token</code> nem implementa OpenID Connect; usa apenas access token Bearer e, se autorizado, refresh token.
+
+Para cadastro e requisitos de segurança, consulte [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636), [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252), [RFC 9700](https://www.rfc-editor.org/rfc/rfc9700) e [RFC 10017](https://www.rfc-editor.org/rfc/rfc10017).
+
 ### Salvamento e intercâmbio
 
 A opção **Salvar credenciais de Auth nas requests locais** controla histórico, abas e padrões de coleção/pasta. Desmarcada, o Vortix mantém os valores só na sessão e não os grava nessas áreas. SQLite protege campos sensíveis com ASP.NET Core Data Protection.
 
 Na importação, você escolhe se guarda credenciais. Na exportação, elas ficam fora por padrão. Marcar **Incluir credenciais de Auth e variáveis sensíveis** grava valores diretamente no JSON sem criptografia.
 
-Vortix JSON e Postman Collection v2.1 preservam Auth de coleção/pasta e requests herdadas. Insomnia v4 não oferece Auth nativa na coleção; ao exportar, o Vortix cria a pasta “Auth padrão” para manter o escopo. As requests herdam da pasta, como no fluxo do Insomnia. Consulte a documentação oficial sobre [Auth em pastas no Insomnia](https://developer.konghq.com/insomnia/requests/) e [herança no Postman](https://learning.postman.com/latest-v-12/docs/use/send-requests/authorization/specifying-authorization-details).
+Vortix JSON e Postman Collection v2.1 preservam Auth de coleção/pasta e requests herdadas. Para manter a herança documentada no Insomnia, o Vortix exporta Auth de coleção numa pasta raiz chamada "Auth padrão"; as requests herdam da pasta.. Consulte a documentação oficial sobre [Auth em pastas no Insomnia](https://developer.konghq.com/insomnia/requests/) e [herança no Postman](https://learning.postman.com/latest-v-12/docs/use/send-requests/authorization/specifying-authorization-details).
 
 
 ## Importar cURL
@@ -327,6 +408,20 @@ A importação converte método, URL, Params, headers e body. Também entende as
 A primeira versão aceita `-X`/`--request`, `-H`/`--header`, `--url`, `-d`/`--data`, `--data-raw`, `--data-binary`, `--json` e `-I`/`--head`. Body enviado sem método explícito vira POST; `--data` sem Content-Type recebe `application/x-www-form-urlencoded`.
 
 O Vortix rejeita comandos com credenciais na URL, parâmetros de query sensíveis, autenticação Basic, cookies, upload de arquivo e opções não reconhecidas. Isso evita importar uma chamada alterada silenciosamente. Configure esses campos manualmente e importe a request novamente quando terminar.
+
+### Importar HTTPie
+
+No diálogo de importação, selecione **HTTPie** e cole o comando. O Vortix analisa a linha localmente e abre um rascunho; nunca executa o comando.
+
+~~~sh
+http GET https://api.example.com/v1/users page==1 Accept:application/json
+http POST https://api.example.com/v1/users name=Ana age:=42
+http --form POST https://api.example.com/v1/search term=Vortix
+~~~
+
+A importação reconhece método, URL, query com `==`, headers `Nome:valor`, campos JSON `nome=texto`/`nome:=JSON` e formulário simples com `--form`. O comando `https` escolhe HTTPS quando a URL não tem esquema. O Bearer em `Authorization` vai para **Auth** e fica apenas em memória.
+
+Auth Basic, sessões, arquivos, fields/Params com nomes sensíveis, headers sensíveis e opções não suportadas são rejeitados sem repetir valores de credenciais no erro. Configure esses itens manualmente depois de abrir o restante da request.
 
 ## Importar OpenAPI JSON
 
@@ -404,6 +499,20 @@ A aba **Testes** permite até 20 verificações por request:
 
 Os testes rodam depois do envio manual e durante o Runner. Uma falha de teste marca a request como falha na rodada. Ao exportar testes ou captura para Insomnia/Postman, o Vortix pede confirmação para gerar scripts no arquivo.
 
+### Simular uma resposta salva localmente
+
+Em **Exemplos salvos**, clique **Simular local** para mostrar um exemplo sem enviar a request ao proxy nem à API. A request atual precisa manter o mesmo método, caminho e query da request salva; a ordem dos parâmetros não importa, mas nomes e valores precisam corresponder. A simulação não cria servidor de mock e não entra no histórico. Os testes de resposta rodam normalmente; se a captura de variável estiver ativada, ela usa o body simulado e grava o resultado no ambiente ativo.
+
+Exemplos úteis para uma mesma request:
+
+| Cenário | HTTP | Body de exemplo |
+|---|---:|---|
+| Sucesso | 201 | <code>{"id":42,"name":"Ana"}</code> |
+| Validação | 400 | <code>{"error":"validation_error","field":"email"}</code> |
+| Erro do servidor | 500 | <code>{"error":"internal_error","requestId":"req-example"}</code> |
+
+Salve cada resposta na mesma request e escolha **Simular local** para reproduzi-la.
+
 ### Runner de coleção
 
 Selecione uma coleção ou pasta e clique em **Executar seleção**. O Runner percorre as requests em sequência e permite:
@@ -441,11 +550,25 @@ Cada rodada aceita até 500 requests. Credenciais solicitadas manualmente pelo h
 
 Na importação, o Vortix pede confirmação antes de guardar credenciais Bearer, Basic, API Key e variáveis sensíveis com proteção local. A exportação omite credenciais por padrão; se marcar a opção, o JSON poderá conter esses valores sem criptografia. Cookies e chaves privadas continuam fora do export.
 
-Exports Insomnia e Postman podem conter scripts After-response/Post-response gerados para captura e testes. O Vortix pede confirmação antes de gerar esses scripts. Revise o arquivo e o código antes de importá-lo em outro cliente.
+Insomnia v4 e Postman Collection v2.1 preservam os exemplos de resposta vinculados a cada request. No Postman, eles usam `response[]`; no Insomnia v4, recursos `_type: response` referenciam a request por `parentId`. Ao exportar coleções com exemplos, o Vortix pede confirmação porque os bodies seguem sem criptografia no arquivo. Headers de autenticação, cookies e outros headers sensíveis são filtrados. Exports Insomnia e Postman também podem conter scripts After-response/Post-response para captura e testes; o Vortix pede confirmação antes de exportá-los. Revise o arquivo e os scripts antes de importá-lo em outro cliente.
+
+## Histórico de respostas
+
+Cada envio manual salva status HTTP, motivo, duração e cabeçalhos de resposta filtrados no histórico da request. Clique no selo de status no painel **Histórico** para restaurar a resposta na área de resultado.
+
+O limite padrão mantém as 500 requests mais recentes. Em **Configurações → Histórico de respostas**, escolha 50, 100, 250, 500, 1000 ou 2500. Reduzir o limite pede confirmação e remove os registros mais antigos, incluindo responses já salvos.
+
+O body de resposta não é salvo por padrão. Ative **Salvar body de resposta** para requests futuras; o SQLite protege esses bodies com ASP.NET Core Data Protection. Bodies acima do limite local não são guardados. Desativar a opção não apaga bodies antigos; use **Limpar histórico** para removê-los. Bodies de respostas de endpoints de token nunca são guardados, mesmo com a opção ativa. Cabeçalhos de autenticação, cookies, tokens e chaves também ficam fora do snapshot.
+
+Marque duas respostas no **Histórico** e clique **Comparar respostas**. A janela mostra status, duração, headers filtrados e bodies salvos lado a lado; o resumo destaca quais dados mudaram. Se algum body não foi guardado, a comparação continua com status, duração e headers. Bodies de token nunca são mostrados.
+
+Backups do workspace incluem histórico e bodies que você escolheu salvar. O backup simples não é criptografado; use **Backup com senha** para proteger o arquivo.
 
 ## Persistência e backups
 
-Histórico, coleções, pastas, ambientes, Cookie jars, requests, abas e configurações ficam em um banco SQLite local. Valores de cookies são protegidos com Data Protection. O body das respostas não é persistido. Requests e variáveis podem conter dados sensíveis, portanto proteja o computador e os backups.
+Histórico, coleções, pastas, ambientes, Cookie jars, requests, abas e configurações ficam em um banco SQLite local. Valores de cookies são protegidos com Data Protection. O body das respostas fica temporário até você salvar explicitamente um exemplo na request. Requests e variáveis podem conter dados sensíveis, portanto proteja o computador e os backups.
+
+Exemplos de resposta salvos ficam anexados à request da coleção, com status, body e headers filtrados; o body é protegido por Data Protection no SQLite. Vortix JSON, Insomnia v4 e Postman Collection v2.1 preservam os exemplos. Os exports JSON não são criptografados e podem conter dados reais da resposta, então revise e confirme antes de compartilhar.
 
 Em Windows, sem configuração personalizada, o banco fica em:
 
@@ -453,13 +576,15 @@ Em Windows, sem configuração personalizada, o banco fica em:
 %LOCALAPPDATA%/ApiPublicacaoTester/api-studio.sqlite
 ~~~
 
+O projeto, executável e launcher usam o nome <code>VortixApiClient</code>. O diretório de dados legado permanece <code>ApiPublicacaoTester</code> e a identidade de Data Protection permanece <code>ApiPublicacaoTester</code>; isso mantém acesso ao SQLite e aos valores já protegidos. O nome antigo do IndexedDB também continua reconhecido para a migração inicial.
+
 Em outros sistemas, o diretório parte de <code>Environment.SpecialFolder.LocalApplicationData</code>. O caminho pode ser definido com <code>ApiStudio__DatabasePath</code>.
 
 Na primeira execução, o Vortix tenta importar os dados antigos do IndexedDB do navegador. A cópia antiga é preservada no navegador; se a migração falhar, os dados permanecem disponíveis para nova tentativa.
 
 ### Proteção de dados
 
-O SQLite inteiro não é criptografado. ASP.NET Core Data Protection protege campos reconhecidos como sensíveis e bodies não vazios. A proteção depende do key ring e da identidade que executa o aplicativo. Mantenha acesso às chaves ao mover o banco ou trocar a identidade do processo.
+O SQLite inteiro não é criptografado. ASP.NET Core Data Protection protege campos reconhecidos como sensíveis e bodies não vazios. A proteção depende do key ring e da identidade que executa o aplicativo. Mantenha acesso às chaves ao mover o banco ou trocar a identidade do processo. Se uma chave antiga não estiver disponível para descriptografar a preferência não secreta `tokenCredentialMode`, o Vortix usa `body`, mantém o ciphertext original e mostra um aviso. Outros valores protegidos continuam exigindo o key ring original.
 
 As credenciais de Auth seguem a opção de salvamento da request ou do histórico. No helper **Solicitar token**, client_id/client_secret são pedidos a cada envio e não entram no histórico.
 
@@ -489,6 +614,7 @@ O aplicativo lê as configurações ASP.NET Core por variáveis de ambiente:
 | Variável | Padrão | Descrição |
 |---|---|---|
 | <code>ApiStudio__Port</code> | <code>51873</code> | Porta local. Aceita valores de 1 a 65535. |
+| <code>ApiStudio__OAuthPkceFlowTimeoutSeconds</code> | <code>300</code> | Tempo máximo de um fluxo PKCE pendente, de 1 a 600 segundos. |
 | <code>ApiStudio__DatabasePath</code> | LocalApplicationData + <code>ApiPublicacaoTester/api-studio.sqlite</code> | Caminho completo do banco SQLite. A identidade do processo precisa ter permissão de leitura e escrita. |
 
 Exemplo no PowerShell:
@@ -496,7 +622,7 @@ Exemplo no PowerShell:
 ~~~powershell
 $env:ApiStudio__Port = '51874'
 $env:ApiStudio__DatabasePath = 'D:/VortixData/api-studio.sqlite'
-dotnet run --project ./ApiPublicacaoTester.csproj --no-launch-profile
+dotnet run --project ./VortixApiClient.csproj --no-launch-profile
 ~~~
 
 As variáveis valem para o processo iniciado nesse terminal.
@@ -504,10 +630,13 @@ As variáveis valem para o processo iniciado nesse terminal.
 ## Desenvolvimento e validação
 
 ~~~powershell
-dotnet restore ./ApiPublicacaoTester.csproj
-dotnet build ./ApiPublicacaoTester.csproj -c Release
+dotnet restore ./VortixApiClient.csproj
+dotnet build ./VortixApiClient.csproj -c Release
 node --test ./RunnerLogic.test.cjs
 powershell -NoProfile -ExecutionPolicy Bypass -File ./WorkspaceProtection.test.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File ./AuthorizationCodePkce.test.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File ./HistoryRetention.test.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File ./GraphqlIntrospection.test.ps1
 ~~~
 
 O teste integrado precisa de Python 3 acessível como <code>python</code>. Ele cria um SQLite temporário, inicia uma instância local isolada e remove a pasta temporária ao finalizar.
@@ -515,7 +644,7 @@ O teste integrado precisa de Python 3 acessível como <code>python</code>. Ele c
 Com o Vortix já em execução, valide a página e os endpoints locais:
 
 ~~~powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File ./Validar-Testador.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File ./Test-VortixApiClient.ps1
 ~~~
 
 ## Estrutura do projeto
@@ -528,10 +657,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./Validar-Testador.ps1
 | <code>wwwroot/app.js</code> | Editor, coleções, ambientes, histórico e fluxos da interface. |
 | <code>wwwroot/runner-logic.js</code> | Lógica sem dependência de DOM, importação, validação e Runner. |
 | <code>wwwroot/style.css</code> | Layout, temas, tipografia e estados visuais. |
-| <code>Abrir-Testador-API.cmd</code> | Atalho de inicialização no Windows. |
-| <code>Validar-Testador.ps1</code> | Smoke check contra uma instância em execução. |
+| <code>VortixApiClient.csproj</code> | Nome do projeto e artefatos de build. |
+| <code>VortixApiClient.ps1</code> | Inicializa ou reutiliza a instância local. |
+| <code>VortixApiClient.cmd</code> | Atalho de inicialização no Windows. |
+| <code>Test-VortixApiClient.ps1</code> | Smoke check contra uma instância em execução. |
+| <code>HistoryRetention.test.ps1</code> | Testa limite do histórico e proteção do body SQLite. |
+| <code>GraphqlIntrospection.test.ps1</code> | Testa introspecção fixa contra mock local. |
+| <code>GraphqlSchemaCaptureServer.test.ps1</code> | Mock GraphQL loopback para o teste integrado. |
 | <code>RunnerLogic.test.cjs</code> | Testes de lógica JavaScript. |
 | <code>WorkspaceProtection.test.ps1</code> | Teste integrado de persistência e proteção em banco temporário. |
+| <code>AuthorizationCodePkce.test.ps1</code> | Teste local de callback, state, PKCE, cancelamento e expiração. |
+| <code>OAuthAuthorizationServer.test.ps1</code> | Provedor OAuth fictício de loopback para testes. |
 
 ## Solução de problemas
 

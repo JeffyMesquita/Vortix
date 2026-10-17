@@ -13,6 +13,7 @@ $oldTestSecrets = $env:API_STUDIO_TEST_SECRETS
 $oldTestRecord = $env:API_STUDIO_TEST_RECORD
 $server = $null
 $authMockServer = $null
+$oauthMockServer = $null
 $cookieMockServer = $null
 $bodyMockServer = $null
 $passed = $false
@@ -40,6 +41,19 @@ function Start-AuthCaptureServer([int]$requestCount) {
     return [pscustomobject]@{ Process = $process; Port = [int](Get-Content -Raw $readyPath) }
 }
 
+
+function Start-OAuthCaptureServer([int]$requestCount) {
+    $readyPath = Join-Path $temporaryRoot 'oauth-mock.port'
+    $scriptPath = Join-Path $projectRoot 'OAuthCaptureServer.test.ps1'
+    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath, '-RequestCount', [string]$requestCount, '-ReadyPath', $readyPath, '-OutputRoot', $temporaryRoot) -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $temporaryRoot 'oauth-mock.out') -RedirectStandardError (Join-Path $temporaryRoot 'oauth-mock.err')
+    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+        if ($process.HasExited) { throw 'OAuth capture server exited before becoming ready.' }
+        if (Test-Path $readyPath) { break }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not (Test-Path $readyPath)) { throw 'OAuth capture server did not become ready.' }
+    return [pscustomobject]@{ Process = $process; Port = [int](Get-Content -Raw $readyPath) }
+}
 function Start-CookieCaptureServer([int]$requestCount) {
     $readyPath = Join-Path $temporaryRoot 'cookie-mock.port'
     $scriptPath = Join-Path $projectRoot 'CookieCaptureServer.test.ps1'
@@ -75,9 +89,9 @@ function Get-PlaintextScan([string[]]$secrets, [string]$pythonPath) {
 try {
     $env:ApiStudio__Port = [string]$port
     $env:ApiStudio__DatabasePath = $databasePath
-    $dll = Join-Path $projectRoot 'bin\Release\net8.0\ApiPublicacaoTester.dll'
+    $dll = Join-Path $projectRoot 'bin\Release\net8.0\VortixApiClient.dll'
     $server = Start-TestApi 'first'
-    & (Join-Path $projectRoot 'Validar-Testador.ps1') -BaseUrl $baseUrl
+    & (Join-Path $projectRoot 'Test-VortixApiClient.ps1') -BaseUrl $baseUrl
     $headers = @{ 'X-Api-Studio' = '1'; Origin = $baseUrl }
     $blockedHttpCall = @{ baseUrl = 'http://api.example.invalid'; route = '/health'; method = 'GET'; allowInsecureHttp = $false } | ConvertTo-Json -Compress
     $blockedHttpStatus = 0
@@ -99,12 +113,43 @@ try {
     $apiKey = 'api-key-value-canary-' + [guid]::NewGuid().ToString('N')
     $collectionAuth = 'collection-auth-canary-' + [guid]::NewGuid().ToString('N')
     $folderAuth = 'folder-auth-canary-' + [guid]::NewGuid().ToString('N')
-    $record = @{ key = 'protection-test'; value = @{ bearerToken = $bearer; headers = "Authorization: Bearer $headerSecret`r`nX-Api-Key: api-key-canary"; body = ('Body texto livre ' + $bodySecret); route = '/auth?client_secret=' + $querySecret; params = @(@('client_secret', $paramSecret), @('tenant', 'safe-tenant')); basicUsername = $basicUsername; basicPassword = $basicPassword; authType = 'apiKey'; apiKeyName = 'X-API-Key'; apiKeyValue = $apiKey; collection = @{ auth = @{ authType = 'bearer'; bearerToken = $collectionAuth }; folders = @(@{ auth = @{ authType = 'apiKey'; apiKeyName = 'X-API-Key'; apiKeyValue = $folderAuth } }) } } }
+    $responseExampleBody = 'response-example-body-canary-' + [guid]::NewGuid().ToString('N')
+    $record = @{ key = 'protection-test'; value = @{ bearerToken = $bearer; headers = "Authorization: Bearer $headerSecret`r`nX-Api-Key: api-key-canary"; body = ('Body texto livre ' + $bodySecret); route = '/auth?client_secret=' + $querySecret; params = @(@('client_secret', $paramSecret), @('tenant', 'safe-tenant')); basicUsername = $basicUsername; basicPassword = $basicPassword; authType = 'apiKey'; apiKeyName = 'X-API-Key'; apiKeyValue = $apiKey; collection = @{ auth = @{ authType = 'bearer'; bearerToken = $collectionAuth }; folders = @(@{ auth = @{ authType = 'apiKey'; apiKeyName = 'X-API-Key'; apiKeyValue = $folderAuth } }); requests = @(@{ responseExamples = @(@{ id = 'response-example-test'; name = 'Sucesso'; status = 200; headers = @{ 'Content-Type' = @('application/json') }; body = ('Response example body ' + $responseExampleBody); savedAt = '2026-10-15T12:00:00.000Z' }) }) } } }
     $json = $record | ConvertTo-Json -Depth 20 -Compress
     Invoke-RestMethod -Uri ($baseUrl + '/api/storage/settings') -Method Post -Headers $headers -ContentType 'application/json' -Body $json -TimeoutSec 3 | Out-Null
     $saved = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/settings?key=protection-test') -Headers $headers -TimeoutSec 3
-    if ($saved.value.bearerToken -ne $bearer -or $saved.value.headers -notlike "*${headerSecret}*" -or $saved.value.body -notlike "*${bodySecret}*" -or $saved.value.route -notlike "*${querySecret}*" -or $saved.value.params[0][1] -ne $paramSecret -or $saved.value.params[1][1] -ne 'safe-tenant' -or $saved.value.basicUsername -ne $basicUsername -or $saved.value.basicPassword -ne $basicPassword -or $saved.value.apiKeyValue -ne $apiKey -or $saved.value.collection.auth.bearerToken -ne $collectionAuth -or $saved.value.collection.folders[0].auth.apiKeyValue -ne $folderAuth) { throw 'Storage API did not return original sensitive values.' }
+    if ($saved.value.bearerToken -ne $bearer -or $saved.value.headers -notlike "*${headerSecret}*" -or $saved.value.body -notlike "*${bodySecret}*" -or $saved.value.route -notlike "*${querySecret}*" -or $saved.value.params[0][1] -ne $paramSecret -or $saved.value.params[1][1] -ne 'safe-tenant' -or $saved.value.basicUsername -ne $basicUsername -or $saved.value.basicPassword -ne $basicPassword -or $saved.value.apiKeyValue -ne $apiKey -or $saved.value.collection.auth.bearerToken -ne $collectionAuth -or $saved.value.collection.folders[0].auth.apiKeyValue -ne $folderAuth -or $saved.value.collection.requests[0].responseExamples[0].body -ne ('Response example body ' + $responseExampleBody)) { throw 'Storage API did not return original sensitive values.' }
 
+    $missingKeyBytes = [byte[]]@(9, 240, 201, 240)
+    $missingKeyBytes += [guid]::NewGuid().ToByteArray()
+    $missingKeyBytes += [byte[]]@(1, 2, 3, 4)
+    $unavailableModeMarker = 'APISTUDIO:DATA-PROTECTION:v1:' + [Convert]::ToBase64String($missingKeyBytes)
+    $workspaceTabsFixture = @{
+        key = 'workspaceTabs'
+        value = @{ activeId = 'recovery-tab'; tabs = @(@{ id = 'recovery-tab'; title = 'Recovery'; request = @{ method = 'GET'; route = '/health'; tokenCredentialMode = $unavailableModeMarker } }) }
+    } | ConvertTo-Json -Depth 12 -Compress
+    $null = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/settings') -Method Post -Headers $headers -ContentType 'application/json' -Body $workspaceTabsFixture -TimeoutSec 3
+    $recoveredTabsResponse = $null; $recoveredTabsStatus = 0
+    try { $recoveredTabsResponse = Invoke-WebRequest -Uri ($baseUrl + '/api/storage/settings?key=workspaceTabs') -Headers $headers -TimeoutSec 3 -UseBasicParsing; $recoveredTabsStatus = [int]$recoveredTabsResponse.StatusCode } catch { if ($_.Exception.Response) { $recoveredTabsStatus = [int]$_.Exception.Response.StatusCode } else { throw } }
+    if ($recoveredTabsStatus -ne 200) { throw ('Unreadable non-secret tokenCredentialMode must recover as body; expected HTTP 200, got ' + $recoveredTabsStatus) }
+    $recoveredTabs = $recoveredTabsResponse.Content | ConvertFrom-Json
+    if ($recoveredTabs.value.tabs[0].request.tokenCredentialMode -ne 'body' -or @($recoveredTabsResponse.Headers['X-Api-Studio-Data-Recovery']) -notcontains 'tokenCredentialMode') { throw 'Workspace recovery did not return the safe body default and warning header.' }
+    $recoveredWorkspace = Invoke-WebRequest -Uri ($baseUrl + '/api/storage/workspace') -Headers $headers -TimeoutSec 3 -UseBasicParsing
+    if ([int]$recoveredWorkspace.StatusCode -ne 200) { throw 'Unreadable tokenCredentialMode still prevents a full workspace snapshot.' }
+    $recoveredWorkspaceJson = $recoveredWorkspace.Content | ConvertFrom-Json
+    $workspaceTabsRecord = @($recoveredWorkspaceJson.settings | Where-Object { $_.key -eq 'workspaceTabs' })[0]
+    if ($workspaceTabsRecord.value.tabs[0].request.tokenCredentialMode -ne 'body') { throw 'Full workspace snapshot did not apply the safe body default.' }
+    $markerCheckPath = Join-Path $temporaryRoot 'check-workspace-marker.py'
+    $markerCheckCode = @(
+        'import json, sqlite3, sys',
+        'connection = sqlite3.connect(sys.argv[1])',
+        'raw = connection.execute("SELECT json FROM api_studio_data WHERE store = ? AND record_key = ?", ("settings", "workspaceTabs")).fetchone()[0]',
+        'stored = json.loads(raw)["value"]["tabs"][0]["request"]["tokenCredentialMode"]',
+        'print("PRESERVED" if stored == sys.argv[2] else "CHANGED")'
+    ) -join "`n"
+    [System.IO.File]::WriteAllText($markerCheckPath, $markerCheckCode, [System.Text.UTF8Encoding]::new($false))
+    $markerCheck = & python $markerCheckPath $databasePath $unavailableModeMarker
+    if ($LASTEXITCODE -ne 0 -or $markerCheck.Trim() -ne 'PRESERVED') { throw 'The unreadable protected value was modified while returning its safe fallback.' }
     $scanPath = Join-Path $temporaryRoot 'scan.sqlite.py'
     $scanCode = @(
         'import json, os, sqlite3, sys',
@@ -114,7 +159,14 @@ try {
         'print("FOUND" if any(secret in text for secret in secrets) else "CLEAR")'
     ) -join "`n"
     [System.IO.File]::WriteAllText($scanPath, $scanCode, [System.Text.UTF8Encoding]::new($false))
-    $secrets = @($bearer, $headerSecret, 'api-key-canary', $bodySecret, $querySecret, $paramSecret, $basicUsername, $basicPassword, $apiKey, $collectionAuth, $folderAuth, 'local-session-canary', 'local-domain-canary', 'local-secure-canary')
+    $secrets = @($bearer, $headerSecret, 'api-key-canary', $bodySecret, $querySecret, $paramSecret, $basicUsername, $basicPassword, $apiKey, $collectionAuth, $folderAuth, $responseExampleBody, 'local-session-canary', 'local-domain-canary', 'local-secure-canary')
+    $pkceAccessToken = 'pkce-access-canary-' + [guid]::NewGuid().ToString('N')
+    $pkceRefreshToken = 'pkce-refresh-canary-' + [guid]::NewGuid().ToString('N')
+    $pkceEnvironment = @{ id = 'pkce-protection-test'; name = 'PKCE protection test'; group = 'OAuth'; variables = @{ token = $pkceAccessToken; refresh_token = $pkceRefreshToken } } | ConvertTo-Json -Depth 10 -Compress
+    $null = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/environments') -Method Post -Headers $headers -ContentType 'application/json' -Body $pkceEnvironment -TimeoutSec 3
+    $pkceRoundTrip = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/environments?key=pkce-protection-test') -Headers $headers -TimeoutSec 3
+    if ($pkceRoundTrip.variables.token -ne $pkceAccessToken -or $pkceRoundTrip.variables.refresh_token -ne $pkceRefreshToken) { throw 'PKCE environment tokens did not round-trip through protected storage.' }
+    $secrets += @($pkceAccessToken, $pkceRefreshToken)
     if ((Get-PlaintextScan $secrets $scanPath) -ne 'CLEAR') { throw 'A sensitive sentinel remains in SQLite plaintext.' }
     $authMockServer = Start-AuthCaptureServer 3
     $mockBaseUrl = 'http://127.0.0.1:' + $authMockServer.Port
@@ -139,6 +191,56 @@ try {
     $queryCapture = Get-Content -Raw (Join-Path $temporaryRoot 'request-2.txt')
     if ($queryCapture -notmatch [regex]::Escape('access_key=' + $wireQueryKey)) { throw 'API key query parameter was not applied.' }
 
+    $oauthMockServer = Start-OAuthCaptureServer 2
+    $oauthBaseUrl = 'http://127.0.0.1:' + $oauthMockServer.Port
+    $oauthClientId = 'oauth client:id'
+    $oauthClientSecret = 'oauth-secret&value-' + [guid]::NewGuid().ToString('N')
+    $encodedClientId = [System.Net.WebUtility]::UrlEncode($oauthClientId)
+    $encodedClientSecret = [System.Net.WebUtility]::UrlEncode($oauthClientSecret)
+    $oauthBasicCall = @{
+        baseUrl = $oauthBaseUrl; route = '/oauth/token?tenant=demo'; method = 'POST'; bodyMode = 'urlencoded'
+        body = 'grant_type=client_credentials&scope=read+write'; headers = 'Accept: application/json'
+        authType = 'basic'; basicUsername = $encodedClientId; basicPassword = $encodedClientSecret
+        confirmTokenRequest = $true; tokenFlow = 'oauth2-client-credentials'; environmentId = 'oauth-client-credentials-basic'
+    } | ConvertTo-Json -Compress
+    $oauthBasicResult = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $oauthBasicCall -TimeoutSec 5
+    if ($oauthBasicResult.status -ne 200 -or $oauthBasicResult.body -notlike '*oauth-access-canary-012345*') { throw 'OAuth client_secret_basic token request did not complete.' }
+    $oauthBasicCapture = Get-Content -Raw (Join-Path $temporaryRoot 'oauth-request-0.txt')
+    $expectedOAuthBasic = 'Authorization: Basic ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($encodedClientId + ':' + $encodedClientSecret))
+    if ($oauthBasicCapture -notmatch [regex]::Escape($expectedOAuthBasic) -or $oauthBasicCapture -notmatch '(?im)^Content-Type:\s*application/x-www-form-urlencoded' -or -not $oauthBasicCapture.Contains('grant_type=client_credentials&scope=read+write') -or $oauthBasicCapture -notmatch '(?m)^POST /oauth/token\?tenant=demo ') { throw 'OAuth Basic authentication, form body, or endpoint query was not preserved.' }
+    if ($oauthBasicCapture.Contains($oauthClientSecret) -or $oauthBasicCapture.Contains('client_secret=')) { throw 'client_secret_basic leaked the secret to the body or URL.' }
+
+    $oauthPostCall = @{
+        baseUrl = $oauthBaseUrl; route = '/oauth/token'; method = 'POST'; bodyMode = 'urlencoded'
+        body = 'grant_type=client_credentials&client_id=' + $encodedClientId + '&client_secret=' + $encodedClientSecret
+        headers = 'Accept: application/json'; authType = 'none'; confirmTokenRequest = $true
+        tokenFlow = 'oauth2-client-credentials'; environmentId = 'oauth-client-credentials-post'
+    } | ConvertTo-Json -Compress
+    $oauthPostResult = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $oauthPostCall -TimeoutSec 5
+    if ($oauthPostResult.status -ne 200 -or $oauthPostResult.body -notlike '*oauth-access-canary-012345*') { throw 'OAuth client_secret_post token request did not complete.' }
+    $oauthPostCapture = Get-Content -Raw (Join-Path $temporaryRoot 'oauth-request-1.txt')
+    if ($oauthPostCapture -match '(?im)^Authorization:' -or -not $oauthPostCapture.Contains('grant_type=client_credentials&client_id=' + $encodedClientId + '&client_secret=' + $encodedClientSecret) -or $oauthPostCapture -match '(?m)^POST /oauth/token[?]') { throw 'OAuth client_secret_post form credentials were not sent only in the body.' }
+    $assertOAuthRejected = {
+        param([string]$callJson, [string]$label)
+        $status = 0
+        try {
+            $null = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $callJson -TimeoutSec 5
+            $status = 200
+        } catch {
+            if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode } else { throw }
+        }
+        if ($status -ne 400) { throw ('Invalid OAuth token request expected HTTP 400: ' + $label) }
+    }
+    $oauthBadQuery = @{ baseUrl = $oauthBaseUrl; route = '/oauth/token?client_secret=query-leak'; method = 'POST'; bodyMode = 'urlencoded'; body = 'grant_type=client_credentials'; headers = 'Accept: application/json'; authType = 'basic'; basicUsername = $encodedClientId; basicPassword = $encodedClientSecret; confirmTokenRequest = $true; tokenFlow = 'oauth2-client-credentials' } | ConvertTo-Json -Compress
+    & $assertOAuthRejected $oauthBadQuery 'secret in URL'
+    $oauthDuplicateGrant = @{ baseUrl = $oauthBaseUrl; route = '/oauth/token'; method = 'POST'; bodyMode = 'urlencoded'; body = 'grant_type=client_credentials&grant_type=client_credentials&client_id=id&client_secret=' + $oauthClientSecret; headers = 'Accept: application/json'; authType = 'none'; confirmTokenRequest = $true; tokenFlow = 'oauth2-client-credentials' } | ConvertTo-Json -Compress
+    & $assertOAuthRejected $oauthDuplicateGrant 'duplicate grant_type'
+    $oauthMixedAuth = @{ baseUrl = $oauthBaseUrl; route = '/oauth/token'; method = 'POST'; bodyMode = 'urlencoded'; body = 'grant_type=client_credentials&client_secret=duplicate-one&client_secret=duplicate-two'; headers = 'Accept: application/json'; authType = 'basic'; basicUsername = $encodedClientId; basicPassword = $encodedClientSecret; confirmTokenRequest = $true; tokenFlow = 'oauth2-client-credentials' } | ConvertTo-Json -Compress
+    & $assertOAuthRejected $oauthMixedAuth 'client_secret in both Basic and body'
+    $oauthWrongContentType = @{ baseUrl = $oauthBaseUrl; route = '/oauth/token'; method = 'POST'; bodyMode = 'urlencoded'; body = 'grant_type=client_credentials'; headers = 'Accept: application/json' + [Environment]::NewLine + 'Content-Type: application/json'; authType = 'basic'; basicUsername = $encodedClientId; basicPassword = $encodedClientSecret; confirmTokenRequest = $true; tokenFlow = 'oauth2-client-credentials' } | ConvertTo-Json -Compress
+    & $assertOAuthRejected $oauthWrongContentType 'wrong content type'
+    $secrets += $oauthClientSecret
+    if ((Get-PlaintextScan $secrets $scanPath) -ne 'CLEAR') { throw 'OAuth client_secret was persisted in SQLite plaintext.' }
     $cookieMockServer = Start-CookieCaptureServer 5
     $cookieBaseUrl = 'http://localhost:' + $cookieMockServer.Port
     $cookieSetCall = @{ baseUrl = $cookieBaseUrl; route = '/scope/set'; method = 'GET'; environmentId = 'cookie-env-a' } | ConvertTo-Json -Compress
@@ -209,7 +311,12 @@ try {
     $multipartHeaders = Get-Content -Raw (Join-Path $temporaryRoot 'body-request-6.headers.txt')
     if ($multipartHeaders -notmatch '(?im)^Content-Type:\s*multipart/form-data;\s*boundary=') { throw 'Multipart Content-Type did not include an automatic boundary.' }
     $multipartBytes = [System.IO.File]::ReadAllBytes((Join-Path $temporaryRoot 'body-request-6.bin'))
-    $multipartText = [System.Text.Encoding]::Latin1.GetString($multipartBytes)
+    if ((Get-Item -LiteralPath (Join-Path $temporaryRoot 'body-request-6.bin')).Length -eq 0) {
+        $transferEncoding = [regex]::Match($multipartHeaders, '(?im)^Transfer-Encoding:\s*([^\r\n]+)').Groups[1].Value
+        $contentLength = [regex]::Match($multipartHeaders, '(?im)^Content-Length:\s*(\d+)').Groups[1].Value
+        throw ('Multipart body capture was empty; Transfer-Encoding=' + $transferEncoding + '; Content-Length=' + $contentLength)
+    }
+    $multipartText = [System.Text.Encoding]::GetEncoding(28591).GetString($multipartBytes)
     if ([regex]::Matches($multipartText, 'name="?tag"?').Count -ne 2 -or -not $multipartText.Contains('one') -or -not $multipartText.Contains('two')) { throw 'Repeated multipart text fields were not preserved.' }
     if ($multipartText -notmatch 'name="?empty"?\r\n\r\n\r\n--') { throw 'Empty multipart field was not preserved.' }
     if ($multipartText -notmatch 'filename="?sample.bin"?' -or $multipartText -notmatch 'Content-Type: application/octet-stream') { throw 'Multipart file metadata was not preserved.' }
@@ -272,11 +379,13 @@ try {
     Stop-Process -Id $server.Id -Force
     $server = $null
 $authMockServer = $null
+$oauthMockServer = $null
     Start-Sleep -Milliseconds 300
     $server = Start-TestApi 'restart'
     $afterRestart = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/settings?key=protection-test') -Headers $headers -TimeoutSec 3
     $afterMigration = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/settings?key=legacy-protection-test') -Headers $headers -TimeoutSec 3
-    if ($afterRestart.value.bearerToken -ne $bearer -or $afterMigration.value.access_token -ne $legacySecret) { throw 'Protected values did not decrypt after process restart.' }
+    $pkceAfterRestart = Invoke-RestMethod -Uri ($baseUrl + '/api/storage/environments?key=pkce-protection-test') -Headers $headers -TimeoutSec 3
+    if ($afterRestart.value.bearerToken -ne $bearer -or $afterMigration.value.access_token -ne $legacySecret -or $pkceAfterRestart.variables.token -ne $pkceAccessToken -or $pkceAfterRestart.variables.refresh_token -ne $pkceRefreshToken -or $afterRestart.value.collection.requests[0].responseExamples[0].body -ne ('Response example body ' + $responseExampleBody)) { throw 'Protected values did not decrypt after process restart.' }
     $cookieAfterRestartCall = @{ baseUrl = $cookieBaseUrl; route = '/scope/read'; method = 'GET'; environmentId = 'cookie-env-a' } | ConvertTo-Json -Compress
     $cookieAfterRestart = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $cookieAfterRestartCall -TimeoutSec 5
     if ($cookieAfterRestart.status -ne 200) { throw 'Cookie request did not reach the local capture server after restart.' }
@@ -290,6 +399,7 @@ $authMockServer = $null
 finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
     if ($authMockServer -and -not $authMockServer.Process.HasExited) { Stop-Process -Id $authMockServer.Process.Id -Force }
+    if ($oauthMockServer -and -not $oauthMockServer.Process.HasExited) { Stop-Process -Id $oauthMockServer.Process.Id -Force }
     if ($cookieMockServer -and -not $cookieMockServer.Process.HasExited) { Stop-Process -Id $cookieMockServer.Process.Id -Force }
     if ($bodyMockServer -and -not $bodyMockServer.Process.HasExited) { Stop-Process -Id $bodyMockServer.Process.Id -Force }
     if ($null -eq $oldPort) { Remove-Item Env:\ApiStudio__Port -ErrorAction SilentlyContinue } else { $env:ApiStudio__Port = $oldPort }

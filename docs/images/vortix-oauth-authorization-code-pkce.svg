@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 390" role="img" aria-labelledby="title desc">
+  <title id="title">Authorization Code with PKCE in Vortix</title>
+  <desc id="desc">Configure a public client, authorize in a browser, return through a provider-specific loopback callback, exchange the code with S256, then opt in to saving tokens.</desc>
+  <rect width="1200" height="390" rx="18" fill="#20232b"/>
+  <text x="48" y="48" fill="#f1f3f7" font-family="Fira Code,monospace" font-size="22" font-weight="700">Authorization Code + PKCE</text>
+  <text x="48" y="76" fill="#aab3c2" font-family="Fira Code,monospace" font-size="12">public client · S256 · localhost callback · token storage by consent</text>
+
+  <rect x="48" y="112" width="252" height="226" rx="12" fill="#292d38" stroke="#5a536f"/>
+  <circle cx="78" cy="143" r="15" fill="#bd93f9"/><text x="74" y="148" fill="#211d2b" font-family="Fira Code,monospace" font-size="13" font-weight="700">1</text>
+  <text x="104" y="148" fill="#f8f8f2" font-family="Fira Code,monospace" font-size="14" font-weight="700">Configurar</text>
+  <text x="70" y="188" fill="#bdb5d5" font-family="Fira Code,monospace" font-size="11">Authorization URL</text>
+  <text x="70" y="210" fill="#bdb5d5" font-family="Fira Code,monospace" font-size="11">Token endpoint + scopes</text>
+  <text x="70" y="244" fill="#8ce3d3" font-family="Fira Code,monospace" font-size="11">Client ID público</text>
+  <text x="70" y="278" fill="#d6bd75" font-family="Fira Code,monospace" font-size="11">Registrar URI exata</text>
+
+  <path d="M308 225h24m-8-8 8 8-8 8" fill="none" stroke="#8ce3d3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <rect x="344" y="112" width="252" height="226" rx="12" fill="#292d38" stroke="#435c58"/>
+  <circle cx="374" cy="143" r="15" fill="#8ce3d3"/><text x="370" y="148" fill="#1c2927" font-family="Fira Code,monospace" font-size="13" font-weight="700">2</text>
+  <text x="400" y="148" fill="#f8f8f2" font-family="Fira Code,monospace" font-size="14" font-weight="700">Autorizar</text>
+  <text x="366" y="188" fill="#c4ccd6" font-family="Fira Code,monospace" font-size="11">Nova aba do navegador</text>
+  <text x="366" y="210" fill="#c4ccd6" font-family="Fira Code,monospace" font-size="11">Login + consentimento</text>
+  <text x="366" y="244" fill="#8ce3d3" font-family="Fira Code,monospace" font-size="11">state aleatório</text>
+  <text x="366" y="278" fill="#d6bd75" font-family="Fira Code,monospace" font-size="11">code_challenge S256</text>
+
+  <path d="M604 225h24m-8-8 8 8-8 8" fill="none" stroke="#bd93f9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <rect x="640" y="112" width="252" height="226" rx="12" fill="#292d38" stroke="#5a536f"/>
+  <circle cx="670" cy="143" r="15" fill="#bd93f9"/><text x="666" y="148" fill="#211d2b" font-family="Fira Code,monospace" font-size="13" font-weight="700">3</text>
+  <text x="696" y="148" fill="#f8f8f2" font-family="Fira Code,monospace" font-size="14" font-weight="700">Callback local</text>
+  <text x="662" y="188" fill="#c4ccd6" font-family="Fira Code,monospace" font-size="11">127.0.0.1 only</text>
+  <text x="662" y="210" fill="#c4ccd6" font-family="Fira Code,monospace" font-size="11">Validar state + provedor</text>
+  <text x="662" y="244" fill="#8ce3d3" font-family="Fira Code,monospace" font-size="11">code_verifier em memória</text>
+  <text x="662" y="278" fill="#d6bd75" font-family="Fira Code,monospace" font-size="11">Sem código no histórico</text>
+
+  <path d="M900 225h24m-8-8 8 8-8 8" fill="none" stroke="#8ce3d3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <rect x="936" y="112" width="216" height="226" rx="12" fill="#292d38" stroke="#435c58"/>
+  <circle cx="966" cy="143" r="15" fill="#8ce3d3"/><text x="962" y="148" fill="#1c2927" font-family="Fira Code,monospace" font-size="13" font-weight="700">4</text>
+  <text x="992" y="148" fill="#f8f8f2" font-family="Fira Code,monospace" font-size="14" font-weight="700">Reutilizar</text>
+  <text x="958" y="188" fill="#c4ccd6" font-family="Fira Code,monospace" font-size="11">POST com verifier</text>
+  <text x="958" y="210" fill="#c4ccd6" font-family="Fira Code,monospace" font-size="11">Bearer + expiração</text>
+  <text x="958" y="244" fill="#8ce3d3" font-family="Fira Code,monospace" font-size="11">Salvar só por escolha</text>
+  <text x="958" y="278" fill="#d6bd75" font-family="Fira Code,monospace" font-size="11">Access + refresh</text>
+</svg>
