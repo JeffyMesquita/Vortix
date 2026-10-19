@@ -475,11 +475,18 @@ app.MapGet("/api/storage/workspace", async (HttpContext context, CancellationTok
     return Results.Json(new { limit, removed });
 });
 
-app.MapPost("/api/storage/{store}", async (HttpContext context, string store, JsonElement value, CancellationToken cancellationToken) =>
+app.MapPost("/api/storage/{store}", async (HttpContext context, string store, JsonElement value, int? retentionLimit, CancellationToken cancellationToken) =>
 {
     if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     try
     {
+        if (store == "history" && retentionLimit.HasValue)
+        {
+            if (retentionLimit.Value is < 1 or > 5000)
+                return Results.Json(new { error = "O limite do histórico deve estar entre 1 e 5000." }, statusCode: StatusCodes.Status400BadRequest);
+            var removed = await localDataStore.WriteHistoryAsync(value, retentionLimit.Value, cancellationToken);
+            return Results.Json(new { removed });
+        }
         await localDataStore.WriteAsync(store, value, cancellationToken);
         return Results.NoContent();
     }

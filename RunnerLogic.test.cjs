@@ -1478,3 +1478,19 @@ test('OAuth authorization mock declares its form parser once', () => {
   const mock = fs.readFileSync(path.join(__dirname, 'OAuthAuthorizationServer.test.ps1'), 'utf8');
   assert.equal((mock.match(/function Get-FormMap/g) || []).length, 1);
 });
+test('hosted workspace limit guidance reaches the primary save toasts', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const saveFlows = [
+    ['async function addCollection(){', '\nasync function addFolder('],
+    ['async function saveCollectionRequest(event){', '\nfunction loadCollectionRequest('],
+    ['async function saveEnvironmentDraft(event){', '\nfunction tokenCandidate('],
+    ['async function saveHistory(request){', '\nfunction applyHistoryEntry(']
+  ];
+
+  for (const [startMarker, endMarker] of saveFlows) {
+    const start = app.indexOf(startMarker);
+    const end = app.indexOf(endMarker, start + startMarker.length);
+    assert.ok(start >= 0 && end > start, `save flow is present: ${startMarker}`);
+    assert.match(app.slice(start, end), /catch\(error\)\{[^}]*error\.message/, `save flow must show the server error: ${startMarker}`);
+  }
+});

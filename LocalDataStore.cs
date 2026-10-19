@@ -98,6 +98,17 @@ internal sealed class LocalDataStore
 
     public async Task WriteAsync(string store, JsonElement value, CancellationToken cancellationToken = default)
     {
+        await WriteRecordAsync(store, value, null, cancellationToken);
+    }
+
+    public async Task<int> WriteHistoryAsync(JsonElement value, int retentionLimit, CancellationToken cancellationToken = default)
+    {
+        if (retentionLimit is < 1 or > 5000) throw new ArgumentOutOfRangeException(nameof(retentionLimit));
+        return await WriteRecordAsync("history", value, retentionLimit, cancellationToken);
+    }
+
+    private async Task<int> WriteRecordAsync(string store, JsonElement value, int? historyRetentionLimit, CancellationToken cancellationToken)
+    {
         ValidateStore(store);
         var key = GetRecordKey(store, value);
         await using var connection = await OpenAsync(cancellationToken);
@@ -112,8 +123,12 @@ internal sealed class LocalDataStore
         command.Parameters.AddWithValue("$key", key);
         command.Parameters.AddWithValue("$json", ProtectJson(value).GetRawText());
         await command.ExecuteNonQueryAsync(cancellationToken);
+        var removed = historyRetentionLimit.HasValue
+            ? await RetainHistoryAsync(connection, transaction, historyRetentionLimit.Value, cancellationToken)
+            : 0;
         await EnsureWorkspaceBackupFitsAsync(connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        return removed;
     }
 
     public async Task<int> ImportLegacyBatchAsync(string store, JsonElement values, CancellationToken cancellationToken = default)
@@ -458,7 +473,20 @@ internal sealed class LocalDataStore
     {
         if (limit is < 1 or > 5000) throw new ArgumentOutOfRangeException(nameof(limit));
         await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var removed = await RetainHistoryAsync(connection, transaction, limit, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return removed;
+    }
+
+    private static async Task<int> RetainHistoryAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        int limit,
+        CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             DELETE FROM api_studio_data
             WHERE store = $store AND record_key NOT IN (

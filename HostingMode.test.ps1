@@ -116,6 +116,16 @@ try {
         throw 'Workspace size rejection persisted part of the rejected history write.'
     }
 
+    $retainedHistoryId = 'size-test-history-retained'
+    $retainedHistoryBody = ConvertTo-Json -InputObject @{ id = $retainedHistoryId; savedAt = [DateTime]::UtcNow.AddSeconds(1).ToString('o'); body = ('y' * 500000) } -Compress
+    $retentionWrite = Send-HostedRequest 'POST' '/api/storage/history?retentionLimit=1' $publicOrigin $retainedHistoryBody $cookie
+    if ([int]$retentionWrite.Response.StatusCode -ne 200) { throw 'Hosted history write did not retain older entries before enforcing the snapshot size limit.' }
+    $retentionResult = $retentionWrite.Content | ConvertFrom-Json
+    $workspaceAfterRetention = (Send-HostedRequest 'GET' '/api/storage/workspace' $publicOrigin '' $cookie).Content | ConvertFrom-Json
+    if ($retentionResult.removed -ne $acceptedHistory -or @($workspaceAfterRetention.history).Count -ne 1 -or $workspaceAfterRetention.history[0].id -ne $retainedHistoryId) {
+        throw 'Hosted history retention did not atomically keep the new entry and remove older entries.'
+    }
+
     'Hosted-mode test passed: PORT binding, password gate, secure cookie, rate limit, protected workspace, snapshot size limit, and public OAuth redirect.'
 }
 finally {
