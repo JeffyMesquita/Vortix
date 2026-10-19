@@ -1305,6 +1305,31 @@
     return { data: backup.data, counts, exportedAt: String(backup.exportedAt || '') };
   }
 
+  async function readHostedCookieJars(fetcher = globalThis.fetch) {
+    const response = await fetcher('/api/cookie-jar', { headers: { 'X-Api-Studio': '1' }, cache: 'no-store' });
+    const payload = response.ok ? await response.json() : await response.json().catch(() => null);
+    if (!response.ok) throw Error(payload?.error || 'Não foi possível ler os cookies deste navegador.');
+    if (!Array.isArray(payload?.jars)) throw Error('Resposta inválida dos cookies deste navegador.');
+    return payload.jars.filter(jar => jar && typeof jar.environmentId === 'string' && jar.value && Array.isArray(jar.value.cookies));
+  }
+
+  async function replaceHostedCookieJars(records, fetcher = globalThis.fetch) {
+    const jars = (Array.isArray(records) ? records : [])
+      .filter(record => typeof record?.key === 'string' && record.key.startsWith('cookiejar:'))
+      .map(record => ({ environmentId: record.key.slice('cookiejar:'.length), value: record.value }));
+    const response = await fetcher('/api/cookie-jar', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Api-Studio': '1' },
+      cache: 'no-store',
+      body: JSON.stringify({ jars })
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw Error(payload?.error || 'Não foi possível restaurar os cookies deste navegador.');
+    }
+    return jars;
+  }
+
   function isEncryptedWorkspaceBackup(text) {
     if (typeof text !== 'string' || text.length > maxEncryptedWorkspaceBackupBytes) return false;
     try { return JSON.parse(text)?.format === encryptedWorkspaceBackupFormat; }
@@ -1416,5 +1441,5 @@
     return vault.decrypt(text);
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

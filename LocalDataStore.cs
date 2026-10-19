@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.DataProtection;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -16,6 +17,11 @@ internal sealed class LocalDataStore
     private const string LegacyProtectedPrefix = "APISTUDIO:DPAPI:v1:";
     private const string WorkspaceBackupFormat = "api-studio-workspace";
     private const string WorkspaceBackupTimestampForSize = "2000-01-01T00:00:00.000Z";
+    private const int HostedCookieJarSessionLimitBytes = 256 * 1024;
+    private const int HostedCookieJarStoreLimitBytes = 4 * 1024 * 1024;
+    private const int HostedCookieJarEnvironmentLimit = 1000;
+    /// <summary>Gets the maximum number of cookies allowed in one environment jar.</summary>
+    internal const int MaxHostedCookieJarCookieCount = 300;
     private static readonly JsonSerializerOptions WorkspaceBackupSizeJsonOptions = new()
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
@@ -95,6 +101,231 @@ internal sealed class LocalDataStore
         using var document = JsonDocument.Parse(json);
         return UnprotectJson(document.RootElement);
     }
+
+    /// <summary>Reads cookie jars owned by one hosted browser session.</summary>
+    /// <param name="sessionId">The anonymous browser session identifier.</param>
+    /// <param name="cancellationToken">A token that cancels the operation.</param>
+    /// <returns>The environment-scoped cookie jars for the session.</returns>
+    /// <exception cref="ArgumentException">The session identifier is invalid.</exception>
+    public async Task<IReadOnlyDictionary<string, JsonElement>> ReadHostedCookieJarsAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ValidateHostedCookieSession(sessionId);
+        var prefix = "cookiejar:" + sessionId + ":";
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT record_key, json FROM api_studio_data WHERE store = 'settings' AND substr(record_key, 1, length($prefix)) = $prefix ORDER BY record_key";
+        command.Parameters.AddWithValue("$prefix", prefix);
+        var jars = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        var unreadableKeys = new List<string>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var key = reader.GetString(0);
+                if (!TryGetHostedCookieJarIdentity(key, out _, out var environmentId)) continue;
+                try
+                {
+                    using var document = JsonDocument.Parse(reader.GetString(1));
+                    var record = UnprotectJson(document.RootElement);
+                    if (record.ValueKind == JsonValueKind.Object && record.TryGetProperty("value", out var value) && IsCookieJarValue(value))
+                        jars[environmentId] = value.Clone();
+                    else unreadableKeys.Add(key);
+                }
+                catch (CryptographicException) { unreadableKeys.Add(key); }
+                catch (JsonException) { unreadableKeys.Add(key); }
+            }
+        }
+        foreach (var key in unreadableKeys)
+        {
+            await using var delete = connection.CreateCommand();
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM api_studio_data WHERE store = 'settings' AND record_key = $key";
+            delete.Parameters.AddWithValue("$key", key);
+            await delete.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return jars;
+    }
+
+    /// <summary>Writes one hosted cookie jar while enforcing session and shared-store quotas.</summary>
+    /// <param name="sessionId">The anonymous browser session identifier.</param>
+    /// <param name="environmentId">The environment that owns the cookie jar.</param>
+    /// <param name="value">The validated cookie jar value.</param>
+    /// <param name="cancellationToken">A token that cancels the operation.</param>
+    /// <exception cref="ArgumentException">The session, environment, or cookie jar value is invalid.</exception>
+    /// <exception cref="HostedCookieJarLimitExceededException">The session exceeds its cookie storage quota.</exception>
+    public async Task WriteHostedCookieJarAsync(string sessionId, string environmentId, JsonElement value, CancellationToken cancellationToken = default)
+    {
+        ValidateHostedCookieSession(sessionId);
+        ValidateHostedCookieEnvironment(environmentId);
+        if (!IsCookieJarValue(value)) throw new ArgumentException("Cookie jar inválido.", nameof(value));
+        if (value.GetProperty("cookies").GetArrayLength() == 0)
+        {
+            await DeleteAsync("settings", HostedCookieStorageKey(sessionId, environmentId), cancellationToken);
+            return;
+        }
+        await WriteHostedCookieJarsCoreAsync(sessionId, new Dictionary<string, JsonElement>(StringComparer.Ordinal) { [environmentId] = value }, replaceSession: false, cancellationToken);
+    }
+
+    /// <summary>Replaces one hosted browser session's cookie jars in a single SQLite transaction.</summary>
+    /// <param name="sessionId">The anonymous browser session identifier.</param>
+    /// <param name="jars">The complete environment-to-cookie-jar map for the session.</param>
+    /// <param name="cancellationToken">A token that cancels the operation.</param>
+    /// <exception cref="ArgumentException">The session, environment, or cookie jar value is invalid.</exception>
+    /// <exception cref="HostedCookieJarLimitExceededException">The session exceeds its cookie storage quota.</exception>
+    public async Task ReplaceHostedCookieJarsAsync(string sessionId, IReadOnlyDictionary<string, JsonElement> jars, CancellationToken cancellationToken = default)
+    {
+        ValidateHostedCookieSession(sessionId);
+        if (jars.Count > HostedCookieJarEnvironmentLimit) throw new ArgumentException("O backup contém ambientes demais.", nameof(jars));
+        foreach (var (environmentId, value) in jars)
+        {
+            ValidateHostedCookieEnvironment(environmentId);
+            if (!IsCookieJarValue(value)) throw new ArgumentException("Cookie jar inválido.", nameof(jars));
+        }
+        await WriteHostedCookieJarsCoreAsync(sessionId, jars, replaceSession: true, cancellationToken);
+    }
+
+    private async Task WriteHostedCookieJarsCoreAsync(string sessionId, IReadOnlyDictionary<string, JsonElement> jars, bool replaceSession, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var incoming = new Dictionary<string, (string Key, string Json, long Size)>(StringComparer.Ordinal);
+        foreach (var (environmentId, value) in jars)
+        {
+            if (value.GetProperty("cookies").GetArrayLength() == 0) continue;
+            var key = HostedCookieStorageKey(sessionId, environmentId);
+            var record = JsonSerializer.SerializeToElement(new { key, updatedAt = now, value }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var protectedJson = ProtectJson(record).GetRawText();
+            incoming[environmentId] = (key, protectedJson, Encoding.UTF8.GetByteCount(key) + Encoding.UTF8.GetByteCount(protectedJson));
+        }
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var entries = await ReadHostedCookieJarEntriesAsync(connection, transaction, cancellationToken);
+        var replacedEnvironments = replaceSession ? null : incoming.Keys.ToHashSet(StringComparer.Ordinal);
+        var retained = entries.Where(entry => entry.SessionId != sessionId || (!replaceSession && !replacedEnvironments!.Contains(entry.EnvironmentId))).ToList();
+        var sessionEntries = retained.Where(entry => entry.SessionId == sessionId).ToArray();
+        var newSessionBytes = incoming.Values.Sum(entry => entry.Size);
+        if (sessionEntries.Length + incoming.Count > HostedCookieJarEnvironmentLimit ||
+            sessionEntries.Sum(entry => entry.Size) + newSessionBytes > HostedCookieJarSessionLimitBytes)
+            throw new HostedCookieJarLimitExceededException();
+
+        var remainingBytes = retained.Sum(entry => entry.Size) + newSessionBytes;
+        var evictedSessions = new HashSet<string>(StringComparer.Ordinal);
+        if (remainingBytes > HostedCookieJarStoreLimitBytes)
+        {
+            foreach (var inactiveSession in retained.Where(entry => entry.SessionId != sessionId)
+                         .GroupBy(entry => entry.SessionId)
+                         .Select(group => new { SessionId = group.Key, Size = group.Sum(entry => entry.Size), LastWrite = group.Max(entry => entry.LastWriteUtc) })
+                         .OrderBy(group => group.LastWrite))
+            {
+                evictedSessions.Add(inactiveSession.SessionId);
+                remainingBytes -= inactiveSession.Size;
+                if (remainingBytes <= HostedCookieJarStoreLimitBytes) break;
+            }
+        }
+        if (remainingBytes > HostedCookieJarStoreLimitBytes) throw new HostedCookieJarLimitExceededException();
+
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = replaceSession
+                ? "DELETE FROM api_studio_data WHERE store = 'settings' AND substr(record_key, 1, length($prefix)) = $prefix"
+                : "DELETE FROM api_studio_data WHERE store = 'settings' AND record_key = $key";
+            if (replaceSession) delete.Parameters.AddWithValue("$prefix", "cookiejar:" + sessionId + ":");
+            else
+            {
+                var keys = incoming.Values.Select(entry => entry.Key).ToArray();
+                foreach (var key in keys)
+                {
+                    delete.Parameters.Clear();
+                    delete.Parameters.AddWithValue("$key", key);
+                    await delete.ExecuteNonQueryAsync(cancellationToken);
+                }
+            }
+            if (replaceSession) await delete.ExecuteNonQueryAsync(cancellationToken);
+        }
+        foreach (var evictedSession in evictedSessions)
+        {
+            await using var delete = connection.CreateCommand();
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM api_studio_data WHERE store = 'settings' AND substr(record_key, 1, length($prefix)) = $prefix";
+            delete.Parameters.AddWithValue("$prefix", "cookiejar:" + evictedSession + ":");
+            await delete.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO api_studio_data(store, record_key, json) VALUES ('settings', $key, $json)";
+            var keyParameter = insert.Parameters.Add("$key", SqliteType.Text);
+            var jsonParameter = insert.Parameters.Add("$json", SqliteType.Text);
+            foreach (var entry in incoming.Values)
+            {
+                keyParameter.Value = entry.Key;
+                jsonParameter.Value = entry.Json;
+                await insert.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+        await EnsureWorkspaceBackupFitsAsync(connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task<List<HostedCookieJarEntry>> ReadHostedCookieJarEntriesAsync(SqliteConnection connection, SqliteTransaction transaction, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT record_key, json FROM api_studio_data WHERE store = 'settings' AND substr(record_key, 1, 10) = 'cookiejar:'";
+        var entries = new List<HostedCookieJarEntry>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var key = reader.GetString(0);
+            var json = reader.GetString(1);
+            if (!TryGetHostedCookieJarIdentity(key, out var sessionId, out var environmentId)) continue;
+            var lastWrite = DateTimeOffset.MinValue;
+            try
+            {
+                using var document = JsonDocument.Parse(json);
+                if (document.RootElement.TryGetProperty("updatedAt", out var value) && value.ValueKind == JsonValueKind.String &&
+                    DateTimeOffset.TryParse(value.GetString(), out var parsed)) lastWrite = parsed;
+            }
+            catch (JsonException) { }
+            entries.Add(new HostedCookieJarEntry(key, sessionId, environmentId, Encoding.UTF8.GetByteCount(key) + Encoding.UTF8.GetByteCount(json), lastWrite));
+        }
+        return entries;
+    }
+
+    private static bool IsCookieJarValue(JsonElement value) => value.ValueKind == JsonValueKind.Object &&
+        value.TryGetProperty("cookies", out var cookies) && cookies.ValueKind == JsonValueKind.Array && cookies.GetArrayLength() <= MaxHostedCookieJarCookieCount;
+
+    private static bool TryGetHostedCookieJarIdentity(string key, out string sessionId, out string environmentId)
+    {
+        sessionId = string.Empty;
+        environmentId = string.Empty;
+        const string prefix = "cookiejar:";
+        var separator = key.IndexOf(':', prefix.Length);
+        if (!key.StartsWith(prefix, StringComparison.Ordinal) || separator - prefix.Length != 43 || separator == key.Length - 1) return false;
+        sessionId = key[prefix.Length..separator];
+        environmentId = key[(separator + 1)..];
+        return sessionId.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
+    }
+
+    private static void ValidateHostedCookieSession(string sessionId)
+    {
+        if (sessionId.Length != 43 || sessionId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('-' or '_')))
+            throw new ArgumentException("Sessão de cookie inválida.", nameof(sessionId));
+    }
+
+    private static void ValidateHostedCookieEnvironment(string environmentId)
+    {
+        if (string.IsNullOrWhiteSpace(environmentId) || environmentId.Length > 128 || environmentId.Contains('\r') || environmentId.Contains('\n'))
+            throw new ArgumentException("Ambiente de cookie inválido.", nameof(environmentId));
+    }
+
+    private static string HostedCookieStorageKey(string sessionId, string environmentId) => "cookiejar:" + sessionId + ":" + environmentId;
+
+    private sealed record HostedCookieJarEntry(string Key, string SessionId, string EnvironmentId, long Size, DateTimeOffset LastWriteUtc);
 
     public async Task WriteAsync(string store, JsonElement value, CancellationToken cancellationToken = default)
     {
@@ -553,6 +784,16 @@ internal sealed class WorkspaceSnapshotLimitExceededException : Exception
 {
     public WorkspaceSnapshotLimitExceededException()
         : base("A gravação excederia os limites do backup de recuperação hospedado (15 MiB ou quantidade máxima de registros). Remova dados ou respostas antigas do histórico e tente novamente.")
+    {
+    }
+}
+
+/// <summary>Indicates that hosted cookie storage quotas would be exceeded.</summary>
+internal sealed class HostedCookieJarLimitExceededException : Exception
+{
+    /// <summary>Initializes a new instance of the <see cref="HostedCookieJarLimitExceededException"/> class.</summary>
+    public HostedCookieJarLimitExceededException()
+        : base("Os cookies deste navegador excedem o limite de 256 KiB por sessão.")
     {
     }
 }

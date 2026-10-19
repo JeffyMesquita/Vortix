@@ -132,7 +132,7 @@ O repositório inclui <code>Dockerfile</code> e <code>render.yaml</code> para cr
 
 O Blueprint já declara <code>apicliente.jeffymesquita.dev</code> como domínio personalizado. Se criar o serviço manualmente, adicione esse domínio nas configurações do Render. No provedor DNS do domínio, crie o CNAME para o destino exato exibido pelo Render. A configuração afeta apenas o host <code>apicliente</code>; mantenha os registros do domínio raiz e de e-mail. O Render configura e renova TLS para o domínio personalizado. Consulte [domínios personalizados do Render](https://render.com/docs/custom-domains) e [Blueprints](https://render.com/docs/blueprint-spec).
 
-O modo Render também aceita a URL <code>onrender.com</code> que a plataforma fornece, mesmo antes do CNAME do domínio próprio resolver. A Redirect URI OAuth usa a origem aberta no navegador. Quando o DNS estiver configurado, o subdomínio próprio funcionará sem mudar a variável.
+O modo Render também aceita a URL <code>onrender.com</code> que a plataforma fornece, mesmo antes do CNAME do domínio próprio resolver. O host automático vem de <code>RENDER_EXTERNAL_HOSTNAME</code>; <code>RENDER_EXTERNAL_URL</code> também é aceito quando definido. A Redirect URI OAuth usa a origem aberta no navegador. Quando o DNS estiver configurado, o subdomínio próprio funcionará sem mudar a variável.
 
 ### Persistência e limites do plano Free
 
@@ -636,6 +636,7 @@ A restauração substitui o workspace local, incluindo histórico, coleções, a
 
 - No modo local, o serviço escuta somente em <code>127.0.0.1</code>; os endpoints também validam origem e host. Não exponha esse modo à rede local ou à internet.
 - No modo público, cada visitante usa workspace próprio no IndexedDB do perfil atual. SQLite de workspace, autenticação e backup automático compartilhado ficam desativados. Cookie jars e fluxos OAuth temporários usam uma sessão aleatória <code>HttpOnly</code>, <code>Secure</code> e <code>SameSite=Lax</code>.
+- Cookie jars hospedados ficam limitados a 256 KiB por sessão e 4 MiB no serviço. Sob pressão, o Vortix remove jars das sessões menos recentemente gravadas; exporte o backup do navegador se precisar preservar cookies por longo prazo.
 - O proxy público limita endpoints de rede a 30 chamadas por minuto por IP encaminhado pelo Render e bloqueia loopback, rede privada, link-local, multicast, documentação e outros endereços IP não públicos para reduzir risco de SSRF. Redirecionamentos HTTP não são seguidos.
 - Render Free é um plano de hobby/teste, não uma hospedagem de produção. O serviço pode dormir e perder o SQLite temporário; mantenha backups exportados e não dependa dele como único armazenamento.
 - O proxy hospedado envia requests a partir da rede do Render. Ele não alcança <code>localhost</code> nem a rede privada do computador.
@@ -705,7 +706,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./Test-VortixApiClient.ps1
 | <code>Dockerfile</code> | Imagem de produção para o serviço hospedado Render. |
 | <code>render.yaml</code> | Blueprint com o serviço Render Free e variáveis públicas/secretas. |
 | <code>Test-VortixApiClient.ps1</code> | Smoke check contra uma instância em execução. |
-| <code>HostingMode.test.ps1</code> | Testa acesso público sem senha, isolamento de sessões/OAuth, bloqueio de destinos privados, origem e rate limit. |
+| <code>HostingMode.test.ps1</code> | Testa hostname Render, isolamento de sessões/OAuth, validação e quotas dos Cookie jars, restore em lote, bloqueio de destinos privados, origem e rate limit. |
 | <code>HistoryRetention.test.ps1</code> | Testa limite do histórico e proteção do body SQLite. |
 | <code>GraphqlIntrospection.test.ps1</code> | Testa introspecção fixa contra mock local. |
 | <code>GraphqlSchemaCaptureServer.test.ps1</code> | Mock GraphQL loopback para o teste integrado. |
