@@ -672,6 +672,45 @@ test('encrypted workspace backup hides data and restores the validated workspace
   assert.equal(restored.data.history[0].body, marker);
 });
 
+test('hosted workspace vault encrypts repeated snapshots and reopens with the same browser password', async () => {
+  const { webcrypto } = require('node:crypto');
+  const { createWorkspaceBackup, createWorkspaceBackupVault } = runnerLogic();
+  const passphrase = 'correct horse battery staple';
+  const firstBackup = createWorkspaceBackup({
+    collections: [{ id: 'c1', name: 'Collection', requests: [], folders: [] }],
+    environments: [{ id: 'e1', name: 'Local', variables: { token: 'first-token' } }],
+    history: [], settings: []
+  });
+  const vault = await createWorkspaceBackupVault(passphrase, undefined, webcrypto);
+  const first = await vault.encrypt(JSON.stringify(firstBackup));
+  const second = await vault.encrypt(JSON.stringify({ ...firstBackup, data: { ...firstBackup.data, environments: [{ id: 'e1', name: 'Local', variables: { token: 'second-token' } }] } }));
+
+  assert.equal(first.salt, vault.salt);
+  assert.equal(second.salt, first.salt);
+  assert.notEqual(second.iv, first.iv);
+  assert.doesNotMatch(JSON.stringify(first), /first-token/);
+
+  const reopened = await createWorkspaceBackupVault(passphrase, first.salt, webcrypto);
+  const restored = await reopened.decrypt(JSON.stringify(first));
+  assert.equal(restored.data.environments[0].variables.token, 'first-token');
+  await assert.rejects(createWorkspaceBackupVault('incorrect horse battery staple', first.salt, webcrypto).then(instance => instance.decrypt(JSON.stringify(first))), /incorreta|danificado/i);
+});
+
+test('hosted mode stores only the encrypted workspace snapshot in its dedicated IndexedDB store', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const page = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const render = fs.readFileSync(path.join(__dirname, 'render.yaml'), 'utf8');
+
+  assert.match(app, /DB_VERSION\s*=\s*2/);
+  assert.match(app, /createObjectStore\('hostedSnapshots'/);
+  assert.match(app, /RunnerLogic\.createWorkspaceBackupVault/);
+  assert.match(app, /await writeHostedSnapshot\(encrypted\)/);
+  assert.match(app, /await restoreHostedSnapshot\(snapshot,passphrase\)/);
+  assert.match(page, /id="hosted-login-dialog"/);
+  assert.match(render, /key: ApiStudio__AccessPassword\s+sync: false/);
+  assert.doesNotMatch(app, /localStorage\.setItem\([^,]*(?:password|passphrase)/i);
+});
+
 test('encrypted workspace backup rejects wrong passwords, tampering, and weak passphrases', async () => {
   const { webcrypto } = require('node:crypto');
   const { createWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup } = runnerLogic();

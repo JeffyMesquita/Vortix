@@ -596,5 +596,17 @@ insomnia.environment.set("token", body.access_token);</code></pre>
       <div class="dialog-actions"><button class="button primary" id="close-history-compare-done" type="button">Concluído</button></div>
     </form>
   </dialog>
+  <dialog class="app-dialog hosted-login-dialog" id="hosted-login-dialog" aria-labelledby="hosted-login-title">
+    <form id="hosted-login-form">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">VORTIX WORKSPACE</p><h2 id="hosted-login-title">Desbloquear workspace</h2><p class="dialog-description">Entre com a senha definida nas configurações privadas do serviço.</p></div>
+      </div>
+      <label for="hosted-access-password">Senha de acesso e do backup</label>
+      <input id="hosted-access-password" type="password" autocomplete="current-password" minlength="12" maxlength="256" required>
+      <p class="hosted-login-note">O SQLite do plano gratuito é temporário. O Vortix mantém um backup criptografado neste navegador; use sempre o mesmo navegador para recuperar seus dados.</p>
+      <p id="hosted-login-error" class="hosted-login-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button class="button primary" id="hosted-login-submit" type="submit">Desbloquear</button></div>
+    </form>
+  </dialog>
 </body>
 </html>

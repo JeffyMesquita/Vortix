@@ -160,6 +160,21 @@ Só entram depois das features anteriores e dos testes de uso:
 - [x] Importar HTTPie CLI como formato adicional, sem executar o comando; filtrar credenciais e recusar arquivos/opções desconhecidas.
 - [x] Schema GraphQL por introspecção com confirmação explícita, cache em memória, browser de tipos e autocomplete.
 
+### 11. Hospedagem pessoal gratuita
+
+**Status: preparação e validação local concluídas; provisionamento externo pendente.**
+
+- [x] Manter o modo local preso ao loopback e criar modo Render com `PORT`, origem HTTPS configurada e senha.
+- [x] Proteger endpoints hospedados com sessão HttpOnly/Secure, validação de origem e limite de tentativas de login.
+- [x] Manter SQLite como banco ativo e criar snapshot AES-GCM no IndexedDB do navegador para recuperação após suspensão/reinício.
+- [x] Cobrir porta, login, cookie, origem, rate limit e redirect OAuth em teste integrado.
+- [x] Documentar limites do plano Free, subdomínio, senha, persistência por navegador e acesso a APIs privadas.
+- [x] Incluir `Dockerfile` e `render.yaml` sem credenciais.
+- [ ] Atualizar o target e a imagem de .NET 8 antes de 10/11/2026, fim do suporte oficial dessa versão.
+- [ ] Criar o serviço Render e guardar `ApiStudio__AccessPassword` como segredo no painel.
+- [ ] Configurar CNAME de `apicliente.jeffymesquita.dev` e validar o TLS pelo subdomínio.
+- [ ] Conferir uma request a uma API pública e a recuperação do workspace após um cold start real.
+
 ## Regra de sequência
 
 Fechamos cada feature com teste, documentação e revisão. Busca, histórico, comparação, HTTPie, schema GraphQL e fluxo PKCE visual foram validados em ambiente local/mock.

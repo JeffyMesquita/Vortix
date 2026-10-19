@@ -2,7 +2,7 @@ const byId = id => document.getElementById(id);
 const method = byId('method'), route = byId('route'), body = byId('body');
 const sendButton = byId('send-request'), writeGuard = byId('write-guard'), queryParams = byId('query-params');
 const tokenRequestButton = byId('request-token'), oauth2TokenButton = byId('oauth2-request-token'), oauthPkceStartButton = byId('oauth-pkce-start'), toastRegion = byId('toast-region');
-const DB_NAME = 'ApiPublicacaoTester', DB_VERSION = 1, LEGACY_HISTORY_KEY = 'apiTester.savedRequests.v1';
+const DB_NAME = 'ApiPublicacaoTester', DB_VERSION = 2, LEGACY_HISTORY_KEY = 'apiTester.savedRequests.v1';
 const STORAGE_MIGRATION_KEY = 'apiStudio.sqliteMigration.v1';
 const TOKEN_REQUEST_CONFIG_KEY = 'tokenRequestConfig';
 const OAUTH2_TOKEN_CONFIG_KEY = 'oauth2ClientCredentials', OAUTH2_TOKEN_META_KEY = 'oauth2TokenMetadata', OAUTH_PKCE_CONFIG_KEY = 'oauthAuthorizationCodePkce';
@@ -31,6 +31,8 @@ let currentResponseExample = null;
 let graphqlSchema = null, graphqlSchemaEndpointKey = '', graphqlSchemaLoading = false, graphqlAutocompleteSuggestions = [], graphqlAutocompleteIndex = 0;
 let tokenRequestConfig = RunnerLogic.normalizeTokenRequestConfig(), oauth2TokenConfig = RunnerLogic.normalizeOAuthClientCredentialsConfig();
 let oauthPkceConfig = RunnerLogic.normalizeOAuthPkceConfig(), oauthPkceBusy = false, oauthPkceCancelRequested = false, oauthPkcePopup = null, oauthPkcePreviewTimer = 0;
+let hostedMode = false, hostedVault = null, hostedNeedsLegacyMigration = false, hostedLegacyStoresCleared = false;
+let hostedSnapshotVersion = 0, hostedSnapshotWarningShown = false, hostedSnapshotSync = Promise.resolve();
 
 function openLegacyDb() {
   if (legacyDbPromise) return legacyDbPromise;
@@ -40,6 +42,7 @@ function openLegacyDb() {
       const db = request.result;
       for (const name of ['history','collections','environments','settings'])
         if (!db.objectStoreNames.contains(name)) db.createObjectStore(name,{keyPath:name === 'settings' ? 'key' : 'id'});
+      if (!db.objectStoreNames.contains('hostedSnapshots')) db.createObjectStore('hostedSnapshots',{keyPath:'id'});
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || Error('Banco local indisponível.'));
@@ -55,8 +58,36 @@ async function legacyDbRead(store) {
     request.onerror = () => reject(request.error || Error('Falha ao ler o banco local.'));
   });
 }
+async function readHostedSnapshot() {
+  const db = await openLegacyDb();
+  return new Promise((resolve,reject) => {
+    const request = db.transaction('hostedSnapshots','readonly').objectStore('hostedSnapshots').get('workspace');
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error || Error('Falha ao ler o backup criptografado deste navegador.'));
+  });
+}
+async function writeHostedSnapshot(encrypted) {
+  const db = await openLegacyDb();
+  return new Promise((resolve,reject) => {
+    const transaction = db.transaction('hostedSnapshots','readwrite');
+    transaction.objectStore('hostedSnapshots').put({id:'workspace',encrypted,savedAt:new Date().toISOString()});
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || Error('Falha ao gravar o backup criptografado neste navegador.'));
+    transaction.onabort = () => reject(transaction.error || Error('A gravação do backup criptografado foi cancelada.'));
+  });
+}
+async function clearLegacyWorkspaceStores() {
+  const db = await openLegacyDb();
+  return new Promise((resolve,reject) => {
+    const transaction = db.transaction(DB_STORES,'readwrite');
+    for(const store of DB_STORES)transaction.objectStore(store).clear();
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || Error('Falha ao limpar dados antigos do navegador.'));
+    transaction.onabort = () => reject(transaction.error || Error('A limpeza dos dados antigos do navegador foi cancelada.'));
+  });
+}
 async function migrateLegacyDb() {
-  try{if(localStorage.getItem(STORAGE_MIGRATION_KEY)==='done')return;}catch{}
+  try{if(localStorage.getItem(STORAGE_MIGRATION_KEY)==='done'&&!(hostedMode&&hostedNeedsLegacyMigration))return;}catch{}
   const legacy = {};
   for (const store of DB_STORES) legacy[store] = await legacyDbRead(store);
   let legacyHistory='',legacyHistoryImported=false;try{legacyHistory=localStorage.getItem(LEGACY_HISTORY_KEY)||'';}catch{}
@@ -75,6 +106,7 @@ async function migrateLegacyDb() {
     }
   }
   try{localStorage.setItem(STORAGE_MIGRATION_KEY,'done');if(legacyHistoryImported)localStorage.removeItem(LEGACY_HISTORY_KEY);}catch{}
+  hostedNeedsLegacyMigration=false;
 }
 async function dbRead(store,key) {
   const url=`/api/storage/${encodeURIComponent(store)}${key===undefined?'':'?key='+encodeURIComponent(key)}`;
@@ -87,6 +119,96 @@ async function dbWrite(store,value,remove=false) {
   const url=remove==='clear'?`/api/storage/${encodeURIComponent(store)}`:remove?`/api/storage/${encodeURIComponent(store)}?key=${encodeURIComponent(value)}`:`/api/storage/${encodeURIComponent(store)}`;
   const response=await fetch(url,{method:remove?'DELETE':'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:remove?undefined:JSON.stringify(value)});
   if(!response.ok)throw Error('Falha ao gravar no banco local.');
+  await scheduleHostedWorkspaceSnapshot();
+}
+function hostedWorkspaceIsEmpty(workspace) {
+  return ['history','collections','environments','settings'].every(store=>Array.isArray(workspace?.[store])&&workspace[store].length===0);
+}
+async function readServerWorkspace() {
+  const response=await fetch('/api/storage/workspace',{headers:{'X-Api-Studio':'1'},cache:'no-store'});
+  if(!response.ok)throw Error('Não foi possível ler o SQLite hospedado.');
+  return response.json();
+}
+async function restoreHostedSnapshot(snapshot,passphrase) {
+  if(!snapshot?.encrypted)return false;
+  const vault=await RunnerLogic.createWorkspaceBackupVault(passphrase,snapshot.encrypted.salt);
+  const parsed=await vault.decrypt(JSON.stringify(snapshot.encrypted));
+  const backup=RunnerLogic.createWorkspaceBackup(parsed.data,parsed.exportedAt||new Date().toISOString());
+  const response=await fetch('/api/storage/workspace/restore',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify(backup)});
+  if(!response.ok)throw Error('O SQLite temporário não aceitou o backup do navegador.');
+  hostedVault=vault;hostedNeedsLegacyMigration=false;
+  try{localStorage.setItem(STORAGE_MIGRATION_KEY,'done');}catch{}
+  return true;
+}
+async function initializeHostedPersistence(passphrase) {
+  hostedVault=null;hostedNeedsLegacyMigration=false;
+  const snapshot=await readHostedSnapshot();
+  let workspace=null,serverReadError=null;
+  try{workspace=await readServerWorkspace();}catch(error){serverReadError=error;}
+  if((!workspace||hostedWorkspaceIsEmpty(workspace))&&snapshot?.encrypted){
+    try{await restoreHostedSnapshot(snapshot,passphrase);return;}
+    catch(error){throw Error('Não foi possível recuperar o backup criptografado deste navegador. Confira se a senha de acesso não foi alterada. '+(error.message||''));}
+  }
+  if(!workspace){
+    if(serverReadError)throw serverReadError;
+    throw Error('Workspace hospedado indisponível.');
+  }
+  hostedVault=await RunnerLogic.createWorkspaceBackupVault(passphrase);
+  hostedNeedsLegacyMigration=hostedWorkspaceIsEmpty(workspace);
+}
+async function persistHostedWorkspaceSnapshot(workspace) {
+  if(!hostedMode||!hostedVault)return false;
+  const current=workspace||await readServerWorkspace();
+  if(!Array.isArray(current?.collections)||!current.collections.length||!Array.isArray(current?.environments)||!current.environments.length)return false;
+  const backup=RunnerLogic.createWorkspaceBackup(current),encrypted=await hostedVault.encrypt(JSON.stringify(backup));
+  await writeHostedSnapshot(encrypted);
+  try{localStorage.setItem(STORAGE_MIGRATION_KEY,'done');localStorage.removeItem(LEGACY_HISTORY_KEY);}catch{}
+  if(!hostedLegacyStoresCleared){
+    await clearLegacyWorkspaceStores();hostedLegacyStoresCleared=true;
+  }
+  hostedSnapshotWarningShown=false;
+  return true;
+}
+function scheduleHostedWorkspaceSnapshot() {
+  if(!hostedMode||!hostedVault)return Promise.resolve();
+  const version=++hostedSnapshotVersion;
+  hostedSnapshotSync=hostedSnapshotSync.catch(()=>{}).then(async()=>{
+    if(version!==hostedSnapshotVersion)return;
+    const workspace=await readServerWorkspace();
+    if(version!==hostedSnapshotVersion)return;
+    await persistHostedWorkspaceSnapshot(workspace);
+  });
+  void hostedSnapshotSync.catch(error=>{if(!hostedSnapshotWarningShown){hostedSnapshotWarningShown=true;showToast('Backup do navegador pendente',error.message||'O SQLite foi atualizado, mas o backup criptografado ainda não foi salvo.','error',0);}});
+  return hostedSnapshotSync;
+}
+async function initializeHostingMode() {
+  const runtimeResponse=await fetch('/api/runtime',{cache:'no-store'});
+  if(!runtimeResponse.ok)throw Error('Não foi possível identificar o modo de hospedagem.');
+  const runtime=await runtimeResponse.json();hostedMode=runtime.hostingMode==='render';
+  if(!hostedMode)return;
+  const dialog=byId('hosted-login-dialog'),form=byId('hosted-login-form'),input=byId('hosted-access-password'),error=byId('hosted-login-error'),button=byId('hosted-login-submit');
+  dialog.addEventListener('cancel',event=>event.preventDefault(),{once:true});
+  await new Promise(resolve=>{
+    const submit=async event=>{
+      event.preventDefault();error.hidden=true;button.disabled=true;button.textContent='Desbloqueando…';
+      const passphrase=input.value;
+      try{
+        const response=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify({password:passphrase})});
+        if(response.status===401)throw Error('Senha incorreta.');
+        if(response.status===403)throw Error('A origem HTTPS não corresponde à configuração do serviço.');
+        if(response.status===429)throw Error('Muitas tentativas. Aguarde um minuto e tente novamente.');
+        if(!response.ok)throw Error('Não foi possível iniciar a sessão.');
+        await initializeHostedPersistence(passphrase);
+        input.value='';dialog.close();resolve();
+      }catch(failure){
+        hostedVault=null;
+        await fetch('/api/auth/logout',{method:'POST',headers:{'X-Api-Studio':'1'},cache:'no-store'}).catch(()=>{});
+        error.textContent=failure.message||'Não foi possível desbloquear o workspace.';error.hidden=false;
+      }finally{button.disabled=false;button.textContent='Desbloquear';}
+    };
+    form.addEventListener('submit',submit);
+    dialog.showModal();input.focus();
+  });
 }
 const newId = () => crypto.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 async function initializeDb() {
@@ -773,6 +895,7 @@ function syncHistorySettingsControls(){
 async function trimHistory(limit=historySettings.limit){
   const response=await fetch('/api/storage/history/trim',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify({limit})});
   if(!response.ok)throw Error('O servidor local não aplicou o limite do histórico.');
+  await scheduleHostedWorkspaceSnapshot();
   return response.json();
 }
 async function saveHistorySettings(){
@@ -1494,6 +1617,7 @@ async function restoreWorkspaceBackup(event){
     const response=await fetch('/api/storage/workspace/restore',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify(backup)});
     const result=await response.json().catch(()=>null);
     if(!response.ok)throw Error(result?.error||'Não foi possível restaurar o backup local.');
+    if(hostedMode)await persistHostedWorkspaceSnapshot();
     byId('settings-dialog').close();showToast('Workspace restaurado','Dados substituídos. Recarregando…','success',0);setTimeout(()=>window.location.reload(),1200);
   }catch(error){showToast('Falha ao restaurar backup',error.message||'Revise o arquivo e tente novamente.','error');}
   finally{event.target.value='';}
@@ -2222,7 +2346,7 @@ async function executeApiRequest(request){
   const {graphqlQuery,graphqlVariables,graphqlOperationName,...proxyRequest}=request;delete proxyRequest.authMode;delete proxyRequest.authSource;delete proxyRequest.collectionId;delete proxyRequest.folderId;delete proxyRequest.saveBearerToken;
   const response=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify(proxyRequest)});
   let result;try{result=await response.json();}catch{throw Error('O servidor local devolveu uma resposta inválida.');}
-  void renderCookieJar();if(result.cookieJarWarning)showToast('Cookie não salvo',result.cookieJarWarning,'warning');
+  void renderCookieJar();if(result.cookieJarWarning)showToast('Cookie não salvo',result.cookieJarWarning,'warning');await scheduleHostedWorkspaceSnapshot();
   return{proxyStatus:response.status,result};
 }
 async function performApiRequest(request,button,save,historyRequest=request){
@@ -2418,7 +2542,9 @@ function addEventListeners(){
 }
 async function startApp(){
   addEventListeners();renderQueryParams([]);renderMultipartFields([]);renderGraphqlFields({});updateAuthTypeUi();updateBodyModeUi();renderBodyHighlight();
-  try{await initializeDb();await loadTokenRequestConfig();await loadOAuth2TokenConfig();applyTheme(activeTheme);applyTypography();applyUiScale();renderCollectionTree();renderEnvironmentSelect();await loadOAuthPkceConfig();if(!byId('base-url').value)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';await renderHistory();await initializeWorkspaceTabs();updateGuard();updateCopyButtons();updateTokenButton();updateJsonTools();updateResponseCaptureUi();byId('sidebar-storage-note').textContent='SQLite local · proteção de dados';}
-  catch(error){showToast('Banco local indisponível',error.message||'Confira o acesso ao SQLite e tente recarregar.','error',0);updateGuard();updateCopyButtons();updateTokenButton();}
+  try{await initializeHostingMode();await initializeDb();await loadTokenRequestConfig();await loadOAuth2TokenConfig();applyTheme(activeTheme);applyTypography();applyUiScale();renderCollectionTree();renderEnvironmentSelect();await loadOAuthPkceConfig();if(!byId('base-url').value)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';await renderHistory();await initializeWorkspaceTabs();updateGuard();updateCopyButtons();updateTokenButton();updateJsonTools();updateResponseCaptureUi();
+    if(hostedMode){await hostedSnapshotSync.catch(()=>{});await persistHostedWorkspaceSnapshot();byId('sidebar-storage-note').textContent='SQLite temporário · backup criptografado neste navegador';document.querySelector('.sidebar-bottom strong').textContent='Workspace por navegador';byId('history-panel').querySelector('.history-hint').textContent='Respostas no SQLite ativo, com recuperação criptografada neste navegador.';}
+    else byId('sidebar-storage-note').textContent='SQLite local · proteção de dados';}
+  catch(error){showToast(hostedMode?'Workspace hospedado indisponível':'Banco local indisponível',error.message||'Confira o acesso ao armazenamento e tente recarregar.','error',0);updateGuard();updateCopyButtons();updateTokenButton();}
 }
 startApp();

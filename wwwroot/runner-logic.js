@@ -1346,28 +1346,63 @@
     );
   }
 
-  async function encryptWorkspaceBackup(backupText, passphrase, cryptoProvider = globalThis.crypto) {
+  async function createWorkspaceBackupVault(passphrase, saltBase64, cryptoProvider = globalThis.crypto) {
     validateWorkspaceBackupPassphrase(passphrase);
     if (!cryptoProvider?.subtle || typeof cryptoProvider.getRandomValues !== 'function') throw Error('Criptografia segura indisponível neste navegador. Abra o Vortix pelo endereço local.');
-    parseWorkspaceBackup(backupText);
-    const encoder = new TextEncoder();
-    const plaintext = encoder.encode(backupText);
-    if (plaintext.byteLength > maxWorkspaceBackupBytes) throw Error('Backup excede o limite de 15 MB.');
-    const salt = cryptoProvider.getRandomValues(new Uint8Array(16));
-    const iv = cryptoProvider.getRandomValues(new Uint8Array(12));
+    const salt = saltBase64 === undefined ? cryptoProvider.getRandomValues(new Uint8Array(16)) : base64ToBytes(saltBase64, 'salt');
+    if (salt.length !== 16) throw Error('Arquivo de backup protegido inválido: salt.');
     const key = await deriveWorkspaceBackupKey(passphrase, salt, cryptoProvider);
+    const encoder = new TextEncoder();
     const additionalData = encoder.encode(encryptedWorkspaceBackupFormat + ':1');
-    const ciphertext = await cryptoProvider.subtle.encrypt({ name: 'AES-GCM', iv, additionalData, tagLength: 128 }, key, plaintext);
+
     return {
-      format: encryptedWorkspaceBackupFormat,
-      version: 1,
-      cipher: 'AES-GCM-256',
-      kdf: 'PBKDF2-SHA-256',
-      iterations: workspaceBackupPbkdf2Iterations,
       salt: bytesToBase64(salt),
-      iv: bytesToBase64(iv),
-      ciphertext: bytesToBase64(new Uint8Array(ciphertext))
+      async encrypt(backupText) {
+        parseWorkspaceBackup(backupText);
+        const plaintext = encoder.encode(backupText);
+        if (plaintext.byteLength > maxWorkspaceBackupBytes) throw Error('Backup excede o limite de 15 MB.');
+        const iv = cryptoProvider.getRandomValues(new Uint8Array(12));
+        const ciphertext = await cryptoProvider.subtle.encrypt({ name: 'AES-GCM', iv, additionalData, tagLength: 128 }, key, plaintext);
+        return {
+          format: encryptedWorkspaceBackupFormat,
+          version: 1,
+          cipher: 'AES-GCM-256',
+          kdf: 'PBKDF2-SHA-256',
+          iterations: workspaceBackupPbkdf2Iterations,
+          salt: bytesToBase64(salt),
+          iv: bytesToBase64(iv),
+          ciphertext: bytesToBase64(new Uint8Array(ciphertext))
+        };
+      },
+      async decrypt(text) {
+        if (typeof text !== 'string' || text.length > maxEncryptedWorkspaceBackupBytes) throw Error('Arquivo de backup protegido excede 22 MB.');
+        let envelope;
+        try { envelope = JSON.parse(text); }
+        catch { throw Error('Arquivo de backup protegido inválido.'); }
+        if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope) || envelope.format !== encryptedWorkspaceBackupFormat || envelope.version !== 1 || envelope.cipher !== 'AES-GCM-256' || envelope.kdf !== 'PBKDF2-SHA-256' || envelope.iterations !== workspaceBackupPbkdf2Iterations || envelope.salt !== bytesToBase64(salt)) throw Error('Formato de backup protegido não suportado.');
+        const iv = base64ToBytes(envelope.iv, 'vetor de inicialização');
+        const ciphertext = base64ToBytes(envelope.ciphertext, 'conteúdo');
+        if (iv.length !== 12 || ciphertext.length < 16 || ciphertext.length > maxEncryptedWorkspaceBackupBytes) throw Error('Arquivo de backup protegido inválido.');
+        let plaintext;
+        try {
+          const decrypted = await cryptoProvider.subtle.decrypt(
+            { name: 'AES-GCM', iv, additionalData, tagLength: 128 },
+            key,
+            ciphertext
+          );
+          plaintext = new TextDecoder().decode(decrypted);
+        } catch {
+          throw Error('Senha incorreta ou arquivo danificado.');
+        }
+        try { return parseWorkspaceBackup(plaintext); }
+        catch { throw Error('O conteúdo descriptografado não é um backup válido do Vortix.'); }
+      }
     };
+  }
+
+  async function encryptWorkspaceBackup(backupText, passphrase, cryptoProvider = globalThis.crypto) {
+    const vault = await createWorkspaceBackupVault(passphrase, undefined, cryptoProvider);
+    return vault.encrypt(backupText);
   }
 
   async function decryptWorkspaceBackup(text, passphrase, cryptoProvider = globalThis.crypto) {
@@ -1377,26 +1412,9 @@
     try { envelope = JSON.parse(text); }
     catch { throw Error('Arquivo de backup protegido inválido.'); }
     if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope) || envelope.format !== encryptedWorkspaceBackupFormat || envelope.version !== 1 || envelope.cipher !== 'AES-GCM-256' || envelope.kdf !== 'PBKDF2-SHA-256' || envelope.iterations !== workspaceBackupPbkdf2Iterations) throw Error('Formato de backup protegido não suportado.');
-    const salt = base64ToBytes(envelope.salt, 'salt');
-    const iv = base64ToBytes(envelope.iv, 'vetor de inicialização');
-    const ciphertext = base64ToBytes(envelope.ciphertext, 'conteúdo');
-    if (salt.length !== 16 || iv.length !== 12 || ciphertext.length < 16 || ciphertext.length > maxEncryptedWorkspaceBackupBytes) throw Error('Arquivo de backup protegido inválido.');
-    const key = await deriveWorkspaceBackupKey(passphrase, salt, cryptoProvider);
-    const decoder = new TextDecoder();
-    let plaintext;
-    try {
-      const decrypted = await cryptoProvider.subtle.decrypt(
-        { name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(encryptedWorkspaceBackupFormat + ':1'), tagLength: 128 },
-        key,
-        ciphertext
-      );
-      plaintext = decoder.decode(decrypted);
-    } catch {
-      throw Error('Senha incorreta ou arquivo danificado.');
-    }
-    try { return parseWorkspaceBackup(plaintext); }
-    catch { throw Error('O conteúdo descriptografado não é um backup válido do Vortix.'); }
+    const vault = await createWorkspaceBackupVault(passphrase, envelope.salt, cryptoProvider);
+    return vault.decrypt(text);
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

@@ -4,8 +4,8 @@
 
 <h1 align="center">Vortix</h1>
 
-<p align="center">Cliente HTTP local para criar, organizar, executar e repetir requisições de API.</p>
-<p align="center">ASP.NET Core 8 · SQLite · JavaScript sem framework</p>
+<p align="center">Cliente HTTP agnóstico para criar, organizar, executar e repetir requisições de API.</p>
+<p align="center">ASP.NET Core 8 · SQLite · IndexedDB criptografado no modo hospedado</p>
 
 ---
 
@@ -19,6 +19,7 @@
 - [Recursos](#recursos)
 - [Requisitos](#requisitos)
 - [Início rápido](#início-rápido)
+- [Hospedagem pessoal no Render](#hospedagem-pessoal-no-render)
 - [Primeiro fluxo](#primeiro-fluxo)
 - [Busca rápida](#busca-rápida)
 - [Autenticação](#autenticação)
@@ -47,11 +48,11 @@
 
 ## Visão geral
 
-Vortix é um cliente de APIs para uso local, inspirado no fluxo de trabalho de ferramentas como Insomnia e Postman. O projeto é agnóstico: não inclui URL, rota, parâmetro, credencial ou regra de uma API específica.
+Vortix é um cliente de APIs inspirado no fluxo de trabalho de ferramentas como Insomnia e Postman. O projeto é agnóstico: não inclui URL, rota, parâmetro, credencial ou regra de uma API específica.
 
-A interface roda no navegador. Um servidor ASP.NET Core local encaminha as requisições para a API escolhida e persiste o workspace em SQLite. Assim, o navegador não precisa acessar a API diretamente nem depender de CORS.
+A interface roda no navegador. Um servidor ASP.NET Core encaminha as requisições para a API escolhida e persiste o workspace em SQLite. Assim, o navegador não precisa acessar a API diretamente nem depender de CORS. Por padrão, o servidor roda apenas no computador do usuário.
 
-A aplicação escuta somente em loopback e foi pensada para uso em computador desktop. Não há login de usuário; mantenha o serviço restrito à própria máquina.
+Há também um modo hospedado para uso pessoal. Ele exige senha, mantém uma cópia criptografada do workspace no IndexedDB do navegador e pode restaurar o SQLite temporário após uma reinicialização. Esse modo não oferece sincronização durável entre navegadores nem acesso à rede privada do computador.
 
 ## Recursos
 
@@ -116,6 +117,37 @@ http://127.0.0.1:51873/health
 O servidor usa a porta 51873 por padrão. Consulte [Configuração](#configuração) para alterá-la.
 
 O endpoint <code>/health</code> preserva <code>app: ApiPublicacaoTester</code> para clientes antigos e informa <code>product: VortixApiClient</code> como identidade atual.
+
+## Hospedagem pessoal no Render
+
+O repositório inclui <code>Dockerfile</code> e <code>render.yaml</code> para criar um serviço web Render Free. O serviço continua agnóstico de API e exige uma senha antes de permitir acesso ao workspace ou usar o proxy HTTP.
+
+### Criar e proteger o serviço
+
+1. Envie o repositório Vortix para o GitHub.
+2. No Render, crie um **Blueprint** a partir do repositório e revise o serviço <code>vortix-api-client</code>. O Blueprint seleciona Docker e o plano Free.
+3. Confirme <code>ApiStudio__PublicOrigin</code> com a origem HTTPS que você usará no navegador. O valor inicial do Blueprint é <code>https://apicliente.jeffymesquita.dev</code>.
+4. No painel do serviço, defina <code>ApiStudio__AccessPassword</code> como um segredo privado. Use uma senha longa e exclusiva de ao menos 12 caracteres; não a coloque no GitHub, no arquivo YAML ou em logs. Essa mesma senha libera a sessão e deriva a chave do backup criptografado do navegador.
+5. O Render fornece <code>PORT</code> ao container. Não fixe uma porta diferente no painel. O serviço escuta em <code>0.0.0.0</code> somente no modo hospedado.
+6. Aguarde o deploy e confira o health check <code>/health</code>.
+
+O Blueprint já declara <code>apicliente.jeffymesquita.dev</code> como domínio personalizado. Se criar o serviço manualmente, adicione esse domínio nas configurações do Render. No provedor DNS do domínio, crie o CNAME para o destino exato exibido pelo Render. A configuração afeta apenas o host <code>apicliente</code>; mantenha os registros do domínio raiz e de e-mail. O Render configura e renova TLS para o domínio personalizado. Consulte [domínios personalizados do Render](https://render.com/docs/custom-domains) e [Blueprints](https://render.com/docs/blueprint-spec).
+
+Se preferir testar primeiro pela URL <code>onrender.com</code>, atualize <code>ApiStudio__PublicOrigin</code> no painel para essa origem HTTPS exata e depois troque-a para o domínio personalizado. O host acessado no navegador precisa coincidir com a configuração.
+
+### Persistência e limites do plano Free
+
+O SQLite do serviço hospedado é um banco de trabalho temporário. O Vortix cria uma cópia AES-GCM no IndexedDB do navegador, protegida pela senha de acesso, e a restaura no SQLite quando o servidor volta sem dados. A cópia fica vinculada à origem e ao perfil do navegador usados para entrar. Use **Configurações → Backup do workspace** para exportar uma cópia protegida independente.
+
+O Render Free suspende serviços após 15 minutos sem tráfego, pode reiniciá-los e apaga arquivos locais ao dormir, reiniciar ou publicar uma nova versão. O primeiro acesso após suspensão pode levar cerca de um minuto. O plano Free não oferece disco persistente e a própria Render o recomenda para projetos de teste/hobby, não para aplicações de produção. Veja os [limites oficiais do plano Free](https://render.com/docs/free).
+
+O backup automático **não sincroniza com segurança vários navegadores ou dispositivos**. Use sempre o mesmo perfil e a mesma origem. A sessão pode precisar de novo login após um reinício. Mantenha a senha de acesso estável: se o SQLite já tiver sido apagado e a senha mudar, o snapshot existente não poderá ser aberto com a senha nova. Se limpar os dados do navegador ou esquecer a senha, a cópia automática também não poderá ser recuperada; mantenha um backup exportado com senha.
+
+O container acompanha o target atual do projeto, .NET 8. O suporte oficial dessa versão termina em **10 de novembro de 2026**; para manter a hospedagem depois dessa data, atualize o projeto e a imagem Docker para uma versão suportada, como .NET 10. Consulte a [política de suporte do .NET](https://learn.microsoft.com/en-us/dotnet/core/releases-and-support).
+
+Como as requests são encaminhadas pelo servidor hospedado, ele só alcança endereços disponíveis a partir da rede do Render. <code>localhost</code>, <code>192.168.x.x</code> e outros endereços privados do computador não apontam para sua máquina e não serão acessíveis. Use o modo local para APIs da rede privada ou uma infraestrutura local/túnel separado.
+
+Em hospedagem, o callback OAuth PKCE usa a origem pública configurada, não o callback loopback. Cadastre no provedor a URI exata mostrada pela aba **Auth** depois de publicar o domínio. Fluxos PKCE pendentes podem se perder quando o serviço gratuito suspende ou reinicia.
 
 ## Primeiro fluxo
 
@@ -361,9 +393,9 @@ A renovação é manual: solicite outro token quando o status indicar expiraçã
 
 Use este fluxo quando a API precisa agir em nome de um usuário. Na aba **Auth**, abra **OAuth 2.0 · Authorization Code + PKCE** e informe a URL de autorização, URL do token endpoint, Client ID público e scopes. O fluxo **não aceita nem pede <code>client_secret</code>**.
 
-Antes de autorizar, copie a **Redirect URI** exibida e cadastre exatamente esse valor no provedor. A URI usa <code>http://127.0.0.1:&lt;porta&gt;/oauth/callback/&lt;identificador-do-provedor&gt;</code>; a porta corresponde à instância local do Vortix e o caminho identifica a URL de autorização configurada. Se mudar URL, tenant ou porta, copie e cadastre a nova URI. Abra o Vortix por <code>http://127.0.0.1:&lt;porta&gt;</code>; acesso pelo endereço da rede local não recebe callbacks OAuth.
+Antes de autorizar, copie a **Redirect URI** exibida e cadastre exatamente esse valor no provedor. No modo local, a URI usa <code>http://127.0.0.1:&lt;porta&gt;/oauth/callback/&lt;identificador-do-provedor&gt;</code>. No modo hospedado, usa a origem HTTPS pública configurada, por exemplo <code>https://apicliente.jeffymesquita.dev/oauth/callback/&lt;identificador-do-provedor&gt;</code>. Se mudar URL, tenant, porta ou origem pública, copie e cadastre a nova URI.
 
-Ao clicar **Autorizar no navegador**, o Vortix gera <code>state</code> e <code>code_verifier</code> aleatórios, calcula <code>code_challenge</code> com <code>S256</code>, envia <code>code_challenge_method=S256</code> e abre o provedor em outra aba. Depois do login e consentimento, o provedor retorna o código ao callback loopback. O servidor valida <code>state</code>, caminho do provedor e prazo; então envia <code>grant_type=authorization_code</code>, <code>client_id</code>, o mesmo <code>redirect_uri</code>, <code>code</code> e <code>code_verifier</code> ao token endpoint. O verifier nunca aparece na URL de autorização, no histórico ou no SQLite.
+Ao clicar **Autorizar no navegador**, o Vortix gera <code>state</code> e <code>code_verifier</code> aleatórios, calcula <code>code_challenge</code> com <code>S256</code>, envia <code>code_challenge_method=S256</code> e abre o provedor em outra aba. Depois do login e consentimento, o provedor retorna o código ao callback configurado. O servidor valida <code>state</code>, caminho do provedor e prazo; então envia <code>grant_type=authorization_code</code>, <code>client_id</code>, o mesmo <code>redirect_uri</code>, <code>code</code> e <code>code_verifier</code> ao token endpoint. O verifier nunca aparece na URL de autorização, no histórico ou no SQLite.
 
 Exemplo simplificado do token exchange:
 
@@ -374,9 +406,9 @@ Content-Type: application/x-www-form-urlencoded
 grant_type=authorization_code&code=<codigo-de-uso-unico>&client_id=<client-id>&redirect_uri=<redirect-uri-exata>&code_verifier=<verifier-temporario>
 ~~~
 
-As opções **Salvar access token** e **Salvar refresh token** vêm desmarcadas. Marque cada uma antes de iniciar para gravar <code>{{token}}</code> e/ou <code>{{refresh_token}}</code> no ambiente ativo. O Vortix protege os valores no SQLite com ASP.NET Core Data Protection. Sem consentimento, os tokens ficam apenas em memória durante o fluxo e são descartados ao terminar. Refresh token não é renovado automaticamente; a variável pode ser reutilizada manualmente. O botão **Cancelar autorização** invalida o fluxo local; se a aba do provedor permanecer aberta, feche-a. O callback redireciona para uma página limpa sem código ou state na URL final.
+As opções **Salvar access token** e **Salvar refresh token** vêm desmarcadas. Marque cada uma antes de iniciar para gravar <code>{{token}}</code> e/ou <code>{{refresh_token}}</code> no ambiente ativo. No modo local, o Vortix protege os valores no SQLite com ASP.NET Core Data Protection. No modo hospedado, o backup automático do navegador também os protege com AES-GCM. Sem consentimento, os tokens ficam apenas em memória durante o fluxo e são descartados ao terminar. Refresh token não é renovado automaticamente; a variável pode ser reutilizada manualmente. O botão **Cancelar autorização** invalida o fluxo ativo; se a aba do provedor permanecer aberta, feche-a. O callback redireciona para uma página limpa sem código ou state na URL final.
 
-Os endpoints OAuth remotos precisam usar HTTPS. HTTP é aceito somente em loopback, para testes locais. O provedor deve aceitar Authorization Code para cliente público, PKCE <code>S256</code> e uma redirect URI loopback registrada com correspondência exata. Provedores que exigem <code>client_secret</code>, não aceitam loopback ou só oferecem outro grant não funcionam neste fluxo. O Vortix não valida <code>id_token</code> nem implementa OpenID Connect; usa apenas access token Bearer e, se autorizado, refresh token.
+Os endpoints OAuth remotos precisam usar HTTPS. HTTP é aceito somente em loopback, para testes locais. O provedor deve aceitar Authorization Code para cliente público, PKCE <code>S256</code> e a redirect URI exata exibida pelo Vortix. Provedores que exigem <code>client_secret</code> ou não oferecem esse grant não funcionam neste fluxo. O Vortix não valida <code>id_token</code> nem implementa OpenID Connect; usa apenas access token Bearer e, se autorizado, refresh token.
 
 Para cadastro e requisitos de segurança, consulte [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636), [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252), [RFC 9700](https://www.rfc-editor.org/rfc/rfc9700) e [RFC 10017](https://www.rfc-editor.org/rfc/rfc10017).
 
@@ -566,9 +598,11 @@ Backups do workspace incluem histórico e bodies que você escolheu salvar. O ba
 
 ## Persistência e backups
 
-Histórico, coleções, pastas, ambientes, Cookie jars, requests, abas e configurações ficam em um banco SQLite local. Valores de cookies são protegidos com Data Protection. O body das respostas fica temporário até você salvar explicitamente um exemplo na request. Requests e variáveis podem conter dados sensíveis, portanto proteja o computador e os backups.
+No modo local, histórico, coleções, pastas, ambientes, Cookie jars, requests, abas e configurações ficam em um banco SQLite no computador. Valores de cookies são protegidos com Data Protection. O body das respostas fica temporário até você salvar explicitamente um exemplo na request. Requests e variáveis podem conter dados sensíveis, portanto proteja o computador e os backups.
 
-Exemplos de resposta salvos ficam anexados à request da coleção, com status, body e headers filtrados; o body é protegido por Data Protection no SQLite. Vortix JSON, Insomnia v4 e Postman Collection v2.1 preservam os exemplos. Os exports JSON não são criptografados e podem conter dados reais da resposta, então revise e confirme antes de compartilhar.
+No modo hospedado, o SQLite fica no container e pode desaparecer quando o Render Free reinicia ou suspende o serviço. Depois de cada alteração, o Vortix grava no IndexedDB do mesmo navegador um snapshot AES-GCM do workspace. A senha de acesso deriva a chave com PBKDF2-SHA-256; o segredo é mantido apenas na memória durante a sessão. Após uma reinicialização, entre novamente com a senha para recuperar o snapshot e regravar os dados no SQLite ativo. Isso protege a cópia local do navegador, mas não cria um banco compartilhado durável entre dispositivos.
+
+Exemplos de resposta salvos ficam anexados à request da coleção, com status, body e headers filtrados; o body é protegido por Data Protection no SQLite local e incluído no snapshot criptografado hospedado. Vortix JSON, Insomnia v4 e Postman Collection v2.1 preservam os exemplos. Os exports JSON não são criptografados e podem conter dados reais da resposta, então revise e confirme antes de compartilhar.
 
 Em Windows, sem configuração personalizada, o banco fica em:
 
@@ -599,8 +633,10 @@ A restauração substitui o workspace local, incluindo histórico, coleções, a
 
 ## Segurança
 
-- O serviço escuta somente em <code>127.0.0.1</code>; os endpoints locais também validam origem e host.
-- A interface não oferece autenticação. Não exponha o serviço à rede local ou à internet por proxy reverso.
+- No modo local, o serviço escuta somente em <code>127.0.0.1</code>; os endpoints também validam origem e host. Não exponha esse modo à rede local ou à internet.
+- No modo hospedado, todos os endpoints de workspace e proxy exigem autenticação por cookie <code>HttpOnly</code>, <code>Secure</code> e <code>SameSite=Lax</code>. O login limita cinco tentativas por minuto e usa a origem HTTPS configurada. Mantenha o acesso pessoal; o Vortix não oferece contas ou isolamento multiusuário.
+- Render Free é um plano de hobby/teste, não uma hospedagem de produção. O serviço pode dormir e perder o SQLite temporário; mantenha backups exportados e não dependa dele como único armazenamento.
+- O proxy hospedado envia requests a partir da rede do Render. Ele não alcança <code>localhost</code> nem a rede privada do computador.
 - HTTPS é recomendado para a API de destino. HTTP em localhost funciona; HTTP em outros hosts exige habilitação explícita na request e confirmação antes do envio. HTTP não cifra tokens, headers ou body.
 - O Vortix valida URL base e rota, não permite trocar de host pela rota e bloqueia alguns cabeçalhos de transporte. Redirecionamentos HTTP não são seguidos automaticamente.
 - Configure a autenticação na aba **Auth**. O Vortix gera o header Authorization para Bearer e Basic; não informe esse header manualmente.
@@ -614,6 +650,10 @@ O aplicativo lê as configurações ASP.NET Core por variáveis de ambiente:
 | Variável | Padrão | Descrição |
 |---|---|---|
 | <code>ApiStudio__Port</code> | <code>51873</code> | Porta local. Aceita valores de 1 a 65535. |
+| <code>PORT</code> | fornecido pelo Render | Porta do container hospedado. O modo <code>render</code> também aceita um valor entre 1 e 65535 e escuta em todas as interfaces do container. |
+| <code>ApiStudio__HostingMode</code> | <code>local</code> | Use <code>render</code> para ativar senha, origem pública e persistência de recuperação no navegador. |
+| <code>ApiStudio__PublicOrigin</code> | vazio no modo local | Obrigatória no modo <code>render</code>. Origem HTTPS exata usada no navegador, sem caminho, query ou fragmento. |
+| <code>ApiStudio__AccessPassword</code> | vazio no modo local | Obrigatória no modo <code>render</code>. Segredo de 12 a 256 caracteres; configure no painel de hospedagem, nunca no repositório. Também protege o snapshot hospedado do navegador. |
 | <code>ApiStudio__OAuthPkceFlowTimeoutSeconds</code> | <code>300</code> | Tempo máximo de um fluxo PKCE pendente, de 1 a 600 segundos. |
 | <code>ApiStudio__DatabasePath</code> | LocalApplicationData + <code>ApiPublicacaoTester/api-studio.sqlite</code> | Caminho completo do banco SQLite. A identidade do processo precisa ter permissão de leitura e escrita. |
 
@@ -633,6 +673,7 @@ As variáveis valem para o processo iniciado nesse terminal.
 dotnet restore ./VortixApiClient.csproj
 dotnet build ./VortixApiClient.csproj -c Release
 node --test ./RunnerLogic.test.cjs
+powershell -NoProfile -ExecutionPolicy Bypass -File ./HostingMode.test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File ./WorkspaceProtection.test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File ./AuthorizationCodePkce.test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File ./HistoryRetention.test.ps1
@@ -660,7 +701,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./Test-VortixApiClient.ps1
 | <code>VortixApiClient.csproj</code> | Nome do projeto e artefatos de build. |
 | <code>VortixApiClient.ps1</code> | Inicializa ou reutiliza a instância local. |
 | <code>VortixApiClient.cmd</code> | Atalho de inicialização no Windows. |
+| <code>Dockerfile</code> | Imagem de produção para o serviço hospedado Render. |
+| <code>render.yaml</code> | Blueprint com o serviço Render Free e variáveis públicas/secretas. |
 | <code>Test-VortixApiClient.ps1</code> | Smoke check contra uma instância em execução. |
+| <code>HostingMode.test.ps1</code> | Testa porta do container, login, cookie seguro, origem e redirect OAuth hospedado. |
 | <code>HistoryRetention.test.ps1</code> | Testa limite do histórico e proteção do body SQLite. |
 | <code>GraphqlIntrospection.test.ps1</code> | Testa introspecção fixa contra mock local. |
 | <code>GraphqlSchemaCaptureServer.test.ps1</code> | Mock GraphQL loopback para o teste integrado. |

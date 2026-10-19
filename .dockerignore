@@ -1,0 +1,13 @@
+.git
+.github
+**/bin
+**/obj
+**/*.sqlite
+**/*.sqlite-*
+**/DataProtection-Keys
+.env
+.env.*
+appsettings.Local.json
+appsettings.*.Local.json
+secrets.json
+*.publishsettings
