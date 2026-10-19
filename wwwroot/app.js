@@ -118,7 +118,7 @@ async function dbRead(store,key) {
 async function dbWrite(store,value,remove=false) {
   const url=remove==='clear'?`/api/storage/${encodeURIComponent(store)}`:remove?`/api/storage/${encodeURIComponent(store)}?key=${encodeURIComponent(value)}`:`/api/storage/${encodeURIComponent(store)}`;
   const response=await fetch(url,{method:remove?'DELETE':'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:remove?undefined:JSON.stringify(value)});
-  if(!response.ok)throw Error('Falha ao gravar no banco local.');
+  if(!response.ok){const error=await response.json().catch(()=>null);throw Error(error?.error||'Falha ao gravar no banco local.');}
   await scheduleHostedWorkspaceSnapshot();
 }
 function hostedWorkspaceIsEmpty(workspace) {

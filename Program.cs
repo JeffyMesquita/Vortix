@@ -14,7 +14,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.DataProtection;
 
-const long maxWorkspaceBackupBytes = 16 * 1024 * 1024;
+const long maxWorkspaceBackupBytes = 15 * 1024 * 1024;
 const string graphqlIntrospectionQuery = """
     query VortixSchemaIntrospection {
       __schema {
@@ -92,7 +92,10 @@ if (hostedMode)
     {
         throw new InvalidOperationException("ApiStudio:PublicOrigin precisa ser uma origem HTTPS, por exemplo https://apicliente.example.com.");
     }
-    if (accessPassword.Length is < 12 or > 256)
+    var accessPasswordCodePointCount = 0;
+    foreach (var _ in accessPassword.EnumerateRunes()) accessPasswordCodePointCount++;
+    // Match the browser's Array.from(password).length validation for the 12-character minimum.
+    if (accessPasswordCodePointCount < 12 || accessPassword.Length > 256)
     {
         throw new InvalidOperationException("ApiStudio:AccessPassword precisa ter entre 12 e 256 caracteres.");
     }
@@ -164,7 +167,7 @@ builder.Services.AddRateLimiter(options =>
 });
 var app = builder.Build();
 var dataProtector = app.Services.GetRequiredService<IDataProtectionProvider>().CreateProtector("LocalDataStore.v1");
-var localDataStore = new LocalDataStore(databasePath, dataProtector);
+var localDataStore = new LocalDataStore(databasePath, dataProtector, hostedMode ? maxWorkspaceBackupBytes : null);
 var cookieJarLocks = new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal);
 var oauthPkceFlows = new ConcurrentDictionary<string, OAuthPkceFlow>(StringComparer.Ordinal);
 await localDataStore.InitializeAsync();
@@ -451,6 +454,10 @@ app.MapGet("/api/storage/workspace", async (HttpContext context, CancellationTok
     {
         return Results.Json(new { error = "Arquivo de backup inválido." }, statusCode: StatusCodes.Status400BadRequest);
     }
+    catch (WorkspaceSnapshotLimitExceededException exception)
+    {
+        return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status413PayloadTooLarge);
+    }
     catch (ArgumentException)
     {
         return Results.Json(new { error = "Backup inválido ou incompatível." }, statusCode: StatusCodes.Status400BadRequest);
@@ -475,6 +482,10 @@ app.MapPost("/api/storage/{store}", async (HttpContext context, string store, Js
     {
         await localDataStore.WriteAsync(store, value, cancellationToken);
         return Results.NoContent();
+    }
+    catch (WorkspaceSnapshotLimitExceededException exception)
+    {
+        return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status413PayloadTooLarge);
     }
     catch (ArgumentException)
     {
@@ -507,6 +518,10 @@ app.MapPost("/api/storage/{store}/import", async (HttpContext context, string st
     {
         var imported = await localDataStore.ImportLegacyBatchAsync(store, values, cancellationToken);
         return Results.Json(new { imported });
+    }
+    catch (WorkspaceSnapshotLimitExceededException exception)
+    {
+        return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status413PayloadTooLarge);
     }
     catch (ArgumentException)
     {

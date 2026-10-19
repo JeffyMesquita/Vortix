@@ -24,7 +24,7 @@ try {
     $mockBaseUrl = 'http://127.0.0.1:' + [int](Get-Content -Raw $mockReady)
     $env:ApiStudio__Port = [string]$port
     $env:ApiStudio__DatabasePath = $databasePath
-    $dll = Join-Path $projectRoot 'bin\Release\net8.0\VortixApiClient.dll'
+    $dll = Join-Path $projectRoot 'bin\Release\net10.0\VortixApiClient.dll'
     if (-not (Test-Path -LiteralPath $dll)) { throw 'Release DLL is missing; build VortixApiClient first.' }
     $server = Start-Process -FilePath 'dotnet' -ArgumentList @($dll) -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $tempRoot 'server.out') -RedirectStandardError (Join-Path $tempRoot 'server.err')
     $ready = $false

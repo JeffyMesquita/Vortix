@@ -2,7 +2,7 @@
 setlocal
 where dotnet >nul 2>nul
 if errorlevel 1 (
-  echo .NET 8 nao encontrado. Instale/valide o runtime antes de abrir esta ferramenta.
+  echo .NET 10 nao encontrado. Instale/valide o runtime antes de abrir esta ferramenta.
   pause
   exit /b 1
 )

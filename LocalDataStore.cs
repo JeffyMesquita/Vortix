@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.DataProtection;
 using System.Security.Cryptography;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -13,13 +14,22 @@ internal sealed class LocalDataStore
 
     private const string ProtectedPrefix = "APISTUDIO:DATA-PROTECTION:v1:";
     private const string LegacyProtectedPrefix = "APISTUDIO:DPAPI:v1:";
+    private const string WorkspaceBackupFormat = "api-studio-workspace";
+    private const string WorkspaceBackupTimestampForSize = "2000-01-01T00:00:00.000Z";
+    private static readonly JsonSerializerOptions WorkspaceBackupSizeJsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
     private readonly string _connectionString;
     private readonly IDataProtector _protector;
+    private readonly long? _maxWorkspaceBackupBytes;
     private int _tokenCredentialModeRecoveryWarning;
 
-    public LocalDataStore(string databasePath, IDataProtector protector)
+    public LocalDataStore(string databasePath, IDataProtector protector, long? maxWorkspaceBackupBytes = null)
     {
+        if (maxWorkspaceBackupBytes is <= 0) throw new ArgumentOutOfRangeException(nameof(maxWorkspaceBackupBytes));
         _protector = protector;
+        _maxWorkspaceBackupBytes = maxWorkspaceBackupBytes;
         DatabasePath = Path.GetFullPath(databasePath);
         Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
         _connectionString = new SqliteConnectionStringBuilder
@@ -91,7 +101,9 @@ internal sealed class LocalDataStore
         ValidateStore(store);
         var key = GetRecordKey(store, value);
         await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO api_studio_data(store, record_key, json) VALUES ($store, $key, $json)
             ON CONFLICT(store, record_key) DO UPDATE SET json = excluded.json
@@ -100,6 +112,8 @@ internal sealed class LocalDataStore
         command.Parameters.AddWithValue("$key", key);
         command.Parameters.AddWithValue("$json", ProtectJson(value).GetRawText());
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await EnsureWorkspaceBackupFitsAsync(connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<int> ImportLegacyBatchAsync(string store, JsonElement values, CancellationToken cancellationToken = default)
@@ -128,15 +142,26 @@ internal sealed class LocalDataStore
             inserted += await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        await EnsureWorkspaceBackupFitsAsync(connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return inserted;
     }
 
     public async Task<IReadOnlyDictionary<string, IReadOnlyList<JsonElement>>> ReadWorkspaceAsync(CancellationToken cancellationToken = default)
     {
-        var stores = new[] { "history", "collections", "environments", "settings" };
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var workspace = await ReadWorkspaceAsync(connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return workspace;
+    }
+
+    private async Task<IReadOnlyDictionary<string, IReadOnlyList<JsonElement>>> ReadWorkspaceAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var stores = new[] { "history", "collections", "environments", "settings" };
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "SELECT json FROM api_studio_data WHERE store = $store ORDER BY record_key";
@@ -154,7 +179,6 @@ internal sealed class LocalDataStore
             }
             workspace[store] = values;
         }
-        await transaction.CommitAsync(cancellationToken);
         return workspace;
     }
     public async Task<IReadOnlyDictionary<string, int>> ReplaceWorkspaceAsync(JsonElement backup, CancellationToken cancellationToken = default)
@@ -217,8 +241,33 @@ internal sealed class LocalDataStore
             jsonParameter.Value = entry.Json;
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
+        await EnsureWorkspaceBackupFitsAsync(connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return counts;
+    }
+
+    private async Task EnsureWorkspaceBackupFitsAsync(SqliteConnection connection, SqliteTransaction transaction, CancellationToken cancellationToken)
+    {
+        if (_maxWorkspaceBackupBytes is not long limit) return;
+
+        var data = await ReadWorkspaceAsync(connection, transaction, cancellationToken);
+        if (data["history"].Count > 25000 || data["collections"].Count > 1000 ||
+            data["environments"].Count > 1000 || data["settings"].Count > 1000)
+        {
+            throw new WorkspaceSnapshotLimitExceededException();
+        }
+
+        var backup = new
+        {
+            format = WorkspaceBackupFormat,
+            version = 1,
+            exportedAt = WorkspaceBackupTimestampForSize,
+            data
+        };
+        if (JsonSerializer.SerializeToUtf8Bytes(backup, WorkspaceBackupSizeJsonOptions).LongLength > limit)
+        {
+            throw new WorkspaceSnapshotLimitExceededException();
+        }
     }
 
     public async Task<int> ProtectExistingSecretsAsync(CancellationToken cancellationToken = default)
@@ -469,5 +518,13 @@ internal sealed class LocalDataStore
         {
             throw new ArgumentException("Tipo de armazenamento inválido.", nameof(store));
         }
+    }
+}
+
+internal sealed class WorkspaceSnapshotLimitExceededException : Exception
+{
+    public WorkspaceSnapshotLimitExceededException()
+        : base("A gravação excederia os limites do backup de recuperação hospedado (15 MiB ou quantidade máxima de registros). Remova dados ou respostas antigas do histórico e tente novamente.")
+    {
     }
 }
