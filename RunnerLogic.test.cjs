@@ -649,6 +649,23 @@ test('workspace backup parser rejects unsupported versions, missing stores, and 
   assert.throws(() => parseWorkspaceBackup(JSON.stringify({ ...backup, data: { ...backup.data, collections: [{ id: 'c1' }, { id: 'c1' }] } })), /duplicad/i);
 });
 
+test('hosted cookie-jar restore uses one bulk API call for all environment jars', async () => {
+  const { replaceHostedCookieJars } = runnerLogic();
+  const records = Array.from({ length: 40 }, (_, index) => ({
+    key: `cookiejar:environment-${index}`,
+    value: { cookies: [{ cookieName: 'session', cookieHeader: `session=${index}`, cookieOrigin: 'https://api.example.test' }] }
+  }));
+  const calls = [];
+  await replaceHostedCookieJars(records, async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, status: 204 };
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/api/cookie-jar');
+  assert.equal(calls[0].options.method, 'PUT');
+  assert.equal(JSON.parse(calls[0].options.body).jars.length, 40);
+});
+
 test('encrypted workspace backup hides data and restores the validated workspace', async () => {
   const { webcrypto } = require('node:crypto');
   const { createWorkspaceBackup, encryptWorkspaceBackup, decryptWorkspaceBackup } = runnerLogic();

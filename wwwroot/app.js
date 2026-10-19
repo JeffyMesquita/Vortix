@@ -144,8 +144,8 @@ async function readWorkspace(){
     return response.json();
   }
   const workspace=Object.fromEntries(await Promise.all(DB_STORES.map(async store=>[store,await dbRead(store)])));
-  const jars=await Promise.all(workspace.environments.map(environment=>dbRead('settings','cookiejar:'+environment.id)));
-  workspace.settings.push(...jars.filter(record=>record?.value?.cookies?.length));
+  const jars=await ApiStudioRunner.readHostedCookieJars(fetch);
+  workspace.settings.push(...jars.filter(jar=>jar.value.cookies.length).map(jar=>({key:'cookiejar:'+jar.environmentId,value:jar.value})));
   return workspace;
 }
 async function replaceWorkspace(backup){
@@ -155,16 +155,21 @@ async function replaceWorkspace(backup){
     if(!response.ok)throw Error(result?.error||'Não foi possível restaurar o backup local.');
     return result;
   }
-  const previousEnvironments=await dbRead('environments'),db=await openLegacyDb();
+  const db=await openLegacyDb();
   const cookieRecords=(backup.settings||[]).filter(record=>String(record?.key||'').startsWith('cookiejar:'));
-  await new Promise((resolve,reject)=>{
-    const transaction=db.transaction(DB_STORES,'readwrite');
-    for(const store of DB_STORES){const objectStore=transaction.objectStore(store);objectStore.clear();for(const record of backup[store]||[])if(store!=='settings'||!String(record?.key||'').startsWith('cookiejar:'))objectStore.put(record);}
-    transaction.oncomplete=resolve;transaction.onerror=()=>reject(transaction.error||Error('Falha ao restaurar o banco deste navegador.'));transaction.onabort=()=>reject(transaction.error||Error('A restauração do banco deste navegador foi cancelada.'));
-  });
-  const environmentIds=new Set([...previousEnvironments,...(backup.environments||[])].map(environment=>environment.id));
-  for(const environmentId of environmentIds)await dbWrite('settings','cookiejar:'+environmentId,true);
-  for(const record of cookieRecords)await dbWrite('settings',record);
+  const previousJars=await ApiStudioRunner.readHostedCookieJars(fetch);
+  await ApiStudioRunner.replaceHostedCookieJars(cookieRecords,fetch);
+  try{
+    await new Promise((resolve,reject)=>{
+      const transaction=db.transaction(DB_STORES,'readwrite');
+      for(const store of DB_STORES){const objectStore=transaction.objectStore(store);objectStore.clear();for(const record of backup[store]||[])if(store!=='settings'||!String(record?.key||'').startsWith('cookiejar:'))objectStore.put(record);}
+      transaction.oncomplete=resolve;transaction.onerror=()=>reject(transaction.error||Error('Falha ao restaurar o banco deste navegador.'));transaction.onabort=()=>reject(transaction.error||Error('A restauração do banco deste navegador foi cancelada.'));
+    });
+  }catch(error){
+    try{await ApiStudioRunner.replaceHostedCookieJars(previousJars.map(jar=>({key:'cookiejar:'+jar.environmentId,value:jar.value})),fetch);}
+    catch{throw Error('A restauração do workspace falhou e os cookies não puderam ser revertidos. Tente restaurar novamente.');}
+    throw error;
+  }
   return {restored:true};
 }
 async function initializeHostingMode() {

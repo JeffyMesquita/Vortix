@@ -189,36 +189,61 @@ var publicSessionEndpoint = app.MapGet("/api/session", (HttpContext context) =>
     EnsureHostedSession(context);
     return Results.NoContent();
 });
+var cookieJarsReadEndpoint = app.MapGet("/api/cookie-jar", async (HttpContext context, CancellationToken cancellationToken) =>
+{
+    if (!hostedMode) return Results.NotFound();
+    if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var sessionId = EnsureHostedSession(context);
+    var jars = await localDataStore.ReadHostedCookieJarsAsync(sessionId, cancellationToken);
+    return Results.Json(new { jars = jars.Select(jar => new { environmentId = jar.Key, value = jar.Value }) });
+});
+var cookieJarsReplaceEndpoint = app.MapPut("/api/cookie-jar", async (HttpContext context, JsonElement request, CancellationToken cancellationToken) =>
+{
+    if (!hostedMode) return Results.NotFound();
+    if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!TryParseCookieJarRestore(request, out var jars)) return StorageError();
+    var sessionId = EnsureHostedSession(context);
+    try
+    {
+        await localDataStore.ReplaceHostedCookieJarsAsync(sessionId, jars, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (HostedCookieJarLimitExceededException exception)
+    {
+        return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status413PayloadTooLarge);
+    }
+    catch (WorkspaceSnapshotLimitExceededException exception)
+    {
+        return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status413PayloadTooLarge);
+    }
+});
 app.MapGet("/api/cookie-jar/{environmentId}", async (HttpContext context, string environmentId, CancellationToken cancellationToken) =>
 {
     if (!hostedMode) return Results.NotFound();
     if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     if (!IsValidEnvironmentId(environmentId)) return StorageError();
     var sessionId = EnsureHostedSession(context);
-    JsonElement? record;
-    try { record = await localDataStore.ReadAsync("settings", HostedCookieStorageKey(sessionId, environmentId), cancellationToken); }
-    catch (CryptographicException)
-    {
-        await localDataStore.DeleteAsync("settings", HostedCookieStorageKey(sessionId, environmentId), cancellationToken);
-        return Results.Json(new { key = "cookiejar:" + environmentId, value = new { cookies = Array.Empty<StoredCookie>() } });
-    }
-    if (!record.HasValue || record.Value.ValueKind != JsonValueKind.Object || !record.Value.TryGetProperty("value", out var value))
-        return Results.Json(new { key = "cookiejar:" + environmentId, value = new { cookies = Array.Empty<StoredCookie>() } });
+    var jars = await localDataStore.ReadHostedCookieJarsAsync(sessionId, cancellationToken);
+    var value = jars.TryGetValue(environmentId, out var storedValue)
+        ? storedValue
+        : JsonSerializer.SerializeToElement(new { cookies = Array.Empty<StoredCookie>() }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
     return Results.Json(new { key = "cookiejar:" + environmentId, value });
 });
 var cookieJarWriteEndpoint = app.MapPut("/api/cookie-jar/{environmentId}", async (HttpContext context, string environmentId, JsonElement value, CancellationToken cancellationToken) =>
 {
     if (!hostedMode) return Results.NotFound();
     if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
-    if (!IsValidEnvironmentId(environmentId) || value.ValueKind != JsonValueKind.Object ||
-        !value.TryGetProperty("cookies", out var cookies) || cookies.ValueKind != JsonValueKind.Array || cookies.GetArrayLength() > 200)
+    if (!IsValidEnvironmentId(environmentId) || !TryNormalizeCookieJarValue(value, out var normalizedValue))
         return StorageError();
     var sessionId = EnsureHostedSession(context);
-    var record = JsonSerializer.SerializeToElement(new { key = HostedCookieStorageKey(sessionId, environmentId), value }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
     try
     {
-        await localDataStore.WriteAsync("settings", record, cancellationToken);
+        await localDataStore.WriteHostedCookieJarAsync(sessionId, environmentId, normalizedValue, cancellationToken);
         return Results.NoContent();
+    }
+    catch (HostedCookieJarLimitExceededException exception)
+    {
+        return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status413PayloadTooLarge);
     }
     catch (WorkspaceSnapshotLimitExceededException exception)
     {
@@ -237,6 +262,7 @@ var cookieJarDeleteEndpoint = app.MapDelete("/api/cookie-jar/{environmentId}", a
 if (hostedMode)
 {
     publicSessionEndpoint.RequireRateLimiting("hosted-proxy");
+    cookieJarsReplaceEndpoint.RequireRateLimiting("hosted-proxy");
     cookieJarWriteEndpoint.RequireRateLimiting("hosted-proxy");
     cookieJarDeleteEndpoint.RequireRateLimiting("hosted-proxy");
 }
@@ -631,7 +657,9 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
     }
 
     var environmentId = string.IsNullOrWhiteSpace(call.EnvironmentId) ? "default" : call.EnvironmentId.Trim();
-    var cookieStorageKey = GetCookieJarStorageKey(context, environmentId);
+    var isHostedMode = string.Equals(context.RequestServices.GetRequiredService<IConfiguration>()["ApiStudio:HostingMode"], "render", StringComparison.OrdinalIgnoreCase);
+    var sessionId = isHostedMode ? EnsureHostedSession(context) : string.Empty;
+    var cookieStorageKey = isHostedMode ? HostedCookieStorageKey(sessionId, environmentId) : "cookiejar:" + environmentId;
     var providedAuthType = call.AuthType?.Trim() ?? string.Empty;
     var authType = providedAuthType.Length == 0
         ? (string.IsNullOrEmpty(call.BearerToken) ? "none" : "bearer")
@@ -901,7 +929,7 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
         }
     }
 
-    return await SendWithCookieJarAsync(context, request, httpClient, localDataStore, cookieJarLocks, cookieStorageKey, targetUri);
+    return await SendWithCookieJarAsync(context, request, httpClient, localDataStore, cookieJarLocks, cookieStorageKey, targetUri, isHostedMode, sessionId, environmentId);
 
 }
 
@@ -913,13 +941,16 @@ static async Task<IResult> SendWithCookieJarAsync(
     LocalDataStore localDataStore,
     ConcurrentDictionary<string, SemaphoreSlim> cookieJarLocks,
     string cookieStorageKey,
-    Uri targetUri)
+    Uri targetUri,
+    bool hostedMode,
+    string sessionId,
+    string environmentId)
 {
     var cookieLock = cookieJarLocks.GetOrAdd(cookieStorageKey, static _ => new SemaphoreSlim(1, 1));
     await cookieLock.WaitAsync(context.RequestAborted);
     try
     {
-        var cookieLoad = await ReadCookieJarAsync(localDataStore, cookieStorageKey, context.RequestAborted);
+        var cookieLoad = await ReadCookieJarAsync(localDataStore, cookieStorageKey, hostedMode, sessionId, environmentId, context.RequestAborted);
         var cookies = cookieLoad.Cookies;
         var cookieContainer = CreateCookieContainer(cookies);
         var outgoingCookieHeader = cookieContainer.GetCookieHeader(targetUri);
@@ -942,9 +973,9 @@ static async Task<IResult> SendWithCookieJarAsync(
                 cookies = UpdateCookieJar(cookieContainer, cookies, targetUri, setCookieHeaders);
             try
             {
-                await WriteCookieJarAsync(localDataStore, cookieStorageKey, cookies, context.RequestAborted);
+                await WriteCookieJarAsync(localDataStore, cookieStorageKey, cookies, hostedMode, sessionId, environmentId, context.RequestAborted);
             }
-            catch (Exception error) when (error is SqliteException or CryptographicException or JsonException or InvalidOperationException or ArgumentException)
+            catch (Exception error) when (error is SqliteException or CryptographicException or JsonException or InvalidOperationException or ArgumentException or HostedCookieJarLimitExceededException or WorkspaceSnapshotLimitExceededException)
             {
                 cookieJarWarning = "A resposta chegou, mas o Cookie jar deste navegador não foi atualizado.";
             }
@@ -981,14 +1012,25 @@ static async Task<IResult> SendWithCookieJarAsync(
     }
 }
 
-static async Task<CookieJarLoad> ReadCookieJarAsync(LocalDataStore localDataStore, string storageKey, CancellationToken cancellationToken)
+static async Task<CookieJarLoad> ReadCookieJarAsync(LocalDataStore localDataStore, string storageKey, bool hostedMode, string sessionId, string environmentId, CancellationToken cancellationToken)
 {
-    JsonElement? record;
-    try { record = await localDataStore.ReadAsync("settings", storageKey, cancellationToken); }
+    JsonElement? value;
+    try
+    {
+        if (hostedMode)
+        {
+            var jars = await localDataStore.ReadHostedCookieJarsAsync(sessionId, cancellationToken);
+            value = jars.TryGetValue(environmentId, out var hostedValue) ? hostedValue : null;
+        }
+        else
+        {
+            var record = await localDataStore.ReadAsync("settings", storageKey, cancellationToken);
+            value = record.HasValue && record.Value.ValueKind == JsonValueKind.Object && record.Value.TryGetProperty("value", out var localValue) ? localValue : null;
+        }
+    }
     catch (CryptographicException) { return new CookieJarLoad([], false); }
-    if (!record.HasValue || record.Value.ValueKind != JsonValueKind.Object ||
-        !record.Value.TryGetProperty("value", out var value) ||
-        !value.TryGetProperty("cookies", out var cookieArray) ||
+    if (!value.HasValue || value.Value.ValueKind != JsonValueKind.Object ||
+        !value.Value.TryGetProperty("cookies", out var cookieArray) ||
         cookieArray.ValueKind != JsonValueKind.Array)
         return new CookieJarLoad([], false);
 
@@ -1121,11 +1163,17 @@ static string DefaultCookiePath(string requestPath)
 static string CookieIdentity(string name, string domain, string path) =>
     name + "\0" + domain.TrimStart('.').ToLowerInvariant() + "\0" + path;
 
-static async Task WriteCookieJarAsync(LocalDataStore localDataStore, string storageKey, IReadOnlyList<StoredCookie> cookies, CancellationToken cancellationToken)
+static async Task WriteCookieJarAsync(LocalDataStore localDataStore, string storageKey, IReadOnlyList<StoredCookie> cookies, bool hostedMode, string sessionId, string environmentId, CancellationToken cancellationToken)
 {
     if (cookies.Count == 0)
     {
         await localDataStore.DeleteAsync("settings", storageKey, cancellationToken);
+        return;
+    }
+    if (hostedMode)
+    {
+        var hostedValue = JsonSerializer.SerializeToElement(new { cookies }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        await localDataStore.WriteHostedCookieJarAsync(sessionId, environmentId, hostedValue, cancellationToken);
         return;
     }
     var record = JsonSerializer.SerializeToElement(new { key = storageKey, value = new { cookies } }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
@@ -1153,7 +1201,9 @@ static bool IsTrustedLocalRequest(HttpContext context, int port)
 static bool IsTrustedHostedOriginRequest(HttpContext context, string requestOrigin)
 {
     var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
-    foreach (var configuredOrigin in new[] { configuration["ApiStudio:PublicOrigin"], configuration["RENDER_EXTERNAL_URL"] })
+    var renderHostname = configuration["RENDER_EXTERNAL_HOSTNAME"];
+    var renderOrigin = string.IsNullOrWhiteSpace(renderHostname) ? null : "https://" + renderHostname;
+    foreach (var configuredOrigin in new[] { configuration["ApiStudio:PublicOrigin"], configuration["RENDER_EXTERNAL_URL"], renderOrigin })
     {
         if (!Uri.TryCreate(configuredOrigin, UriKind.Absolute, out var parsedOrigin) ||
             parsedOrigin.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(parsedOrigin.UserInfo) ||
@@ -1182,23 +1232,79 @@ static string EnsureHostedSession(HttpContext context)
         HttpOnly = true,
         Secure = true,
         SameSite = SameSiteMode.Lax,
+        MaxAge = TimeSpan.FromDays(30),
         Path = "/"
     });
     return sessionId;
 }
 
-static string GetCookieJarStorageKey(HttpContext context, string environmentId)
-{
-    var isHosted = string.Equals(context.RequestServices.GetRequiredService<IConfiguration>()["ApiStudio:HostingMode"], "render", StringComparison.OrdinalIgnoreCase);
-    return isHosted
-        ? HostedCookieStorageKey(EnsureHostedSession(context), environmentId)
-        : "cookiejar:" + environmentId;
-}
-
 static string HostedCookieStorageKey(string sessionId, string environmentId) => "cookiejar:" + sessionId + ":" + environmentId;
 
 static bool IsValidEnvironmentId(string environmentId) =>
-    environmentId.Length is > 0 and <= 128 && !environmentId.Contains('\r') && !environmentId.Contains('\n');
+    !string.IsNullOrWhiteSpace(environmentId) && environmentId.Length <= 128 && !environmentId.Contains('\r') && !environmentId.Contains('\n');
+
+static bool TryNormalizeCookieJarValue(JsonElement value, out JsonElement normalizedValue)
+{
+    normalizedValue = default;
+    if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty("cookies", out var cookieArray) ||
+        cookieArray.ValueKind != JsonValueKind.Array || cookieArray.GetArrayLength() > LocalDataStore.MaxHostedCookieJarCookieCount)
+        return false;
+    var cookieStringFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "cookieName", "cookieDomain", "cookiePath", "cookieOrigin", "cookieHeader", "sameSite"
+    };
+    foreach (var cookie in cookieArray.EnumerateArray())
+    {
+        if (cookie.ValueKind != JsonValueKind.Object) return false;
+        foreach (var property in cookie.EnumerateObject())
+            if (cookieStringFields.Contains(property.Name) && property.Value.ValueKind != JsonValueKind.String) return false;
+    }
+
+    List<StoredCookie> cookies;
+    try { cookies = JsonSerializer.Deserialize<List<StoredCookie>>(cookieArray.GetRawText(), new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? []; }
+    catch (JsonException) { return false; }
+    foreach (var cookie in cookies)
+    {
+        if (cookie is null) return false;
+        var cookieName = cookie.CookieName ?? string.Empty;
+        var cookieHeader = cookie.CookieHeader ?? string.Empty;
+        var cookieDomain = cookie.CookieDomain ?? string.Empty;
+        var cookiePath = cookie.CookiePath ?? string.Empty;
+        var sameSite = cookie.SameSite ?? string.Empty;
+        var cookieOriginText = cookie.CookieOrigin ?? string.Empty;
+        var headerSeparator = cookieHeader.IndexOf('=');
+        if (cookieName.Length is < 1 or > 256 || cookieName.Any(character => char.IsControl(character) || char.IsWhiteSpace(character) || character is ';' or '=') ||
+            cookieHeader.Length is < 1 or > 8192 || cookieHeader.Contains('\r') || cookieHeader.Contains('\n') || headerSeparator <= 0 ||
+            !string.Equals(cookieHeader[..headerSeparator].Trim(), cookieName, StringComparison.Ordinal) ||
+            cookieDomain.Length > 253 || cookieDomain.Any(char.IsControl) || cookieDomain.Contains('/') ||
+            cookiePath.Length > 4096 || !cookiePath.StartsWith('/') || cookiePath.Any(char.IsControl) ||
+            sameSite.Length > 32 || sameSite.Any(char.IsControl) ||
+            cookieOriginText.Length > 2048 || !Uri.TryCreate(cookieOriginText, UriKind.Absolute, out var cookieOrigin) ||
+            cookieOrigin.Scheme is not ("http" or "https") || string.IsNullOrEmpty(cookieOrigin.Host) || !string.IsNullOrEmpty(cookieOrigin.UserInfo))
+            return false;
+    }
+    normalizedValue = JsonSerializer.SerializeToElement(new { cookies }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    return true;
+}
+
+static bool TryParseCookieJarRestore(JsonElement request, out Dictionary<string, JsonElement> jars)
+{
+    jars = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+    if (request.ValueKind != JsonValueKind.Object || !request.TryGetProperty("jars", out var jarArray) ||
+        jarArray.ValueKind != JsonValueKind.Array || jarArray.GetArrayLength() > 1000)
+        return false;
+
+    foreach (var item in jarArray.EnumerateArray())
+    {
+        if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("environmentId", out var environmentIdValue) ||
+            environmentIdValue.ValueKind != JsonValueKind.String || !item.TryGetProperty("value", out var value))
+            return false;
+        var environmentId = environmentIdValue.GetString()!;
+        if (!IsValidEnvironmentId(environmentId) || !TryNormalizeCookieJarValue(value, out var normalizedValue) || !jars.TryAdd(environmentId, normalizedValue))
+            return false;
+    }
+    return true;
+}
 
 static bool IsHostedFlowOwnedByRequest(HttpContext context, OAuthPkceFlow flow)
 {
