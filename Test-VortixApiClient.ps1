@@ -22,6 +22,7 @@ foreach ($requiredText in @(
     'id="run-collection"', 'id="runner-dialog"', 'id="runner-datasets"', 'id="runner-write-phrase"',
     'id="response-view-modes"', 'data-response-view="tree"', 'id="response-search"', 'id="response-tree"',
     'id="response-example-save-hint"', 'id="save-response-example"', 'id="response-example-save-form"', 'id="response-example-name"', 'id="response-examples-panel"', 'id="response-examples-list"',
+    'id="hosted-login-dialog"', 'id="hosted-access-password"',
     'Insomnia JSON (v4)', 'Postman Collection v2.1', 'id="export-workspace"', 'id="restore-workspace"', 'id="restore-workspace-file"', 'id="protect-existing-secrets"'
 )) {
     if (-not $page.Contains($requiredText)) { throw "Page is missing required label: $requiredText" }

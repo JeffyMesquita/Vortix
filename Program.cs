@@ -7,6 +7,11 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Security.Cryptography;
+using System.Security.Claims;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.DataProtection;
 
 const long maxWorkspaceBackupBytes = 16 * 1024 * 1024;
@@ -70,10 +75,35 @@ const string graphqlIntrospectionQuery = """
 var graphqlIntrospectionBody = JsonSerializer.Serialize(new { query = graphqlIntrospectionQuery, operationName = "VortixSchemaIntrospection" });
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
-var port = builder.Configuration.GetValue("ApiStudio:Port", 51873);
+var hostingMode = (builder.Configuration["ApiStudio:HostingMode"] ?? "local").Trim().ToLowerInvariant();
+if (hostingMode is not ("local" or "render"))
+{
+    throw new InvalidOperationException("ApiStudio:HostingMode aceita somente local ou render.");
+}
+var hostedMode = hostingMode == "render";
+var publicOrigin = string.Empty;
+var accessPassword = builder.Configuration["ApiStudio:AccessPassword"] ?? string.Empty;
+if (hostedMode)
+{
+    var configuredOrigin = builder.Configuration["ApiStudio:PublicOrigin"];
+    if (!Uri.TryCreate(configuredOrigin, UriKind.Absolute, out var parsedOrigin) ||
+        parsedOrigin.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(parsedOrigin.UserInfo) ||
+        parsedOrigin.AbsolutePath != "/" || !string.IsNullOrEmpty(parsedOrigin.Query) || !string.IsNullOrEmpty(parsedOrigin.Fragment))
+    {
+        throw new InvalidOperationException("ApiStudio:PublicOrigin precisa ser uma origem HTTPS, por exemplo https://apicliente.example.com.");
+    }
+    if (accessPassword.Length is < 12 or > 256)
+    {
+        throw new InvalidOperationException("ApiStudio:AccessPassword precisa ter entre 12 e 256 caracteres.");
+    }
+    publicOrigin = parsedOrigin.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+    builder.Configuration["ApiStudio:PublicOrigin"] = publicOrigin;
+}
+var configuredPort = hostedMode ? builder.Configuration.GetValue<int?>("PORT") ?? 10000 : builder.Configuration.GetValue("ApiStudio:Port", 51873);
+var port = configuredPort;
 if (port is < 1 or > 65535)
 {
-    throw new InvalidOperationException("ApiStudio:Port deve estar entre 1 e 65535.");
+    throw new InvalidOperationException(hostedMode ? "PORT deve estar entre 1 e 65535." : "ApiStudio:Port deve estar entre 1 e 65535.");
 }
 var pkceFlowTimeoutSeconds = builder.Configuration.GetValue("ApiStudio:OAuthPkceFlowTimeoutSeconds", 300);
 if (pkceFlowTimeoutSeconds is < 1 or > 600)
@@ -92,7 +122,8 @@ if (string.IsNullOrWhiteSpace(databasePath))
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.Limits.MaxRequestBodySize = 1_048_576;
-    options.Listen(IPAddress.Loopback, port);
+    if (hostedMode) options.ListenAnyIP(port);
+    else options.Listen(IPAddress.Loopback, port);
 });
 
 using var httpClient = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
@@ -102,6 +133,35 @@ using var httpClient = new HttpClient(new HttpClientHandler { AllowAutoRedirect 
 };
 
 builder.Services.AddDataProtection().SetApplicationName("ApiPublicacaoTester");
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.Cookie.Name = "__Host-Vortix.Auth";
+        options.Cookie.Path = "/";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = hostedMode ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
+        options.ExpireTimeSpan = TimeSpan.FromHours(12);
+        options.SlidingExpiration = true;
+        options.Events.OnRedirectToLogin = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        };
+    });
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("hosted-login", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 5,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true
+        }));
+});
 var app = builder.Build();
 var dataProtector = app.Services.GetRequiredService<IDataProtectionProvider>().CreateProtector("LocalDataStore.v1");
 var localDataStore = new LocalDataStore(databasePath, dataProtector);
@@ -116,9 +176,50 @@ app.Use(async (context, next) =>
     context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; connect-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
     await next();
 });
+app.UseRouting();
+app.UseAuthentication();
+app.UseRateLimiter();
+app.Use(async (context, next) =>
+{
+    if (hostedMode && context.Request.Path.StartsWithSegments("/api") &&
+        context.Request.Path != "/api/runtime" && context.Request.Path != "/api/auth/login" &&
+        context.User.Identity?.IsAuthenticated != true)
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return;
+    }
+    await next();
+});
 app.UseDefaultFiles();
 app.UseStaticFiles();
-app.MapGet("/health", () => Results.Json(new { status = "ok", app = "ApiPublicacaoTester", product = "VortixApiClient" }));
+app.MapGet("/health", () => Results.Json(new { status = "ok", app = "ApiPublicacaoTester", product = "VortixApiClient", hostingMode }));
+app.MapGet("/api/runtime", () => Results.Json(new { hostingMode, product = "VortixApiClient" }));
+app.MapPost("/api/auth/login", async (HttpContext context, JsonElement request) =>
+{
+    if (!hostedMode) return Results.NotFound();
+    if (!IsTrustedHostedOriginRequest(context, publicOrigin)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var suppliedPassword = request.ValueKind == JsonValueKind.Object && request.TryGetProperty("password", out var passwordElement) && passwordElement.ValueKind == JsonValueKind.String
+        ? passwordElement.GetString() ?? string.Empty
+        : string.Empty;
+    var expectedHash = SHA256.HashData(Encoding.UTF8.GetBytes(accessPassword));
+    var suppliedHash = SHA256.HashData(Encoding.UTF8.GetBytes(suppliedPassword));
+    if (!CryptographicOperations.FixedTimeEquals(expectedHash, suppliedHash))
+    {
+        await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        return Results.StatusCode(StatusCodes.Status401Unauthorized);
+    }
+    var identity = new ClaimsIdentity([new Claim(ClaimTypes.Name, "vortix-user")], CookieAuthenticationDefaults.AuthenticationScheme);
+    await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity), new AuthenticationProperties { IsPersistent = false, AllowRefresh = true });
+    return Results.NoContent();
+}).RequireRateLimiting("hosted-login");
+app.MapPost("/api/auth/logout", async (HttpContext context) =>
+{
+    if (!hostedMode) return Results.NotFound();
+    if (!IsTrustedHostedOriginRequest(context, publicOrigin) || context.User.Identity?.IsAuthenticated != true)
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    return Results.NoContent();
+});
 app.MapPost("/api/oauth/pkce/redirect-uri", (HttpContext context, OAuthPkceRedirectPreviewRequest request) =>
 {
     if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -126,7 +227,7 @@ app.MapPost("/api/oauth/pkce/redirect-uri", (HttpContext context, OAuthPkceRedir
         return Error(StatusCodes.Status400BadRequest, endpointError);
     if (ContainsOAuthAuthorizationParameter(endpoint) || ContainsOAuthCredentialParameter(endpoint))
         return Error(StatusCodes.Status400BadRequest, "Remova parâmetros OAuth ou credenciais da URL de autorização.");
-    return Results.Json(new { redirectUri = $"http://127.0.0.1:{port}/oauth/callback/{CreateOAuthProviderKey(endpoint)}" });
+    return Results.Json(new { redirectUri = BuildOAuthRedirectUri(publicOrigin, port, CreateOAuthProviderKey(endpoint)) });
 });
 app.MapPost("/api/oauth/pkce/start", async (HttpContext context, OAuthPkceStartRequest request, CancellationToken cancellationToken) =>
 {
@@ -156,7 +257,7 @@ app.MapPost("/api/oauth/pkce/start", async (HttpContext context, OAuthPkceStartR
     var verifier = CreateOAuthRandomValue();
     var challenge = CreateOAuthCodeChallenge(verifier);
     var providerKey = CreateOAuthProviderKey(authorizationEndpoint);
-    var redirectUri = $"http://127.0.0.1:{port}/oauth/callback/{providerKey}";
+    var redirectUri = BuildOAuthRedirectUri(publicOrigin, port, providerKey);
     var authorizationUrl = await BuildOAuthAuthorizationUrlAsync(authorizationEndpoint, clientId, scope, redirectUri, state, challenge, cancellationToken);
     var flow = new OAuthPkceFlow
     {
@@ -975,6 +1076,18 @@ static async Task WriteCookieJarAsync(LocalDataStore localDataStore, string stor
 
 static bool IsTrustedLocalRequest(HttpContext context, int port)
 {
+    var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
+    if (string.Equals(configuration["ApiStudio:HostingMode"], "render", StringComparison.OrdinalIgnoreCase))
+    {
+        var publicOrigin = configuration["ApiStudio:PublicOrigin"];
+        if (!Uri.TryCreate(publicOrigin, UriKind.Absolute, out var parsedOrigin)) return false;
+        var hostedRequestOrigin = context.Request.Headers["Origin"].ToString();
+        var hostedSafeReadWithoutOrigin = hostedRequestOrigin.Length == 0 && HttpMethods.IsGet(context.Request.Method);
+        return context.User.Identity?.IsAuthenticated == true &&
+            string.Equals(context.Request.Headers["X-Api-Studio"].ToString(), "1", StringComparison.Ordinal) &&
+            (string.Equals(hostedRequestOrigin, publicOrigin, StringComparison.OrdinalIgnoreCase) || hostedSafeReadWithoutOrigin) &&
+            string.Equals(context.Request.Host.Value, parsedOrigin.Authority, StringComparison.OrdinalIgnoreCase);
+    }
     var origin = context.Request.Headers["Origin"].ToString();
     var sameOrigin = string.Equals(origin, $"http://127.0.0.1:{port}", StringComparison.OrdinalIgnoreCase);
     // Browsers omit Origin on same-origin GET fetches; keep writes and proxy calls origin-checked.
@@ -982,6 +1095,14 @@ static bool IsTrustedLocalRequest(HttpContext context, int port)
     return string.Equals(context.Request.Headers["X-Api-Studio"].ToString(), "1", StringComparison.Ordinal) &&
         (sameOrigin || safeReadWithoutOrigin) &&
         string.Equals(context.Request.Host.Value, $"127.0.0.1:{port}", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsTrustedHostedOriginRequest(HttpContext context, string publicOrigin)
+{
+    if (!Uri.TryCreate(publicOrigin, UriKind.Absolute, out var parsedOrigin)) return false;
+    return string.Equals(context.Request.Headers["X-Api-Studio"].ToString(), "1", StringComparison.Ordinal) &&
+        string.Equals(context.Request.Headers["Origin"].ToString(), publicOrigin, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(context.Request.Host.Value, parsedOrigin.Authority, StringComparison.OrdinalIgnoreCase);
 }
 
 static IResult StorageError() => Results.Json(new { error = "Registro local inválido." }, statusCode: StatusCodes.Status400BadRequest);
@@ -1241,11 +1362,24 @@ static async Task<string> BuildOAuthAuthorizationUrlAsync(
 
 static bool IsTrustedOAuthCallback(HttpContext context, int port)
 {
+    var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
+    if (string.Equals(configuration["ApiStudio:HostingMode"], "render", StringComparison.OrdinalIgnoreCase))
+    {
+        var publicOrigin = configuration["ApiStudio:PublicOrigin"];
+        return context.User.Identity?.IsAuthenticated == true &&
+            Uri.TryCreate(publicOrigin, UriKind.Absolute, out var parsedOrigin) &&
+            string.Equals(context.Request.Host.Value, parsedOrigin.Authority, StringComparison.OrdinalIgnoreCase);
+    }
     var remoteAddress = context.Connection.RemoteIpAddress;
     return remoteAddress is not null && IPAddress.IsLoopback(remoteAddress) &&
         string.Equals(context.Request.Host.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase) &&
         context.Request.Host.Port == port;
 }
+
+static string BuildOAuthRedirectUri(string publicOrigin, int port, string providerKey) =>
+    string.IsNullOrWhiteSpace(publicOrigin)
+        ? $"http://127.0.0.1:{port}/oauth/callback/{providerKey}"
+        : $"{publicOrigin}/oauth/callback/{providerKey}";
 
 static string CreateOAuthProviderKey(Uri endpoint)
 {

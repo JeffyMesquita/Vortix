@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: vortix-api-client
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    domains:
+      - apicliente.jeffymesquita.dev
+    envVars:
+      - key: ApiStudio__HostingMode
+        value: render
+      - key: ApiStudio__PublicOrigin
+        value: https://apicliente.jeffymesquita.dev
+      - key: ApiStudio__AccessPassword
+        sync: false
