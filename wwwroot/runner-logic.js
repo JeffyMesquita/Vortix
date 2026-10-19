@@ -335,6 +335,7 @@
         graphqlQuery: String(source.request.graphqlQuery || ''),
         graphqlVariables: String(source.request.graphqlVariables || ''),
         graphqlOperationName: String(source.request.graphqlOperationName || ''),
+        responseCaptureTarget: source.request.responseCaptureTarget === 'vault' ? 'vault' : 'environment',
         allowInsecureHttp: source.request.allowInsecureHttp === true
       };
       tabs.push({
@@ -397,6 +398,101 @@
     });
     if (missing.size) throw Error('Variável(veis) sem valor no ambiente: ' + [...missing].join(', '));
     return resolved;
+  }
+
+  function normalizeVaultSecrets(vaultSecrets) {
+    if (!vaultSecrets || typeof vaultSecrets !== 'object' || Array.isArray(vaultSecrets)) {
+      return { unavailable: false, locked: false, values: Object.create(null), names: new Set() };
+    }
+    const names = new Set((Array.isArray(vaultSecrets.names) ? vaultSecrets.names : []).map(String));
+    if (vaultSecrets.unavailable === true) {
+      return { unavailable: true, locked: false, values: Object.create(null), names };
+    }
+    if (vaultSecrets.locked === true) {
+      return { unavailable: false, locked: true, values: Object.create(null), names };
+    }
+    return { unavailable: false, locked: false, values: vaultSecrets, names };
+  }
+
+  function redactSecretValues(value, secrets) {
+    let text = String(value ?? '');
+    const list = Array.isArray(secrets) ? secrets : secrets && typeof secrets === 'object' ? Object.values(secrets) : [];
+    for (const secret of list) {
+      if (!secret) continue;
+      text = text.split(String(secret)).join('{{segredo}}');
+      const encoded = encodeURIComponent(String(secret));
+      if (encoded && encoded !== String(secret)) text = text.split(encoded).join('{{segredo}}');
+    }
+    return text;
+  }
+
+  function vaultCaptureEnvironmentError(state = {}) {
+    if (state.loading === true) return 'Cofre de segredos carregando; aguarde antes de capturar. Nenhum valor será copiado para o ambiente.';
+    if (state.unavailable) return 'Cofre de segredos indisponível; a captura foi bloqueada e não cai para o ambiente.';
+    const active = String(state.activeEnvironmentId || 'default');
+    const vaultEnvironment = String(state.vaultEnvironmentId || '');
+    const requestEnvironment = state.requestEnvironmentId == null ? '' : String(state.requestEnvironmentId || 'default');
+    if (state.unlocked !== true || !vaultEnvironment || vaultEnvironment !== active)
+      return 'Cofre de segredos bloqueado ou de outro ambiente. Desbloqueie o cofre do ambiente ativo antes de capturar; nenhum valor foi salvo no ambiente.';
+    if (!requestEnvironment || requestEnvironment !== active)
+      return 'O ambiente ativo mudou durante a request; a captura no cofre foi bloqueada e nenhum valor foi salvo.';
+    return '';
+  }
+
+  function templateReferenceSource(key, environment, dataset, vault) {
+    if (Object.hasOwn(dataset, key)) return 'dataset';
+    if (vault.unavailable) return 'unavailable';
+    if (vault.locked && vault.names.has(key)) return 'locked';
+    if (!vault.locked && Object.hasOwn(vault.values, key)) return 'vault';
+    if (Object.hasOwn(environment, key)) return 'environment';
+    return 'missing';
+  }
+
+  function resolveTemplateWithProvenance(value, environment = {}, overrides = {}, vaultSecrets = {}) {
+    const env = environment && typeof environment === 'object' ? environment : {};
+    const dataset = overrides && typeof overrides === 'object' ? overrides : {};
+    const vault = normalizeVaultSecrets(vaultSecrets);
+    const provenance = {};
+    const missing = new Set();
+    const text = String(value ?? '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, key) => {
+      if (Object.hasOwn(dataset, key)) {
+        provenance[key] = 'dataset';
+        return String(dataset[key]);
+      }
+      if (vault.unavailable) {
+        throw Error('O cofre de segredos está indisponível; não é possível resolver "{{' + key + '}}" com segurança.');
+      }
+      if (vault.locked && vault.names.has(key)) {
+        throw Error('O cofre de segredos está bloqueado; desbloqueie-o para resolver "{{' + key + '}}".');
+      }
+      if (!vault.locked && Object.hasOwn(vault.values, key)) {
+        provenance[key] = 'vault';
+        return String(vault.values[key]);
+      }
+      if (Object.hasOwn(env, key)) {
+        provenance[key] = 'environment';
+        return String(env[key]);
+      }
+      missing.add(key);
+      return whole;
+    });
+    if (missing.size) throw Error('Variável(veis) sem valor no ambiente: ' + [...missing].join(', '));
+    return { text, provenance };
+  }
+
+  function inspectTemplateReferences(fields, environment = {}, overrides = {}, vaultSecrets = {}) {
+    const env = environment && typeof environment === 'object' && !Array.isArray(environment) ? environment : {};
+    const dataset = overrides && typeof overrides === 'object' && !Array.isArray(overrides) ? overrides : {};
+    const vault = normalizeVaultSecrets(vaultSecrets);
+    const sourceFields = fields && typeof fields === 'object' && !Array.isArray(fields) ? fields : {};
+    const references = [];
+    for (const [field, raw] of Object.entries(sourceFields)) {
+      String(raw ?? '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, name) => {
+        references.push({ field, name, source: templateReferenceSource(name, env, dataset, vault) });
+        return whole;
+      });
+    }
+    return references;
   }
 
   function tokenizeShellCommand(source, format) {
@@ -749,10 +845,10 @@
     } catch { return ''; }
   }
 
-  function remoteHttpOrigins(cases, environment = {}) {
+  function remoteHttpOrigins(cases, environment = {}, vaultSecrets = {}) {
     const origins = new Set();
     for (const item of cases || []) {
-      const baseUrl = resolveTemplate(item?.request?.baseUrl || '', environment, item?.dataset || {});
+      const baseUrl = resolveTemplateWithProvenance(item?.request?.baseUrl || '', environment, item?.dataset || {}, vaultSecrets).text;
       const origin = remoteHttpOrigin(baseUrl);
       if (!origin) continue;
       if (item.request.allowInsecureHttp !== true) throw Error('HTTP remoto exige habilitação explícita na request.');
@@ -1199,14 +1295,19 @@
     return lines.join('\n');
   }
 
-  function prepareSavedRequest(saved, environment, dataset, allowWrites = false, authScopes = []) {
+  function prepareSavedRequest(saved, environment, dataset, allowWrites = false, authScopes = [], vaultSecrets = {}) {
     const method = String(saved?.method || 'GET').toUpperCase();
     if (saved?.tokenRequest) {
       throw Error('Requests de credenciais manuais precisam ser enviadas pelo fluxo de token.');
     }
     if (!methods.has(method)) throw Error('Método não suportado na coleção: ' + method);
     if (writeMethods.has(method) && !allowWrites) throw Error('Confirme as chamadas de escrita antes de executar.');
-    const resolve = value => resolveTemplate(value, environment, dataset);
+    const provenance = {};
+    const resolve = value => {
+      const result = resolveTemplateWithProvenance(value, environment, dataset, vaultSecrets);
+      Object.assign(provenance, result.provenance);
+      return result.text;
+    };
     const bodyMode = normalizeBodyMode(saved?.bodyMode,true);
     const multipartFields = bodyMode === 'multipart' ? normalizeMultipartFields(saved?.multipartFields).map(field => ({ ...field, name: resolve(field.name), value: field.type === 'text' ? resolve(field.value) : '' })) : [];
     if (multipartFields.some(field => field.type === 'file')) throw Error('O Runner não carrega arquivos salvos. Abra a request e selecione os arquivos novamente.');
@@ -1256,7 +1357,9 @@
       responseValueSource: saved?.responseValueSource === 'text' ? 'text' : 'json',
       responseJsonPath: String(saved?.responseJsonPath || 'access_token'),
       responseSuccessOnly: saved?.responseSuccessOnly !== false,
+      responseCaptureTarget: saved?.responseCaptureTarget === 'vault' ? 'vault' : 'environment',
       responseTests: normalizeResponseTests(saved?.responseTests),
+      resolutionProvenance: provenance,
       saveBearerToken: false
     };
   }
@@ -1441,5 +1544,176 @@
     return vault.decrypt(text);
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, resolveTemplate, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  const localSecretVaultFormat = 'api-studio-local-secret-vault';
+  const localSecretVaultVersion = 1;
+  const localSecretVaultMaxBytes = 1024 * 1024;
+  const localSecretVaultMaxEnvelopeBytes = 2 * 1024 * 1024;
+  const localSecretVaultNamePattern = /^[A-Za-z0-9_.-]{1,80}$/;
+
+  function validateLocalSecretName(name) {
+    const value = String(name ?? '').trim();
+    if (!localSecretVaultNamePattern.test(value) || reservedNames.has(value)) throw Error('Informe um nome de segredo válido (até 80 caracteres).');
+    return value;
+  }
+
+  function localSecretVaultAdditionalData() {
+    return new TextEncoder().encode(localSecretVaultFormat + ':' + localSecretVaultVersion);
+  }
+
+  function normalizeLocalSecretVaultSalt(value, cryptoProvider) {
+    if (value === undefined) return cryptoProvider.getRandomValues(new Uint8Array(16));
+    let salt;
+    if (typeof value === 'string') salt = base64ToBytes(value, 'salt');
+    else if (value instanceof Uint8Array) salt = new Uint8Array(value);
+    else if (value && typeof value === 'object' && typeof value.length === 'number') salt = Uint8Array.from(value);
+    else throw Error('Envelope do cofre inválido: salt.');
+    if (salt.length !== 16) throw Error('Envelope do cofre inválido: salt.');
+    return salt;
+  }
+
+  function validateLocalSecretVaultEnvelope(envelope) {
+    if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)
+      || envelope.format !== localSecretVaultFormat || envelope.version !== localSecretVaultVersion
+      || envelope.cipher !== 'AES-GCM-256' || envelope.kdf !== 'PBKDF2-SHA-256'
+      || envelope.iterations !== workspaceBackupPbkdf2Iterations)
+      throw Error('Envelope do cofre inválido.');
+  }
+
+  function makeLocalSecretVault({ salt, key, cryptoProvider, secrets, envelope }) {
+    const state = { salt, key, secrets, envelope };
+    const encoder = new TextEncoder();
+    const additionalData = localSecretVaultAdditionalData();
+    const requireUnlocked = () => {
+      if (!state.key || !state.secrets) throw Error('O cofre de segredos está bloqueado.');
+    };
+    const serializeSecrets = () => {
+      const values = Object.create(null);
+      for (const [name, value] of state.secrets) Object.defineProperty(values, name, { value, enumerable: true, writable: true, configurable: true });
+      return JSON.stringify(values);
+    };
+    const snapshot = async () => {
+      requireUnlocked();
+      const plaintext = encoder.encode(serializeSecrets());
+      if (plaintext.byteLength > localSecretVaultMaxBytes) throw Error('O cofre de segredos excede o limite de 1 MB.');
+      const iv = cryptoProvider.getRandomValues(new Uint8Array(12));
+      const ciphertext = await cryptoProvider.subtle.encrypt({ name: 'AES-GCM', iv, additionalData, tagLength: 128 }, state.key, plaintext);
+      state.envelope = {
+        format: localSecretVaultFormat,
+        version: localSecretVaultVersion,
+        cipher: 'AES-GCM-256',
+        kdf: 'PBKDF2-SHA-256',
+        iterations: workspaceBackupPbkdf2Iterations,
+        salt: bytesToBase64(state.salt),
+        iv: bytesToBase64(iv),
+        ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
+        names: [...state.secrets.keys()]
+      };
+      return state.envelope;
+    };
+    const vault = {
+      get locked() { return !state.secrets; },
+      async set(name, value) {
+        requireUnlocked();
+        const keyName = validateLocalSecretName(name);
+        const text = String(value ?? '');
+        if (text.length > 100000) throw Error('O segredo excede 100 KB.');
+        state.secrets.set(keyName, text);
+        await snapshot();
+      },
+      async get(name) {
+        requireUnlocked();
+        const keyName = validateLocalSecretName(name);
+        if (!state.secrets.has(keyName)) throw Error('Segredo não encontrado no cofre: ' + keyName);
+        return state.secrets.get(keyName);
+      },
+      async remove(name) {
+        requireUnlocked();
+        const keyName = validateLocalSecretName(name);
+        state.secrets.delete(keyName);
+        await snapshot();
+        return true;
+      },
+      async names() {
+        requireUnlocked();
+        return [...state.secrets.keys()];
+      },
+      async lock() {
+        state.key = null;
+        state.secrets = null;
+      },
+      async unlock(passphrase) {
+        validateWorkspaceBackupPassphrase(passphrase);
+        if (!state.envelope) throw Error('O cofre de segredos não possui um snapshot cifrado.');
+        const saltBytes = base64ToBytes(state.envelope.salt, 'salt');
+        const nextKey = await deriveWorkspaceBackupKey(passphrase, saltBytes, cryptoProvider);
+        let plaintext;
+        try {
+          const decrypted = await cryptoProvider.subtle.decrypt(
+            { name: 'AES-GCM', iv: base64ToBytes(state.envelope.iv, 'vetor de inicialização'), additionalData, tagLength: 128 },
+            nextKey,
+            base64ToBytes(state.envelope.ciphertext, 'conteúdo')
+          );
+          plaintext = new TextDecoder().decode(decrypted);
+        } catch {
+          throw Error('Senha do cofre incorreta ou envelope danificado.');
+        }
+        let parsed;
+        try { parsed = JSON.parse(plaintext); }
+        catch { throw Error('Conteúdo do cofre inválido.'); }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw Error('Conteúdo do cofre inválido.');
+        state.salt = saltBytes;
+        state.key = nextKey;
+        state.secrets = new Map(Object.entries(parsed).map(([name, value]) => [validateLocalSecretName(name), String(value)]));
+      },
+      async toEnvelope() {
+        if (state.secrets && state.key) return { ...(await snapshot()) };
+        if (state.envelope) return { ...state.envelope, names: Array.isArray(state.envelope.names) ? [...state.envelope.names] : [] };
+        throw Error('O cofre de segredos não possui um snapshot cifrado.');
+      }
+    };
+    return vault;
+  }
+
+  async function createLocalSecretVault(passphrase, salt, cryptoProvider = globalThis.crypto) {
+    validateWorkspaceBackupPassphrase(passphrase);
+    if (!cryptoProvider?.subtle || typeof cryptoProvider.getRandomValues !== 'function') throw Error('Criptografia segura indisponível neste navegador. Abra o Vortix pelo endereço local.');
+    const saltBytes = normalizeLocalSecretVaultSalt(salt, cryptoProvider);
+    const key = await deriveWorkspaceBackupKey(passphrase, saltBytes, cryptoProvider);
+    const vault = makeLocalSecretVault({ salt: saltBytes, key, cryptoProvider, secrets: new Map(), envelope: null });
+    await vault.toEnvelope();
+    return vault;
+  }
+
+  async function openLocalSecretVault(envelopeText, passphrase, cryptoProvider = globalThis.crypto) {
+    validateWorkspaceBackupPassphrase(passphrase);
+    if (!cryptoProvider?.subtle || typeof cryptoProvider.getRandomValues !== 'function') throw Error('Criptografia segura indisponível neste navegador. Abra o Vortix pelo endereço local.');
+    if (typeof envelopeText !== 'string' || envelopeText.length > localSecretVaultMaxEnvelopeBytes) throw Error('Envelope do cofre inválido.');
+    let envelope;
+    try { envelope = JSON.parse(envelopeText); }
+    catch { throw Error('Envelope do cofre inválido.'); }
+    validateLocalSecretVaultEnvelope(envelope);
+    const saltBytes = normalizeLocalSecretVaultSalt(envelope.salt, cryptoProvider);
+    const key = await deriveWorkspaceBackupKey(passphrase, saltBytes, cryptoProvider);
+    const additionalData = localSecretVaultAdditionalData();
+    let plaintext;
+    try {
+      const decrypted = await cryptoProvider.subtle.decrypt(
+        { name: 'AES-GCM', iv: base64ToBytes(envelope.iv, 'vetor de inicialização'), additionalData, tagLength: 128 },
+        key,
+        base64ToBytes(envelope.ciphertext, 'conteúdo')
+      );
+      plaintext = new TextDecoder().decode(decrypted);
+    } catch {
+      throw Error('Senha do cofre incorreta ou envelope danificado.');
+    }
+    let parsed;
+    try { parsed = JSON.parse(plaintext); }
+    catch { throw Error('Conteúdo do cofre inválido.'); }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw Error('Conteúdo do cofre inválido.');
+    const secrets = new Map();
+    for (const [name, value] of Object.entries(parsed)) secrets.set(validateLocalSecretName(name), String(value));
+    return makeLocalSecretVault({ salt: saltBytes, key, cryptoProvider, secrets, envelope: { ...envelope, names: [...secrets.keys()] } });
+  }
+
+  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

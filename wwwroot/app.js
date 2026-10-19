@@ -6,6 +6,7 @@ const DB_NAME = 'ApiPublicacaoTester', DB_VERSION = 2, LEGACY_HISTORY_KEY = 'api
 const STORAGE_MIGRATION_KEY = 'apiStudio.sqliteMigration.v1';
 const TOKEN_REQUEST_CONFIG_KEY = 'tokenRequestConfig';
 const OAUTH2_TOKEN_CONFIG_KEY = 'oauth2ClientCredentials', OAUTH2_TOKEN_META_KEY = 'oauth2TokenMetadata', OAUTH_PKCE_CONFIG_KEY = 'oauthAuthorizationCodePkce';
+const LOCAL_SECRET_VAULT_PREFIX = 'localSecretVault:';
 const DB_STORES = ['history','collections','environments','settings'];
 const writeMethods = new Set(['POST','PUT','PATCH','DELETE']), toastTimers = new Map();
 const RunnerLogic = window.ApiStudioRunner;
@@ -32,6 +33,8 @@ let graphqlSchema = null, graphqlSchemaEndpointKey = '', graphqlSchemaLoading = 
 let tokenRequestConfig = RunnerLogic.normalizeTokenRequestConfig(), oauth2TokenConfig = RunnerLogic.normalizeOAuthClientCredentialsConfig();
 let oauthPkceConfig = RunnerLogic.normalizeOAuthPkceConfig(), oauthPkceBusy = false, oauthPkceCancelRequested = false, oauthPkcePopup = null, oauthPkcePreviewTimer = 0;
 let hostedMode = false;
+let secretVault = null, secretVaultValues = null, secretVaultEnvelope = null, secretVaultNames = [], secretVaultBusy = false, secretVaultEnvironmentId = '', secretVaultUnavailable = null, secretVaultLoading = false;
+let lastResolutionProvenance = {};
 
 function openLegacyDb() {
   if (legacyDbPromise) return legacyDbPromise;
@@ -535,11 +538,11 @@ async function runGraphqlSchemaLoad(){
     if(safeBase.redacted||safeRoute.redacted)throw Error('Remova credenciais e parâmetros sensíveis da URL; configure Auth pela aba correspondente.');
     const insecureOrigin=RunnerLogic.remoteHttpOrigin(request.baseUrl);
     if(insecureOrigin&&!request.allowInsecureHttp)throw Error('HTTP fora de localhost está bloqueado. Autorize-o nesta request antes de consultar o schema.');
-    const detail=safeBase.value.replace(/\/+$/,'')+safeRoute.value;
+    const detail=redactVaultValues(safeBase.value.replace(/\/+$/,'')+safeRoute.value);
     const warning=['Vortix envia somente uma query GraphQL __schema de leitura, sem mutations nem variables.','Headers, Auth e Cookie jar do ambiente ativo serão utilizados; schema não vai para histórico nem SQLite.',insecureOrigin?remoteHttpWarning(insecureOrigin):''].filter(Boolean).join(' ');
     graphqlSchemaLoading=true;updateGraphqlSchemaControls();
     const status=byId('graphql-schema-status');status.dataset.state='loading';status.textContent='Aguardando confirmação para consultar schema…';
-    if(!(await confirmWithDialog({eyebrow:'SCHEMA GRAPHQL',title:'Consultar schema da API?',description:'POST '+safeRoute.value,detail,warning,confirmLabel:'Consultar schema',danger:!!insecureOrigin}))){status.dataset.state='idle';status.textContent='Consulta cancelada. O endpoint não foi chamado.';return;}
+    if(!(await confirmWithDialog({eyebrow:'SCHEMA GRAPHQL',title:'Consultar schema da API?',description:'POST '+redactVaultValues(safeRoute.value),detail,warning,confirmLabel:'Consultar schema',danger:!!insecureOrigin}))){status.dataset.state='idle';status.textContent='Consulta cancelada. O endpoint não foi chamado.';return;}
     clearGraphqlSchema('Consultando schema GraphQL…');status.dataset.state='loading';status.textContent='Consultando schema GraphQL…';
     const response=await fetch('/api/graphql/introspection',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify(request)});
     const result=await response.json().catch(()=>null);
@@ -816,7 +819,7 @@ async function loadTokenRequestConfig(){
   byId('token-route').value=tokenRequestConfig.route;byId('token-client-id-field').value=tokenRequestConfig.clientIdField;byId('token-client-secret-field').value=tokenRequestConfig.clientSecretField;byId('token-credential-mode').value=tokenRequestConfig.credentialMode;updateTokenButton();
 }
 function updateTokenButton(){let config;try{config=tokenRequestConfigFromForm();}catch{tokenRequestButton.disabled=true;return;}tokenRequestButton.disabled=!config.route||!byId('token-client-id').value.trim()||!byId('token-client-secret').value;}
-function remoteHttpWarning(origin){return `HTTP em ${origin} não cifra tráfego; credenciais, headers e body podem ser observados na rede.`;}
+function remoteHttpWarning(origin){return `HTTP em ${redactVaultValues(origin)} não cifra tráfego; credenciais, headers e body podem ser observados na rede.`;}
 function updateHistoryComparisonControls(){
   const button=byId('compare-history-responses');if(!button)return;
   button.hidden=historyComparisonIds.length===0;button.disabled=historyComparisonIds.length!==2;
@@ -941,7 +944,7 @@ async function saveHistory(request){
     tokenClientIdField:tokenRequest?String(request.tokenClientIdField||'client_id'):'',tokenClientSecretField:tokenRequest?String(request.tokenClientSecretField||'client_secret'):'',
     tokenFlow:tokenRequest?String(request.tokenFlow||''):'',oauthTokenUrl:tokenRequest?String(request.oauthTokenUrl||''):'',oauthClientId:tokenRequest?String(request.oauthClientId||''):'',oauthScope:tokenRequest?String(request.oauthScope||''):'',oauthClientAuthMethod:tokenRequest?String(request.oauthClientAuthMethod||''):'',
     redacted:base.redacted||path.redacted||headers.redacted||payload.redacted||authOmitted||multipart.redacted||graphql.redacted,
-    captureResponseVariable:!!request.captureResponseVariable,responseVariableName:String(request.responseVariableName||''),responseValueSource:request.responseValueSource==='text'?'text':'json',responseJsonPath:String(request.responseJsonPath||''),responseSuccessOnly:request.responseSuccessOnly!==false,
+    captureResponseVariable:!!request.captureResponseVariable,responseVariableName:String(request.responseVariableName||''),responseValueSource:request.responseValueSource==='text'?'text':'json',responseJsonPath:String(request.responseJsonPath||''),responseSuccessOnly:request.responseSuccessOnly!==false,responseCaptureTarget:request.responseCaptureTarget==='vault'?'vault':'environment',
     responseTests:RunnerLogic.normalizeResponseTests(request.responseTests)
   };
   try{
@@ -952,10 +955,16 @@ async function saveHistory(request){
   }catch(error){showToast('Histórico indisponível',error.message||'A chamada terminou, mas o registro não pôde ser salvo.','warning');return null;}
 }
 function applyHistoryEntry(entry,notify=true){
-  selectedContainer={collectionId:'',folderId:''};
-  if(entry.environmentId&&environments.some(item=>item.id===entry.environmentId))activeEnvironmentId=entry.environmentId;
-  else if(entry.authMode==='inherit')activeEnvironmentId=environments.some(item=>item.id==='default')?'default':environments[0]?.id||'default';
-  renderEnvironmentSelect();
+  selectedContainer={collectionId:'',folderId:''};let environmentChanged=false;
+  if(entry.environmentId&&environments.some(item=>item.id===entry.environmentId)){
+    if(activeEnvironmentId!==entry.environmentId){releaseSecretVaultMemory();environmentChanged=true;}
+    activeEnvironmentId=entry.environmentId;
+  }else if(entry.authMode==='inherit'){
+    const targetEnvironmentId=environments.some(item=>item.id==='default')?'default':environments[0]?.id||'default';
+    if(activeEnvironmentId!==targetEnvironmentId){releaseSecretVaultMemory();environmentChanged=true;}
+    activeEnvironmentId=targetEnvironmentId;
+  }
+  renderEnvironmentSelect();if(environmentChanged)void loadSecretVaultForActiveEnvironment();
   byId('base-url').value=entry.baseUrl||'';baseUrlAuto=false;byId('allow-insecure-http').checked=entry.allowInsecureHttp===true;method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(entry.method)?entry.method:'GET';
   const parts=splitRoute(sanitizeRoute(String(entry.route||'')).value);route.value=parts.route;renderQueryParams(parts.params);
   byId('headers').value=sanitizeHeaders(String(entry.headers||'')).value;body.value=entry.tokenRequest?'':sanitizeBody(String(entry.body||'')).value;applyBodyMode(entry.bodyMode);renderMultipartFields(entry.multipartFields||[]);renderGraphqlFields(entry);if(entry.collectionId&&findCollection(entry.collectionId)){const parent=findCollection(entry.collectionId),folder=findFolder(parent,entry.folderId);selectedContainer={collectionId:entry.collectionId,folderId:folder?.id||''};}
@@ -965,7 +974,7 @@ function applyHistoryEntry(entry,notify=true){
 byId('token-helper').open=!!entry.tokenRequest&&!isOAuth2;byId('oauth2-helper').open=isOAuth2;
 if(isOAuth2){byId('oauth2-token-url').value=entry.oauthTokenUrl||((entry.baseUrl||'')+(entry.route||''));byId('oauth2-client-id').value=entry.oauthClientId||'';byId('oauth2-client-secret').value='';byId('oauth2-scope').value=entry.oauthScope||'';byId('oauth2-client-auth-method').value=entry.oauthClientAuthMethod==='client_secret_post'?'client_secret_post':'client_secret_basic';byId('oauth2-allow-insecure-http').checked=entry.allowInsecureHttp===true;}
 updateOAuth2TokenButton();void renderOAuth2TokenStatus();clearWriteConfirmation();updateGuard();updateCopyButtons();renderBodyHighlight();updateJsonTools();
-  byId('capture-response-variable').checked=!!entry.captureResponseVariable;byId('response-variable-name').value=entry.responseVariableName||'token';byId('response-value-source').value=entry.responseValueSource==='text'?'text':'json';byId('response-json-path').value=entry.responseJsonPath||'access_token';byId('response-success-only').checked=entry.responseSuccessOnly!==false;byId('response-variable-result').hidden=true;updateResponseCaptureUi();setResponseTests(entry.responseTests||[]);
+  byId('capture-response-variable').checked=!!entry.captureResponseVariable;byId('response-variable-name').value=entry.responseVariableName||'token';byId('response-value-source').value=entry.responseValueSource==='text'?'text':'json';byId('response-json-path').value=entry.responseJsonPath||'access_token';byId('response-success-only').checked=entry.responseSuccessOnly!==false;byId('response-capture-target').value=entry.responseCaptureTarget==='vault'?'vault':'environment';byId('response-variable-result').hidden=true;updateResponseCaptureUi();setResponseTests(entry.responseTests||[]);
   activeSaved=null;byId('request-title').textContent='Histórico · '+(entry.route||'request');setEditorTab('params');
   if(notify)showToast('Requisição carregada',hasAuthCredentials(entry)?authTypeLabel(entry)+' recuperada; credenciais podem expirar.':'Params, headers e body recuperados. Credenciais foram omitidas ou precisam ser informadas.','info');
 }
@@ -1025,7 +1034,7 @@ function selectContainer(collectionId,folderId=''){
 function findFolderPath(collection,id,path=[]){for(const folder of collection?.folders||[]){const next=[...path,folder.name];if(folder.id===id)return next;const found=findFolderPath(folder,id,next);if(found)return found;}return null;}
 function runnerWriteCases(cases){return cases.filter(item=>!item.request.tokenRequest&&writeMethods.has(String(item.request.method||'GET').toUpperCase()));}
 async function confirmRunnerRemoteHttp(cases){
-  const origins=RunnerLogic.remoteHttpOrigins(cases,getEnvironment().variables||{}),queryKeyCases=cases.filter(item=>item?.request?.authType==='apiKey'&&item.request.apiKeyLocation==='query');
+  const origins=RunnerLogic.remoteHttpOrigins(cases,getEnvironment().variables||{},vaultResolutionInput()).map(origin=>redactVaultValues(origin)),queryKeyCases=cases.filter(item=>item?.request?.authType==='apiKey'&&item.request.apiKeyLocation==='query');
   if(!origins.length&&!queryKeyCases.length)return true;
   const warnings=[];
   if(origins.length)warnings.push('Headers, bodies e credenciais podem ser observados na rede.');
@@ -1033,14 +1042,20 @@ async function confirmRunnerRemoteHttp(cases){
   const detail=[...origins,...(queryKeyCases.length?['API Key em query: '+queryKeyCases.length+' request(s)']:[])].join('\n');
   return confirmWithDialog({eyebrow:'TRANSPORTE E CREDENCIAIS',title:origins.length?'Executar Runner sem HTTPS?':'Executar Runner com API Key na query?',description:'Confira os destinos antes da execução.',detail,warning:warnings.join(' '),confirmLabel:'Executar Runner',danger:true});
 }
+function runnerPreviewDataset(){
+  try{return RunnerLogic.parseDataSets(byId('runner-datasets')?.value||'')[0]||{};}catch{return{};}
+}
 function renderRunnerPlan(entries){
-  const list=byId('runner-plan-list');list.replaceChildren();
+  const list=byId('runner-plan-list'),previewDataset=runnerPreviewDataset();
+  list.replaceChildren();
   for(const entry of entries){
     const row=document.createElement('div');row.className='runner-plan-item';
     const badge=document.createElement('span');badge.className=`method-dot ${String(entry.request.method||'GET').toLowerCase()}`;badge.textContent=String(entry.request.method||'GET').toUpperCase();
     const copy=document.createElement('div');copy.className='runner-item-copy';
     const name=document.createElement('strong');name.textContent=entry.request.name||entry.request.route||'Request';copy.append(name);
     const path=document.createElement('small');path.textContent=entry.request.tokenRequest?'Credenciais exigem o fluxo Solicitar token.':entry.path;copy.append(path);
+    const origins=inspectSavedRequestOrigins(entry.request,previewDataset,entry.authScopes);
+    if(origins.length){const originNote=document.createElement('small');originNote.className='runner-origin-note';originNote.textContent='Origens sem valores: '+formatInspectorOrigins(origins);copy.append(originNote);}
     row.append(badge,copy);list.append(row);
   }
 }
@@ -1094,7 +1109,7 @@ async function confirmRunnerWrites(cases){
   }
   const destinations=[];
   for(const item of writes.slice(0,12)){
-    try{const request=RunnerLogic.prepareSavedRequest(item.request,getEnvironment().variables||{},item.dataset,true,item.authScopes);destinations.push(`${request.method} ${sanitizeBase(request.baseUrl).value}${sanitizeRoute(request.route).value}`);}
+    try{const request=RunnerLogic.prepareSavedRequest(item.request,getEnvironment().variables||{},item.dataset,true,item.authScopes,vaultResolutionInput());destinations.push(`${request.method} ${redactVaultValues(sanitizeBase(request.baseUrl).value)}${redactVaultValues(sanitizeRoute(request.route).value)}`);}
     catch{destinations.push(`${String(item.request.method).toUpperCase()} · ${item.path}`);}
   }
   if(writes.length>destinations.length)destinations.push(`… e mais ${writes.length-destinations.length} gravações`);
@@ -1111,11 +1126,15 @@ async function runRunnerCases(cases,options,allowWrites){
     if(runnerStopRequested){for(let rest=index;rest<runCases.length;rest++){setRunnerCase(runCases[rest],'skipped','Parada solicitada');skipped++;}break;}
     byId('runner-progress-label').textContent=`${index+1} / ${runCases.length} · Conjunto ${item.datasetNumber}`;setRunnerCase(item,'running','Executando…');
     const requestStarted=performance.now();let caseFailed=false,caseStatus='Falha',caseDetail='',responseBody='';
+    const origins=inspectSavedRequestOrigins(item.request,item.dataset||{},item.authScopes);
     try{
-      const request=RunnerLogic.prepareSavedRequest(item.request,getEnvironment().variables||{},item.dataset,allowWrites,item.authScopes);request.environmentId=activeEnvironmentId||'default';
+      const request=RunnerLogic.prepareSavedRequest(item.request,getEnvironment().variables||{},item.dataset,allowWrites,item.authScopes,vaultResolutionInput());request.environmentId=activeEnvironmentId||'default';
+      if(request.captureResponseVariable&&request.responseCaptureTarget==='vault')assertVaultCaptureAvailable(request);
       const {proxyStatus,result}=await executeApiRequest(request),status=Number(result.status)||0,tests=RunnerLogic.evaluateResponseTests(request.responseTests,result),failedTests=tests.filter(item=>!item.passed),hasTests=tests.length>0;
       responseBody=runnerBodyPreview(result.body);caseStatus=status?`${status} ${result.reason||''}`.trim():`Proxy ${proxyStatus}`;
       const details=[];const httpFailed=!!result.error||proxyStatus>=400||status<200||status>=300&&!hasTests;
+      if(origins.length)details.push('Origens sem valores: '+formatInspectorOrigins(origins)+'.');
+      const vaultOrigins=Object.keys(request.resolutionProvenance||{}).filter(name=>request.resolutionProvenance[name]==='vault');if(vaultOrigins.length)details.push('Cofre usado para: '+vaultOrigins.join(', ')+'.');
       if(result.error||proxyStatus>=400)details.push(result.error||`Servidor local respondeu HTTP ${proxyStatus}.`);
       else if(status<200||status>=300&&!hasTests)details.push('A request não retornou status 2xx.');
       if(failedTests.length)details.push('Falharam: '+failedTests.map(item=>item.label).join('; '));
@@ -1123,10 +1142,10 @@ async function runRunnerCases(cases,options,allowWrites){
       if(!result.error&&proxyStatus<400&&status>=200&&status<300){
         const captured=await captureResponseVariable(request,result,true);
         if(!captured.ok){caseFailed=true;details.push(captured.error||'Falha ao salvar variável de resposta.');}
-        else if(captured.captured)details.push(`{{${captured.name}}} salva no ambiente ${captured.environment}.`);
+        else if(captured.captured)details.push(captured.target==='vault'?`{{${captured.name}}} salva no cofre do ambiente ${captured.environment}.`:`{{${captured.name}}} salva no ambiente ${captured.environment}.`);
       }
       caseFailed=caseFailed||httpFailed||failedTests.length>0;caseDetail=details.join(' ');
-    }catch(error){caseFailed=true;caseStatus='Falha';caseDetail=error.message||'Não foi possível preparar ou enviar esta request.';}
+    }catch(error){caseFailed=true;caseStatus='Falha';caseDetail=[origins.length?'Origens sem valores: '+formatInspectorOrigins(origins)+'.':'',error.message||'Não foi possível preparar ou enviar esta request.'].filter(Boolean).join(' ');}
     caseStatus+=` · ${Math.round(performance.now()-requestStarted)} ms`;
     processed++;progress.value=processed;
     if(caseFailed){failed++;runnerFailedCases.push(item);setRunnerCase(item,'failure',caseStatus,caseDetail,responseBody);}
@@ -1160,7 +1179,7 @@ async function rerunRunnerFailures(){
 function activeWorkspaceTab(){return workspaceTabs.find(tab=>tab.id===activeWorkspaceTabId)||null;}
 function captureResponseTestDraft(){return[...byId('response-tests-list').querySelectorAll('.response-test-row')].map(row=>({id:row.dataset.testId,target:row.querySelector('.response-test-target').value,path:row.querySelector('.response-test-path').value,operator:row.querySelector('.response-test-operator').value,expected:row.querySelector('.response-test-expected').value}));}
 function captureWorkspaceDraft(){
-  return{title:byId('request-title').textContent||'Nova requisição',method:method.value,baseUrl:byId('base-url').value,baseUrlAuto,allowInsecureHttp:byId('allow-insecure-http').checked,route:route.value,params:[...queryParams.children].map(row=>[row.querySelector('[data-query-name]').value,row.querySelector('[data-query-value]').value]),headers:byId('headers').value,body:byId('body-mode').value==='graphql'?'':body.value,bodyMode:byId('body-mode').value,multipartFields:getPersistableMultipartFields(true).fields,...normalizePersistableGraphqlFields(getGraphqlFieldsFromForm()),authMode:authModeFromForm(),...authFieldsFromForm(value=>value,true),saveBearerToken:byId('save-token-history').checked,tokenClientId:byId('token-client-id').value,tokenCredentialMode:byId('token-credential-mode').value,tokenHelperOpen:byId('token-helper').open,captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value,responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value,responseSuccessOnly:byId('response-success-only').checked,responseTests:captureResponseTestDraft(),activeSaved:activeSaved?{...activeSaved}:null,collectionId:selectedContainer.collectionId,folderId:selectedContainer.folderId,editorSection:document.querySelector('[data-editor-tab][aria-selected="true"]')?.dataset.editorTab||'params'};
+  return{title:byId('request-title').textContent||'Nova requisição',method:method.value,baseUrl:byId('base-url').value,baseUrlAuto,allowInsecureHttp:byId('allow-insecure-http').checked,route:route.value,params:[...queryParams.children].map(row=>[row.querySelector('[data-query-name]').value,row.querySelector('[data-query-value]').value]),headers:byId('headers').value,body:byId('body-mode').value==='graphql'?'':body.value,bodyMode:byId('body-mode').value,multipartFields:getPersistableMultipartFields(true).fields,...normalizePersistableGraphqlFields(getGraphqlFieldsFromForm()),authMode:authModeFromForm(),...authFieldsFromForm(value=>value,true),saveBearerToken:byId('save-token-history').checked,tokenClientId:byId('token-client-id').value,tokenCredentialMode:byId('token-credential-mode').value,tokenHelperOpen:byId('token-helper').open,captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value,responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value,responseSuccessOnly:byId('response-success-only').checked,responseCaptureTarget:byId('response-capture-target').value==='vault'?'vault':'environment',responseTests:captureResponseTestDraft(),activeSaved:activeSaved?{...activeSaved}:null,collectionId:selectedContainer.collectionId,folderId:selectedContainer.folderId,editorSection:document.querySelector('[data-editor-tab][aria-selected="true"]')?.dataset.editorTab||'params'};
 }
 function restoreResponseTestDraft(tests){
   const list=byId('response-tests-list');list.replaceChildren();
@@ -1438,7 +1457,7 @@ function exportCollectionNode(node,includeBearer,depth=0){
       return{id:request.id,name:String(request.name||'Request').slice(0,100),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET',
         baseUrl:base.value,route:route.value,headers:bodyModeHeaders(headers.value,request.bodyMode),body:payload.value,bodyMode:normalizeBodyMode(request.bodyMode),multipartFields:multipart.fields,graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,...exportAuthConfig(request,includeBearer,true),
         allowInsecureHttp:request.allowInsecureHttp===true,tokenRequest:!!request.tokenRequest,tokenClientId:String(request.tokenClientId||''),tokenCredentialMode:request.tokenCredentialMode==='query'?'query':'body',
-        captureResponseVariable:!!request.captureResponseVariable,responseVariableName:String(request.responseVariableName||'token'),responseValueSource:request.responseValueSource==='text'?'text':'json',responseJsonPath:String(request.responseJsonPath||'access_token'),responseSuccessOnly:request.responseSuccessOnly!==false,responseTests:RunnerLogic.normalizeResponseTests(request.responseTests),responseExamples:RunnerLogic.normalizeResponseExamples(request.responseExamples)};
+        captureResponseVariable:!!request.captureResponseVariable,responseVariableName:String(request.responseVariableName||'token'),responseValueSource:request.responseValueSource==='text'?'text':'json',responseJsonPath:String(request.responseJsonPath||'access_token'),responseSuccessOnly:request.responseSuccessOnly!==false,responseCaptureTarget:request.responseCaptureTarget==='vault'?'vault':'environment',responseTests:RunnerLogic.normalizeResponseTests(request.responseTests),responseExamples:RunnerLogic.normalizeResponseExamples(request.responseExamples)};
     }),
     folders:(node.folders||[]).map(folder=>exportCollectionNode(folder,includeBearer,depth+1))
   };
@@ -1764,7 +1783,7 @@ function normalizeImportedNode(source,keepAuth,depth=0,isRoot=false,enableCaptur
     return{id:newId(),name:String(request.name||'Request').slice(0,100),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET',
       baseUrl:base.value,route:route.value,headers:bodyModeHeaders(headers.value,request.bodyMode),body:payload.value,bodyMode:normalizeBodyMode(request.bodyMode),multipartFields:multipart.fields,graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,...savedAuth,
       allowInsecureHttp:allowInsecureHttp&&request.allowInsecureHttp===true,tokenRequest:!!request.tokenRequest,tokenClientId:String(request.tokenClientId||'').slice(0,512),tokenCredentialMode:request.tokenCredentialMode==='query'?'query':'body',
-      captureResponseVariable:enableCapture&&!!request.captureResponseVariable,responseVariableName:String(request.responseVariableName||'token').slice(0,80),responseValueSource:request.responseValueSource==='text'?'text':'json',responseJsonPath:String(request.responseJsonPath||'access_token').slice(0,1000),responseSuccessOnly:request.responseSuccessOnly!==false,
+      captureResponseVariable:enableCapture&&!!request.captureResponseVariable,responseVariableName:String(request.responseVariableName||'token').slice(0,80),responseValueSource:request.responseValueSource==='text'?'text':'json',responseJsonPath:String(request.responseJsonPath||'access_token').slice(0,1000),responseSuccessOnly:request.responseSuccessOnly!==false,responseCaptureTarget:request.responseCaptureTarget==='vault'?'vault':'environment',
       responseTests:enableCapture?RunnerLogic.normalizeResponseTests(request.responseTests).map(rule=>({...rule,id:newId()})):[],responseExamples:RunnerLogic.normalizeResponseExamples(request.responseExamples).map(example=>({...example,id:newId()}))};
   });
   safe.folders=source.folders.map(folder=>normalizeImportedNode(folder,keepAuth,depth+1,false,enableCapture,allowInsecureHttp));return safe;
@@ -1840,7 +1859,7 @@ function getSnapshot(){
   if(bodyMode==='graphql'){if(method.value!=='POST')throw Error('GraphQL usa POST no Vortix.');RunnerLogic.buildGraphqlBody(graphqlInput.graphqlQuery,graphqlInput.graphqlVariables,graphqlInput.graphqlOperationName);}
   const saveAuth=byId('save-token-history').checked,auth=RunnerLogic.persistAuthFields({...authFieldsFromForm(value=>value,true),authMode:authModeFromForm()},saveAuth),authOmitted=auth.authOmitted;delete auth.authOmitted;const multipart=getPersistableMultipartFields(true),graphql=normalizePersistableGraphqlFields(graphqlInput);
   return{method:method.value,baseUrl:base.value,route:path.value,headers:headers.value,body:bodyMode==='graphql'?'':payload.value,bodyMode,multipartFields:multipart.fields,graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,...auth,allowInsecureHttp:byId('allow-insecure-http').checked,
-    captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseTests,
+    captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseCaptureTarget:byId('response-capture-target').value==='vault'?'vault':'environment',responseTests,
     redacted:base.redacted||path.redacted||headers.redacted||payload.redacted||authOmitted||multipart.redacted||graphql.redacted};
 }
 async function saveCollectionRequest(event){
@@ -1865,7 +1884,7 @@ function loadCollectionRequest(request,collectionId,folderId,notify=true){
   const split=splitRoute(request.route||'');route.value=split.route;renderQueryParams(split.params);byId('headers').value=request.headers||'';body.value=request.body||'';applyBodyMode(request.bodyMode);renderMultipartFields(request.multipartFields||[]);renderGraphqlFields(request);selectedContainer={collectionId,folderId};applyAuthFields(request);
   byId('token-client-id').value=request.tokenRequest?request.tokenClientId||'':'';byId('token-client-secret').value='';byId('token-credential-mode').value=request.tokenCredentialMode==='query'?'query':'body';byId('token-helper').open=!!request.tokenRequest;
   if(request.tokenRequest){byId('token-route').value=split.route;byId('token-client-id-field').value=request.tokenClientIdField||'client_id';byId('token-client-secret-field').value=request.tokenClientSecretField||'client_secret';tokenRequestConfig=RunnerLogic.normalizeTokenRequestConfig({route:split.route,clientIdField:byId('token-client-id-field').value,clientSecretField:byId('token-client-secret-field').value,credentialMode:byId('token-credential-mode').value});}
-  byId('capture-response-variable').checked=!!request.captureResponseVariable;byId('response-variable-name').value=request.responseVariableName||'token';byId('response-value-source').value=request.responseValueSource==='text'?'text':'json';byId('response-json-path').value=request.responseJsonPath||'access_token';byId('response-success-only').checked=request.responseSuccessOnly!==false;byId('response-variable-result').hidden=true;updateResponseCaptureUi();setResponseTests(request.responseTests||[]);
+  byId('capture-response-variable').checked=!!request.captureResponseVariable;byId('response-variable-name').value=request.responseVariableName||'token';byId('response-value-source').value=request.responseValueSource==='text'?'text':'json';byId('response-json-path').value=request.responseJsonPath||'access_token';byId('response-success-only').checked=request.responseSuccessOnly!==false;byId('response-capture-target').value=request.responseCaptureTarget==='vault'?'vault':'environment';byId('response-variable-result').hidden=true;updateResponseCaptureUi();setResponseTests(request.responseTests||[]);
   updateTokenButton();clearWriteConfirmation();updateGuard();updateCopyButtons();renderBodyHighlight();updateJsonTools();activeSaved={id:request.id,name:request.name,collectionId,folderId};
   byId('request-title').textContent=request.name||'Requisição salva';setEditorTab('params');renderCollectionTree();
   if(notify)showToast('Requisição carregada',hasAuthCredentials(request)?authTypeLabel(request)+' recuperada do banco local; pode expirar.':'Params, headers e body recuperados da coleção.','success',3500);
@@ -1875,6 +1894,7 @@ function writeConfirmationValid(){return byId('confirm-test-data').checked&&byId
 function updateGuard(){
   const isWrite=writeMethods.has(method.value);method.className=`method-select method-${method.value.toLowerCase()}`;
   writeGuard.hidden=!isWrite;sendButton.disabled=!route.value.trim()||(isWrite&&!writeConfirmationValid());
+  refreshRequestInspector();
 }
 function escHtml(value){return String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');}
 function highlightJson(value){
@@ -2075,16 +2095,124 @@ async function saveTheme(name){
   catch(error){showToast('Tema aplicado',error.message||'Não foi possível salvar a preferência local.','warning');}
 }
 function getEnvironment(){return environments.find(x=>x.id===activeEnvironmentId)||environments[0]||{variables:{}};}
+function secretVaultStorageKey(environmentId=activeEnvironmentId){return LOCAL_SECRET_VAULT_PREFIX+(environmentId||'default');}
+function vaultResolutionInput(){
+  if(secretVaultLoading||secretVaultUnavailable)return{unavailable:true};
+  return secretVaultValues?{...secretVaultValues}:{locked:true,names:[...secretVaultNames]};
+}
 function applyEnvironment(value){
-  const vars=getEnvironment().variables||{},missing=new Set();const resolved=String(value??'').replace(/\{\{\s*([^{}]+?)\s*\}\}/g,(whole,key)=>{if(Object.hasOwn(vars,key))return String(vars[key]);missing.add(key);return whole;});
-  if(missing.size)throw Error('Variável(veis) sem valor no ambiente: '+[...missing].join(', '));return resolved;
+  const result=RunnerLogic.resolveTemplateWithProvenance(value,getEnvironment().variables||{},{},vaultResolutionInput());
+  Object.assign(lastResolutionProvenance,result.provenance);
+  return result.text;
+}
+function redactVaultValues(value){return RunnerLogic.redactSecretValues(value,secretVaultValues);}
+function addTemplateField(fields,field,value){
+  if(value==null)return;
+  const text=String(value);
+  if(text)fields[field]=text;
+}
+function templateFieldsFromForm(){
+  const fields={};
+  addTemplateField(fields,'baseUrl',byId('base-url')?.value);
+  addTemplateField(fields,'route',route?.value);
+  const params=[...queryParams.children].map(row=>{
+    const name=row.querySelector('[data-query-name]')?.value||'',value=row.querySelector('[data-query-value]')?.value||'';
+    return name||value?`${name}=${value}`:'';
+  }).filter(Boolean).join('\n');
+  addTemplateField(fields,'params',params);
+  addTemplateField(fields,'headers',byId('headers')?.value);
+  const auth=resolveFormAuth();
+  if(auth.authType==='bearer')addTemplateField(fields,'auth.bearerToken',auth.bearerToken);
+  if(auth.authType==='basic'){addTemplateField(fields,'auth.basicUsername',auth.basicUsername);addTemplateField(fields,'auth.basicPassword',auth.basicPassword);}
+  if(auth.authType==='apiKey'){addTemplateField(fields,'auth.apiKeyName',auth.apiKeyName);addTemplateField(fields,'auth.apiKeyValue',auth.apiKeyValue);}
+  const mode=normalizeBodyMode(byId('body-mode')?.value);
+  if(mode==='graphql'){
+    addTemplateField(fields,'graphql.query',byId('graphql-query')?.value);
+    addTemplateField(fields,'graphql.variables',byId('graphql-variables')?.value);
+    addTemplateField(fields,'graphql.operationName',byId('graphql-operation-name')?.value);
+  }else if(mode==='multipart'){
+    for(const [index,entry] of readMultipartFieldEntries().entries()){
+      if(entry.field.type!=='text')continue;
+      addTemplateField(fields,`multipart[${index}].name`,entry.field.name);
+      addTemplateField(fields,`multipart[${index}].value`,entry.field.value);
+    }
+  }else addTemplateField(fields,'body',byId('body')?.value);
+  return fields;
+}
+function templateFieldsFromSavedRequest(request={},authScopes=[]){
+  const fields={};
+  addTemplateField(fields,'baseUrl',request?.baseUrl);
+  addTemplateField(fields,'route',request?.route);
+  addTemplateField(fields,'headers',request?.headers);
+  const auth=RunnerLogic.resolveInheritedAuth(request||{},authScopes);
+  if(auth.authType==='bearer')addTemplateField(fields,'auth.bearerToken',auth.bearerToken);
+  if(auth.authType==='basic'){addTemplateField(fields,'auth.basicUsername',auth.basicUsername);addTemplateField(fields,'auth.basicPassword',auth.basicPassword);}
+  if(auth.authType==='apiKey'){addTemplateField(fields,'auth.apiKeyName',auth.apiKeyName);addTemplateField(fields,'auth.apiKeyValue',auth.apiKeyValue);}
+  const mode=normalizeBodyMode(request?.bodyMode);
+  if(mode==='graphql'){
+    addTemplateField(fields,'graphql.query',request?.graphqlQuery);
+    addTemplateField(fields,'graphql.variables',request?.graphqlVariables);
+    addTemplateField(fields,'graphql.operationName',request?.graphqlOperationName);
+  }else if(mode==='multipart'){
+    for(const [index,field] of (request?.multipartFields||[]).entries()){
+      if(field?.type!=='text')continue;
+      addTemplateField(fields,`multipart[${index}].name`,field.name);
+      addTemplateField(fields,`multipart[${index}].value`,field.value);
+    }
+  }else addTemplateField(fields,'body',request?.body);
+  return fields;
+}
+function inspectorSourceLabel(source){return({environment:'environment',vault:'vault',dataset:'dataset',missing:'missing',locked:'locked',unavailable:'unavailable'})[source]||String(source);}
+function formatInspectorOrigins(references){return(references||[]).map(item=>`${item.field}:{{${item.name}}}=${inspectorSourceLabel(item.source)}`).join(', ');}
+function inspectSavedRequestOrigins(request,dataset={},authScopes=[]){
+  try{return RunnerLogic.inspectTemplateReferences(templateFieldsFromSavedRequest(request,authScopes),getEnvironment().variables||{},dataset||{},vaultResolutionInput());}
+  catch{return[];}
+}
+function refreshRequestInspector(){
+  const output=byId('request-inspector-output');if(!output)return;
+  const count=byId('request-inspector-count');let references=[];
+  try{references=RunnerLogic.inspectTemplateReferences(templateFieldsFromForm(),getEnvironment().variables||{},{},vaultResolutionInput());}
+  catch(error){output.replaceChildren();const item=document.createElement('li');item.className='request-inspector-empty';item.textContent='Inspeção indisponível: '+(error.message||'revise os campos.');output.append(item);if(count)count.textContent='–';return;}
+  output.replaceChildren();
+  if(count)count.textContent=String(references.length);
+  if(!references.length){const item=document.createElement('li');item.className='request-inspector-empty';item.textContent='Nenhuma referência {{...}} nos campos desta request.';output.append(item);return;}
+  for(const reference of references){
+    const item=document.createElement('li');item.dataset.source=reference.source;
+    item.textContent=`${reference.field} · {{${reference.name}}} · ${inspectorSourceLabel(reference.source)}`;
+    output.append(item);
+  }
+}
+function vaultCaptureError(request){
+  return RunnerLogic.vaultCaptureEnvironmentError({
+    loading:secretVaultLoading,
+    unavailable:!!secretVaultUnavailable,
+    unlocked:!!(secretVault&&secretVaultValues),
+    activeEnvironmentId:activeEnvironmentId||'default',
+    vaultEnvironmentId:secretVaultEnvironmentId,
+    requestEnvironmentId:request?.environmentId
+  });
+}
+function assertVaultCaptureAvailable(request){const message=vaultCaptureError(request);if(message)throw Error(message);}
+function releaseSecretVaultMemory(){
+  const vault=secretVault;
+  if(vault){try{void vault.lock();}catch{}}
+  secretVault=null;secretVaultValues=null;secretVaultEnvelope=null;secretVaultNames=[];secretVaultUnavailable=null;secretVaultLoading=true;secretVaultEnvironmentId='';
 }
 function renderEnvironmentSelect(){
   const select=byId('environment-select');select.replaceChildren();const groups=new Map();
   for(const env of environments){const group=String(env.group||'Geral').trim()||'Geral';if(!groups.has(group)){const optionGroup=document.createElement('optgroup');optionGroup.label=group;groups.set(group,optionGroup);select.append(optionGroup);}
     const option=document.createElement('option');option.value=env.id;option.textContent=env.name;option.selected=env.id===activeEnvironmentId;groups.get(group).append(option);}
   void renderCookieJar();
-}async function chooseEnvironment(id){if(!environments.some(x=>x.id===id))return;activeEnvironmentId=id;clearGraphqlSchema('Ambiente alterado; carregue o schema GraphQL novamente.');await dbWrite('settings',{key:'activeEnvironmentId',value:id});renderEnvironmentSelect();if(baseUrlAuto)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';await loadTokenRequestConfig();await loadOAuth2TokenConfig();await loadOAuthPkceConfig();syncActiveWorkspaceTab(false);showToast('Ambiente alterado',`Requests usarão “${getEnvironment().name}”.`,'info',3000);}
+}async function chooseEnvironment(id){
+  if(!environments.some(x=>x.id===id))return;
+  if(id===activeEnvironmentId)return;
+  releaseSecretVaultMemory();
+  activeEnvironmentId=id;clearGraphqlSchema('Ambiente alterado; carregue o schema GraphQL novamente.');
+  await dbWrite('settings',{key:'activeEnvironmentId',value:id});renderEnvironmentSelect();await loadSecretVaultForActiveEnvironment();
+  if(baseUrlAuto)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';
+  await loadTokenRequestConfig();await loadOAuth2TokenConfig();await loadOAuthPkceConfig();syncActiveWorkspaceTab(false);
+  showToast('Ambiente alterado',`Requests usarão “${getEnvironment().name}”.`,'info',3000);
+}
 
 function cookieJarStorageKey(){return'cookiejar:'+(activeEnvironmentId||'default');}
 async function renderCookieJar(){
@@ -2139,7 +2267,149 @@ function renderEnvironmentDraft(){
     card.append(heading,groupRow,varsHeading,vars,add);list.append(card);
   }
 }
-function openSettingsDialog(){syncHistorySettingsControls();byId('settings-dialog').showModal();}
+function renderSecretVaultUi(){
+  const status=byId('secret-vault-status');if(!status)return;
+  const environment=getEnvironment(),unavailable=!!secretVaultUnavailable,loading=!!secretVaultLoading;
+  const hasVault=unavailable||!!secretVaultEnvelope||secretVaultNames.length>0,unlocked=!!secretVaultValues&&!unavailable&&!loading;
+  byId('secret-vault-locked').hidden=unlocked;byId('secret-vault-unlocked').hidden=!unlocked;
+  byId('secret-vault-create').disabled=secretVaultBusy||loading||unavailable||hasVault;
+  byId('secret-vault-unlock').disabled=secretVaultBusy||loading||unavailable||!hasVault;
+  byId('secret-vault-passphrase').disabled=secretVaultBusy||loading||unavailable;
+  byId('secret-vault-add').disabled=secretVaultBusy||loading||unavailable||!unlocked;
+  byId('secret-vault-lock').disabled=secretVaultBusy||loading||unavailable||!unlocked;
+  byId('secret-vault-remove').disabled=secretVaultBusy||loading;
+  byId('secret-vault-name').disabled=secretVaultBusy||loading||unavailable||!unlocked;
+  byId('secret-vault-value').disabled=secretVaultBusy||loading||unavailable||!unlocked;
+  const state=loading?'Carregando cofre':unavailable?'Cofre indisponível':unlocked?'Cofre desbloqueado':hasVault?'Cofre bloqueado':'Cofre ainda não criado';
+  const detail=loading?'Lendo o registro deste ambiente.':unavailable?secretVaultUnavailable:`${secretVaultNames.length} segredo${secretVaultNames.length===1?'':'s'}`;
+  status.textContent=`${state} · Ambiente “${environment.name||'ativo'}” · ${detail}`;
+  const list=byId('secret-vault-list');list.replaceChildren();
+  if(loading){const empty=document.createElement('li');empty.className='secret-vault-empty';empty.textContent='Lendo o cofre deste ambiente…';list.append(empty);return;}
+  if(unavailable){const empty=document.createElement('li');empty.className='secret-vault-empty';empty.textContent='Cofre indisponível. Os nomes e valores não são exibidos até a leitura ser confirmada.';list.append(empty);return;}
+  if(!secretVaultNames.length){const empty=document.createElement('li');empty.className='secret-vault-empty';empty.textContent=unlocked?'Nenhum segredo neste cofre.':'O cofre não tem segredos ou ainda não foi criado.';list.append(empty);return;}
+  for(const name of [...secretVaultNames].sort((left,right)=>left.localeCompare(right))){
+    const item=document.createElement('li');item.className='secret-vault-item';
+    const label=document.createElement('strong');label.textContent=name;label.title='Nome do segredo; o valor nunca é exibido.';
+    const actions=document.createElement('span');actions.className='secret-vault-item-actions';
+    if(unlocked){
+      const edit=document.createElement('button');edit.type='button';edit.className='text-button';edit.textContent='Editar';edit.setAttribute('aria-label','Editar segredo '+name);edit.onclick=()=>{byId('secret-vault-name').value=name;byId('secret-vault-name').dataset.editingName=name;byId('secret-vault-value').value='';byId('secret-vault-value').focus();};
+      const remove=document.createElement('button');remove.type='button';remove.className='text-button';remove.textContent='Remover';remove.setAttribute('aria-label','Remover segredo '+name);remove.onclick=()=>void removeSecretVaultEntry(name);
+      actions.append(edit,remove);
+    }
+    item.append(label,actions);list.append(item);
+  }
+}
+async function loadSecretVaultForActiveEnvironment(){
+  const expected=activeEnvironmentId||'default';
+  secretVault=null;secretVaultValues=null;secretVaultEnvelope=null;secretVaultNames=[];secretVaultUnavailable=null;secretVaultLoading=true;secretVaultEnvironmentId=expected;
+  renderSecretVaultUi();
+  try{
+    const record=await dbRead('settings',secretVaultStorageKey(expected));
+    if(expected!==secretVaultEnvironmentId)return;
+    if(record==null)return;
+    const envelope=record?.value?.envelope??record?.value;
+    if(!envelope||typeof envelope!=='object'||Array.isArray(envelope)||envelope.format!==RunnerLogic.localSecretVaultFormat||envelope.version!==1||envelope.cipher!=='AES-GCM-256'||envelope.kdf!=='PBKDF2-SHA-256'||!Number.isInteger(envelope.iterations)||envelope.iterations<1||typeof envelope.salt!=='string'||!envelope.salt||typeof envelope.iv!=='string'||!envelope.iv||typeof envelope.ciphertext!=='string'||!envelope.ciphertext){
+      secretVaultUnavailable='O registro do cofre está inválido; o envio com templates foi bloqueado até o registro ser corrigido ou removido.';
+      return;
+    }
+    secretVaultEnvelope=envelope;secretVaultNames=Array.isArray(envelope.names)?envelope.names.map(String):[];
+  }catch{
+    if(expected===secretVaultEnvironmentId)secretVaultUnavailable='Não foi possível ler o cofre deste ambiente; o envio com templates foi bloqueado para evitar usar valores obsoletos do ambiente.';
+  }finally{
+    if(expected===secretVaultEnvironmentId){secretVaultLoading=false;renderSecretVaultUi();refreshRequestInspector();}
+  }
+}
+async function persistSecretVaultSnapshot(){
+  const vault=secretVault;if(!vault)throw Error('Desbloqueie o cofre para salvar segredos.');
+  const environmentId=secretVaultEnvironmentId||activeEnvironmentId||'default',envelope=await vault.toEnvelope();
+  if(secretVault!==vault||secretVaultEnvironmentId!==environmentId)throw Error('O cofre ou o ambiente ativo mudou antes de salvar.');
+  await dbWrite('settings',{key:secretVaultStorageKey(environmentId),value:envelope});
+  if(secretVault!==vault||secretVaultEnvironmentId!==environmentId)throw Error('O cofre foi bloqueado antes de confirmar a gravação.');
+  secretVaultEnvelope=envelope;secretVaultNames=Array.isArray(envelope.names)?envelope.names.map(String):[];secretVaultUnavailable=null;
+}
+async function recoverSecretVaultAfterFailure(){
+  releaseSecretVaultMemory();
+  await loadSecretVaultForActiveEnvironment();
+  if(!secretVaultEnvelope&&!secretVaultUnavailable)secretVaultUnavailable='O cofre não foi confirmado no armazenamento; os valores em memória foram descartados. Recarregue a página para tentar novamente.';
+  renderSecretVaultUi();refreshRequestInspector();
+}
+async function createSecretVaultFromUi(){
+  if(secretVaultBusy)return;
+  if(secretVaultLoading||secretVaultUnavailable){showToast('Cofre indisponível','Não crie um cofre enquanto o registro atual não puder ser lido. Recarregue ou remova o registro inválido.','warning');return;}
+  if(secretVaultEnvelope){showToast('Cofre já existe','Desbloqueie o cofre existente ou remova-o antes de criar outro.','warning');return;}
+  const input=byId('secret-vault-passphrase'),passphrase=input.value;
+  if(Array.from(passphrase).length<RunnerLogic.workspaceBackupPassphraseMinLength){showToast('Senha muito curta','Use pelo menos '+RunnerLogic.workspaceBackupPassphraseMinLength+' caracteres.','warning');input.focus();return;}
+  secretVaultBusy=true;renderSecretVaultUi();
+  try{
+    const vault=await RunnerLogic.createLocalSecretVault(passphrase);secretVault=vault;secretVaultValues=Object.create(null);secretVaultEnvironmentId=activeEnvironmentId||'default';
+    await persistSecretVaultSnapshot();showToast('Cofre criado','Segredos deste ambiente serão cifrados com AES-GCM-256. A senha não é salva e não pode ser recuperada.','success',7000);
+  }catch(error){await recoverSecretVaultAfterFailure();showToast('Não foi possível criar o cofre','A criação não foi confirmada no armazenamento. '+(error.message||'Revise a senha e o armazenamento.'),'error');}
+  finally{secretVaultBusy=false;input.value='';renderSecretVaultUi();refreshRequestInspector();if(secretVaultValues)byId('secret-vault-value').focus();}
+}
+async function unlockSecretVaultFromUi(){
+  if(secretVaultBusy)return;
+  if(secretVaultLoading||secretVaultUnavailable){showToast('Cofre indisponível','Não desbloqueie um cofre cujo registro não pôde ser lido. Recarregue ou remova o registro.','warning');return;}
+  if(!secretVaultEnvelope){showToast('Crie o cofre','Defina uma senha de pelo menos 12 caracteres para criar o cofre deste ambiente.','info');return;}
+  const input=byId('secret-vault-passphrase'),passphrase=input.value,expected=secretVaultEnvironmentId||activeEnvironmentId||'default';
+  secretVaultBusy=true;renderSecretVaultUi();
+  try{
+    const vault=await RunnerLogic.openLocalSecretVault(JSON.stringify(secretVaultEnvelope),passphrase);
+    const names=await vault.names(),values=Object.create(null);
+    for(const name of names)Object.defineProperty(values,name,{value:await vault.get(name),enumerable:true,writable:true,configurable:true});
+    if(expected!==secretVaultEnvironmentId){await vault.lock();return;}
+    secretVault=vault;secretVaultValues=values;secretVaultNames=names;secretVaultEnvironmentId=expected;
+    showToast('Cofre desbloqueado','Segredos disponíveis apenas na memória desta aba até bloquear ou recarregar.','success');
+  }catch(error){secretVault=null;secretVaultValues=null;showToast('Não foi possível desbloquear',error.message||'Senha incorreta ou cofre danificado.','error');}
+  finally{secretVaultBusy=false;input.value='';renderSecretVaultUi();refreshRequestInspector();if(secretVaultValues)byId('secret-vault-name').focus();}
+}
+async function lockSecretVaultFromUi(){
+  if(secretVault){try{await secretVault.lock();}catch{}}
+  secretVault=null;secretVaultValues=null;renderSecretVaultUi();refreshRequestInspector();showToast('Cofre bloqueado','Os valores descriptografados foram removidos da memória desta aba.','info');
+}
+async function addSecretVaultEntry(event){
+  event?.preventDefault?.();
+  if(secretVaultLoading||secretVaultUnavailable){showToast('Cofre indisponível','Não adicione segredos enquanto o registro não puder ser confirmado.','warning');return;}
+  if(!secretVaultValues||!secretVault){showToast('Cofre bloqueado','Desbloqueie o cofre antes de adicionar segredos.','warning');return;}
+  const nameInput=byId('secret-vault-name'),valueInput=byId('secret-vault-value');
+  const name=nameInput.value.trim(),value=valueInput.value,editingName=nameInput.dataset.editingName||'',vault=secretVault,values=secretVaultValues;
+  if(!name){nameInput.focus();showToast('Nome obrigatório','Informe o nome do segredo.','warning');return;}
+  try{
+    await vault.set(name,value);
+    if(editingName&&editingName!==name)await vault.remove(editingName);
+    await persistSecretVaultSnapshot();
+    if(secretVault!==vault||secretVaultValues!==values)throw Error('O cofre foi bloqueado antes de confirmar a gravação.');
+    if(editingName&&editingName!==name)delete values[editingName];
+    Object.defineProperty(values,name,{value,writable:true,enumerable:true,configurable:true});
+    delete nameInput.dataset.editingName;nameInput.value='';valueInput.value='';nameInput.focus();
+    showToast('Segredo salvo',`{{${name}}} foi cifrado no cofre do ambiente “${getEnvironment().name}”. O valor não é exibido.`,'success');
+    renderSecretVaultUi();refreshRequestInspector();
+  }catch(error){await recoverSecretVaultAfterFailure();showToast('Segredo não salvo','O valor não foi confirmado no armazenamento e foi descartado. '+(error.message||'Não foi possível atualizar o cofre.'),'error');}
+}
+async function removeSecretVaultEntry(name){
+  if(secretVaultLoading||secretVaultUnavailable){showToast('Cofre indisponível','Não remova segredos enquanto o registro não puder ser confirmado.','warning');return;}
+  if(!secretVaultValues||!secretVault){showToast('Cofre bloqueado','Desbloqueie o cofre antes de remover segredos.','warning');return;}
+  if(!(await confirmWithDialog({eyebrow:'COFRE DE SEGREDOS',title:'Remover segredo?',description:`O nome “${name}” será removido do cofre do ambiente “${getEnvironment().name}”.`,warning:'O valor não pode ser recuperado depois desta ação.',confirmLabel:'Remover segredo',danger:true})))return;
+  const vault=secretVault,values=secretVaultValues;
+  try{
+    await vault.remove(name);await persistSecretVaultSnapshot();
+    if(secretVault!==vault||secretVaultValues!==values)throw Error('O cofre foi bloqueado antes de confirmar a gravação.');
+    delete values[name];
+    renderSecretVaultUi();refreshRequestInspector();showToast('Segredo removido',`O nome “${name}” saiu do cofre.`,'success');
+  }catch(error){await recoverSecretVaultAfterFailure();showToast('Segredo não removido','A remoção não foi confirmada no armazenamento. '+(error.message||'Não foi possível atualizar o cofre.'),'error');}
+}
+async function removeSecretVault(){
+  if(!secretVaultEnvelope&&!secretVaultNames.length&&!secretVaultUnavailable)return;
+  if(!(await confirmWithDialog({eyebrow:'COFRE DE SEGREDOS',title:'Remover o cofre deste ambiente?',description:`Todos os segredos do ambiente “${getEnvironment().name}” serão removidos do armazenamento local.`,warning:'A senha não é armazenada; sem o cofre, os valores não podem ser recuperados.',confirmLabel:'Remover cofre',danger:true})))return;
+  const environmentId=secretVaultEnvironmentId||activeEnvironmentId||'default';
+  releaseSecretVaultMemory();renderSecretVaultUi();
+  try{
+    await dbWrite('settings',secretVaultStorageKey(environmentId),true);
+    await loadSecretVaultForActiveEnvironment();
+    if(secretVaultEnvelope||secretVaultUnavailable)throw Error('O cofre ainda está presente após a remoção.');
+    showToast('Cofre removido','O cofre deste ambiente foi removido do armazenamento local.','success');
+  }catch(error){await recoverSecretVaultAfterFailure();showToast('Cofre não removido','O registro anterior foi recarregado ou bloqueado. '+(error.message||'Não foi possível atualizar o armazenamento.'),'error');}
+}
+function openSettingsDialog(){syncHistorySettingsControls();renderSecretVaultUi();byId('settings-dialog').showModal();}
 function openEnvironmentDialog(){environmentDraft=JSON.parse(JSON.stringify(environments));renderEnvironmentDraft();byId('environment-dialog').showModal();}
 function addEnvironmentDraft(){environmentDraft.push({id:newId(),name:'Novo ambiente',group:'Local',variables:{}});renderEnvironmentDraft();byId('environment-list').lastElementChild.querySelector('.environment-name').focus();}
 async function saveEnvironmentDraft(event){
@@ -2157,9 +2427,12 @@ async function saveEnvironmentDraft(event){
   }
   if(!next.length){showToast('Mantenha um ambiente','Crie pelo menos um ambiente.','error');return;}
   try{
-    const ids=new Set(next.map(x=>x.id));for(const env of environments)if(!ids.has(env.id)){await dbWrite('environments',env.id,true);await dbWrite('settings',TOKEN_REQUEST_CONFIG_KEY+':'+env.id,true);await dbWrite('settings',oauth2TokenConfigStorageKey(env.id),true);await dbWrite('settings',oauth2TokenMetadataStorageKey(env.id),true);await dbWrite('settings',oauthPkceConfigStorageKey(env.id),true);await dbWrite('settings','cookiejar:'+env.id,true);}
+    const ids=new Set(next.map(x=>x.id)),removedIds=new Set(environments.filter(env=>!ids.has(env.id)).map(env=>env.id));
+    if(removedIds.has(secretVaultEnvironmentId)||removedIds.has(activeEnvironmentId||'default'))releaseSecretVaultMemory();
+    for(const env of environments)if(!ids.has(env.id)){await dbWrite('environments',env.id,true);await dbWrite('settings',TOKEN_REQUEST_CONFIG_KEY+':'+env.id,true);await dbWrite('settings',oauth2TokenConfigStorageKey(env.id),true);await dbWrite('settings',oauth2TokenMetadataStorageKey(env.id),true);await dbWrite('settings',oauthPkceConfigStorageKey(env.id),true);await dbWrite('settings','cookiejar:'+env.id,true);await dbWrite('settings',secretVaultStorageKey(env.id),true);}
     for(const env of next)await dbWrite('environments',env);environments=next;
     if(!environments.some(x=>x.id===activeEnvironmentId))activeEnvironmentId=environments[0].id;
+    if(!next.some(env=>env.id===secretVaultEnvironmentId))await loadSecretVaultForActiveEnvironment();
     environmentDraft=[];await dbWrite('settings',{key:'activeEnvironmentId',value:activeEnvironmentId});renderEnvironmentSelect();await loadTokenRequestConfig();await loadOAuth2TokenConfig();await loadOAuthPkceConfig();
     if(baseUrlAuto)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';
     byId('environment-dialog').close();showToast('Ambientes salvos','Grupos e variáveis persistidos no banco local.','success');
@@ -2267,7 +2540,7 @@ async function simulateSavedResponseExample(exampleId){
   const results=RunnerLogic.evaluateResponseTests(getResponseTestsFromForm(),mock);renderResponseTestResults(results);
   const failed=results.filter(item=>!item.passed).length;
   showToast(failed?'Mock executado; testes falharam':'Resposta simulada',failed?`${results.length-failed}/${results.length} verificações passaram. Nenhuma API foi chamada.`:`HTTP ${mock.status}. Nenhuma API foi chamada.`,failed?'warning':'info');
-  await captureResponseVariable({captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked},mock);
+  await captureResponseVariable({captureResponseVariable:byId('capture-response-variable').checked,environmentId:activeEnvironmentId||'default',responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseCaptureTarget:byId('response-capture-target').value==='vault'?'vault':'environment'},mock);
 }
 function updateCopyButtons(){
   const headers=byId('response-headers');byId('copy-headers').disabled=headers.classList.contains('empty')||!headers.textContent.trim();
@@ -2291,6 +2564,7 @@ function validateResponseCaptureForm(){
   if(!byId('capture-response-variable').checked)return;
   const name=byId('response-variable-name').value.trim();if(!/^[A-Za-z0-9_.-]{1,80}$/.test(name)||['__proto__','prototype','constructor'].includes(name))throw Error('Informe um nome de variável válido (até 80 caracteres).');
   if(byId('response-value-source').value==='json'){const path=byId('response-json-path').value.trim();if(!path)throw Error('Informe o caminho do campo JSON, por exemplo access_token.');parseJsonPath(path);}
+  if(byId('response-capture-target').value==='vault')assertVaultCaptureAvailable({environmentId:activeEnvironmentId||'default'});
 }
 function showResponseVariableResult(title,kind='success'){const section=byId('response-variable-result');section.hidden=false;section.dataset.kind=kind;byId('response-variable-result-title').textContent=title;}
 async function saveEnvironmentVariable(name,value){
@@ -2305,13 +2579,28 @@ async function captureResponseVariable(request,result,quiet=false){
   try{
     const name=String(request.responseVariableName||'').trim();
     const value=request.responseValueSource==='text'?String(result.body??''):jsonPathValue(JSON.parse(String(result.body??'')),request.responseJsonPath);
+    if(request.responseCaptureTarget==='vault'){
+      assertVaultCaptureAvailable(request);
+      const vault=secretVault,values=secretVaultValues;
+      try{
+        await vault.set(name,value);
+        await persistSecretVaultSnapshot();
+        if(secretVault!==vault||secretVaultValues!==values)throw Error('O cofre foi bloqueado antes de confirmar a captura.');
+        Object.defineProperty(values,name,{value,writable:true,enumerable:true,configurable:true});
+      }catch(error){
+        await recoverSecretVaultAfterFailure();
+        throw Error('A captura no cofre não foi confirmada no armazenamento; nenhum valor foi copiado para o ambiente. '+(error.message||''));
+      }
+      if(!quiet){showResponseVariableResult(`{{${name}}} salva no cofre do ambiente “${getEnvironment().name}”.`);showToast('Segredo salvo',`{{${name}}} está no cofre cifrado. O valor não é exibido.`,'success');}
+      return{ok:true,captured:true,name,target:'vault',environment:getEnvironment().name};
+    }
     const updated=await saveEnvironmentVariable(name,value);
     if(!quiet){showResponseVariableResult(`{{${name}}} salva no ambiente “${updated.name}”.`);showToast('Variável salva',`{{${name}}} já pode ser usada nas próximas requests.`,'success');}
-    return{ok:true,captured:true,name,environment:updated.name};
+    return{ok:true,captured:true,name,target:'environment',environment:updated.name};
   }catch(error){const message=error.message||'Não foi possível ler o valor da resposta.';if(!quiet){showResponseVariableResult(message,'error');showToast('Variável não salva',message,'error');}return{ok:false,captured:true,error:message};}
 }
 async function executeApiRequest(request){
-  const {graphqlQuery,graphqlVariables,graphqlOperationName,...proxyRequest}=request;delete proxyRequest.authMode;delete proxyRequest.authSource;delete proxyRequest.collectionId;delete proxyRequest.folderId;delete proxyRequest.saveBearerToken;
+  const {graphqlQuery,graphqlVariables,graphqlOperationName,...proxyRequest}=request;delete proxyRequest.authMode;delete proxyRequest.authSource;delete proxyRequest.collectionId;delete proxyRequest.folderId;delete proxyRequest.saveBearerToken;delete proxyRequest.resolutionProvenance;delete proxyRequest.responseCaptureTarget;
   const response=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify(proxyRequest)});
   let result;try{result=await response.json();}catch{throw Error('O proxy Vortix devolveu uma resposta inválida.');}
   void renderCookieJar();if(result.cookieJarWarning)showToast('Cookie não salvo',result.cookieJarWarning,'warning');
@@ -2320,8 +2609,10 @@ async function executeApiRequest(request){
 async function performApiRequest(request,button,save,historyRequest=request){
   clearCurrentResponseExample();
   button.disabled=true;byId('request-note').textContent='Aguardando resposta. Credenciais não serão armazenadas automaticamente.';showResponse('Enviando…','pending','','');renderResponseTestResults([]);
+  const vaultOrigins=Object.keys(request.resolutionProvenance||{}).filter(name=>request.resolutionProvenance[name]==='vault');
+  if(vaultOrigins.length)byId('request-note').textContent='Cofre usado para: '+vaultOrigins.join(', ')+'. Apenas nomes/origens são exibidos.';
   byId('response-persistence-note').textContent='Resposta temporária · não armazenada';
-  const toast=showToast('Enviando requisição',request.method+' '+request.route.split('?')[0],'info',0);let historyEntry=null;
+  const toast=showToast('Enviando requisição',request.method+' '+redactVaultValues(historyRequest.route.split('?')[0]),'info',0);let historyEntry=null;
   try{
     if(save)historyEntry=await saveHistory(historyRequest);
     const requestStartedAt=performance.now();const {proxyStatus,result}=await executeApiRequest(request);dismissToast(toast);
@@ -2338,13 +2629,14 @@ function requestFromForm(selectedMethod,requestRoute,resolveValues=true){
   return{baseUrl:resolve(byId('base-url').value.trim()),route:resolve(requestRoute),method:selectedMethod,...auth,collectionId:selectedContainer.collectionId,folderId:selectedContainer.folderId,environmentId:activeEnvironmentId||'default',bodyMode,headers:resolve(byId('headers').value),body:requestBody,multipartFields:readMultipartFieldEntries(resolve).map(entry=>entry.field),graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,
     allowInsecureHttp:byId('allow-insecure-http').checked,confirmTestData:byId('confirm-test-data').checked,testDataPhrase:byId('test-data-phrase').value,confirmTokenRequest:false,
     saveBearerToken:byId('save-token-history').checked,
-    captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseTests:getResponseTestsFromForm()};
+    captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseCaptureTarget:byId('response-capture-target').value==='vault'?'vault':'environment',responseTests:getResponseTestsFromForm(),resolutionProvenance:{...lastResolutionProvenance}};
 }
 async function sendCurrentRequest(){
   clearCurrentResponseExample();
+  lastResolutionProvenance={};
   const selectedMethod=method.value;let request;
   try{
-    validateResponseCaptureForm();
+    validateResponseCaptureForm();refreshRequestInspector();
     const rawRoute=buildRequestRoute(),resolvedRoute=buildRequestRoute(true);
     if(writeMethods.has(selectedMethod)&&!writeConfirmationValid())throw Error('Digite TESTE e confirme que URL e dados são exclusivos de teste.');
     const historyRequest=requestFromForm(selectedMethod,rawRoute,false);
@@ -2353,7 +2645,7 @@ async function sendCurrentRequest(){
     if(request.bodyMode==='multipart')request.multipartFields=await multipartFieldsForSend(value=>applyEnvironment(value));
     const insecureOrigin=RunnerLogic.remoteHttpOrigin(request.baseUrl);
     if(insecureOrigin&&!request.allowInsecureHttp)throw Error('HTTP fora de localhost está bloqueado. Marque a opção de HTTP sem TLS nesta request para continuar.');
-    const destination=sanitizeBase(request.baseUrl).value.replace(/\/+$/,'')+sanitizeRoute(resolvedRoute).value;
+    const destination=redactVaultValues(sanitizeBase(request.baseUrl).value.replace(/\/+$/,'')+sanitizeRoute(resolvedRoute).value);
     const insecureWarning=insecureOrigin?remoteHttpWarning(insecureOrigin):'';
     const queryKeyWarning=request.authType==='apiKey'&&request.apiKeyLocation==='query'?'A API Key será enviada na query string, onde pode ficar registrada em logs e históricos da API. Prefira header.':'';
     if(writeMethods.has(selectedMethod)){
@@ -2394,8 +2686,8 @@ async function requestOAuthClientCredentialsToken(){
     const insecureOrigin=RunnerLogic.remoteHttpOrigin(request.baseUrl);
     const authDescription=config.clientAuthMethod==='client_secret_basic'?'client_secret será enviado em HTTP Basic.':'client_id e client_secret serão enviados no formulário.';
     const transportWarning=insecureOrigin?remoteHttpWarning(insecureOrigin):'';
-    const destination=request.baseUrl.replace(/\/+$/,'')+request.route;
-    if(!(await confirmWithDialog({eyebrow:'OAUTH 2.0',title:'Solicitar access token?',description:'POST '+request.route,detail:destination,warning:[authDescription,transportWarning].filter(Boolean).join(' '),confirmLabel:'Solicitar token',danger:!!insecureOrigin}))){
+    const destination=redactVaultValues(request.baseUrl.replace(/\/+$/,'')+request.route);
+    if(!(await confirmWithDialog({eyebrow:'OAUTH 2.0',title:'Solicitar access token?',description:'POST '+redactVaultValues(request.route),detail:destination,warning:[authDescription,transportWarning].filter(Boolean).join(' '),confirmLabel:'Solicitar token',danger:!!insecureOrigin}))){
       showToast('Envio cancelado','Nenhuma credencial OAuth foi enviada.','info');return;
     }
     const requestStartedAt=performance.now(),result=await performApiRequest(request,oauth2TokenButton,false);responseDuration=Math.max(0,performance.now()-requestStartedAt);if(!result)return;
@@ -2435,8 +2727,8 @@ async function requestTokenFromHelper(){
     if(insecureOrigin&&!request.allowInsecureHttp)throw Error('HTTP fora de localhost está bloqueado. Marque a opção de HTTP sem TLS nesta request para continuar.');
     const modeWarning=mode==='query'?'O segredo será enviado na query e pode aparecer nos logs da API.':'As credenciais serão enviadas como JSON.';
     const transportWarning=insecureOrigin?remoteHttpWarning(insecureOrigin):'';
-    const destination=sanitizeBase(request.baseUrl).value.replace(/\/+$/,'')+sanitizeRoute(request.route).value;
-    if(!(await confirmWithDialog({eyebrow:'CREDENCIAIS',title:'Solicitar token?',description:'POST '+request.route,detail:destination,warning:[modeWarning,transportWarning].filter(Boolean).join(' '),confirmLabel:'Solicitar token',danger:true}))){
+    const destination=redactVaultValues(sanitizeBase(request.baseUrl).value.replace(/\/+$/,'')+sanitizeRoute(request.route).value);
+    if(!(await confirmWithDialog({eyebrow:'CREDENCIAIS',title:'Solicitar token?',description:'POST '+redactVaultValues(request.route),detail:destination,warning:[modeWarning,transportWarning].filter(Boolean).join(' '),confirmLabel:'Solicitar token',danger:true}))){
       showToast('Envio cancelado','Nenhuma credencial foi enviada.','info');return;
     }
     let result;
@@ -2482,6 +2774,7 @@ function addEventListeners(){
   byId('add-collection').onclick=addCollection;byId('add-collection-heading').onclick=addCollection;byId('import-collection').onclick=openImportDialog;byId('browse-import-file').onclick=()=>{byId('import-dialog').close();byId('import-collection-file').click();};byId('close-import-dialog').onclick=()=>byId('import-dialog').close();byId('cancel-import-dialog').onclick=()=>byId('import-dialog').close();byId('command-import-format').addEventListener('change',updateCommandImportUi);byId('create-imported-request').onclick=openImportedCommandDraft;byId('import-collection-file').addEventListener('change',importCollectionFile);byId('export-collection').onclick=openExportDialog;byId('export-form').addEventListener('submit',exportCollection);byId('close-export-dialog').onclick=()=>byId('export-dialog').close();byId('cancel-export-dialog').onclick=()=>byId('export-dialog').close();byId('save-collection-request').onclick=openSaveDialog;byId('save-request-form').addEventListener('submit',saveCollectionRequest);byId('close-save-request').onclick=()=>byId('save-request-dialog').close();byId('cancel-save-request').onclick=()=>byId('save-request-dialog').close();
   byId('export-workspace').onclick=exportWorkspaceBackup;byId('export-encrypted-workspace').onclick=exportEncryptedWorkspaceBackup;byId('restore-workspace').onclick=()=>byId('restore-workspace-file').click();byId('restore-workspace-file').addEventListener('change',restoreWorkspaceBackup);
   byId('protect-existing-secrets').onclick=protectExistingSecrets;
+  byId('secret-vault-create').onclick=()=>void createSecretVaultFromUi();byId('secret-vault-unlock').onclick=()=>void unlockSecretVaultFromUi();byId('secret-vault-lock').onclick=()=>void lockSecretVaultFromUi();byId('secret-vault-remove').onclick=()=>void removeSecretVault();byId('secret-vault-add').onclick=event=>void addSecretVaultEntry(event);
   byId('environment-form').addEventListener('submit',saveEnvironmentDraft);byId('close-environment').onclick=()=>{environmentDraft=[];byId('environment-dialog').close();};byId('cancel-environment').onclick=()=>{environmentDraft=[];byId('environment-dialog').close();};byId('manage-environments').onclick=openSettingsDialog;byId('settings-environments').onclick=()=>{byId('settings-dialog').close();openEnvironmentDialog();};byId('close-settings').onclick=()=>byId('settings-dialog').close();byId('close-settings-done').onclick=()=>byId('settings-dialog').close();byId('add-environment').onclick=addEnvironmentDraft;
   byId('environment-select').onchange=event=>chooseEnvironment(event.target.value);byId('theme-select').onchange=event=>saveTheme(event.target.value);
   byId('font-select').onchange=event=>saveFont(event.target.value);byId('history-retention-limit').addEventListener('change',()=>void saveHistorySettings());byId('history-save-response-body').addEventListener('change',()=>void saveHistorySettings());byId('decrease-font').onclick=()=>setUiScale(activeScale-0.05);byId('increase-font').onclick=()=>setUiScale(activeScale+0.05);document.addEventListener('keydown',handleScaleShortcut);
@@ -2490,8 +2783,8 @@ function addEventListeners(){
     if(event.target.closest('[data-add-variable]')){const vars=event.target.closest('.environment-card').querySelector('.environment-vars');vars.append(makeVarRow());vars.lastElementChild.querySelector('.environment-var-name').focus();}
   });
   document.querySelectorAll('[data-editor-tab]').forEach(button=>button.onclick=()=>setEditorTab(button.dataset.editorTab));byId('format-json').onclick=()=>formatBodyJson(false);byId('minify-json').onclick=()=>formatBodyJson(true);body.addEventListener('keydown',handleJsonKeydown);
-  for(const id of ['response-variable-name','response-json-path','response-value-source','response-success-only','capture-response-variable']){byId(id).addEventListener('input',updateResponseCaptureUi);byId(id).addEventListener('change',updateResponseCaptureUi);}
-  byId('insert-token-script').onclick=async()=>{const isDefault=byId('response-variable-name').value.trim()==='token'&&byId('response-json-path').value.trim()==='access_token';if(!isDefault&&!(await confirmWithDialog({eyebrow:'EXEMPLO DE TOKEN',title:'Usar o exemplo de token?',description:'Os campos do extrator serão preenchidos com token e access_token.',confirmLabel:'Usar exemplo'})))return;byId('capture-response-variable').checked=true;byId('response-value-source').value='json';byId('response-variable-name').value='token';byId('response-json-path').value='access_token';byId('response-success-only').checked=true;updateResponseCaptureUi();showToast('Exemplo pronto','Confira o caminho access_token na resposta antes de enviar.','info');};
+  for(const id of ['response-variable-name','response-json-path','response-value-source','response-success-only','capture-response-variable','response-capture-target']){byId(id).addEventListener('input',updateResponseCaptureUi);byId(id).addEventListener('change',updateResponseCaptureUi);}
+  byId('insert-token-script').onclick=async()=>{const isDefault=byId('response-variable-name').value.trim()==='token'&&byId('response-json-path').value.trim()==='access_token';if(!isDefault&&!(await confirmWithDialog({eyebrow:'EXEMPLO DE TOKEN',title:'Usar o exemplo de token?',description:'Os campos do extrator serão preenchidos com token e access_token.',confirmLabel:'Usar exemplo'})))return;byId('capture-response-variable').checked=true;byId('response-value-source').value='json';byId('response-variable-name').value='token';byId('response-json-path').value='access_token';byId('response-success-only').checked=true;byId('response-capture-target').value='environment';updateResponseCaptureUi();showToast('Exemplo pronto','Confira o caminho access_token na resposta antes de enviar.','info');};
   byId('copy-insomnia-script').onclick=async()=>{try{await navigator.clipboard.writeText(byId('insomnia-script-preview').textContent);showToast('Exemplo copiado','Script pronto para Scripts → After-response no Insomnia.','success');}catch{showToast('Falha ao copiar','O navegador bloqueou a área de transferência.','error');}};
   byId('clear-token').onclick=()=>{byId('bearer-token').value='';byId('bearer-token').focus();showToast('Token removido','O campo Bearer foi limpo desta sessão.','info');};
   byId('new-request').onclick=createNewWorkspaceTab;
@@ -2499,7 +2792,7 @@ function addEventListeners(){
     const change=()=>{if(['method','route','body','base-url','headers'].includes(id))byId('confirm-test-data').checked=false;if(id==='base-url')baseUrlAuto=false;updateGuard();updateTokenButton();if(id==='body'){renderBodyHighlight();updateJsonTools();}};byId(id).addEventListener('input',change);byId(id).addEventListener('change',change);
   }
   body.addEventListener('scroll',renderBodyHighlight);byId('token-client-id').addEventListener('input',updateTokenButton);byId('token-client-secret').addEventListener('input',updateTokenButton);
-  byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('auth-inheritance-mode').addEventListener('change',()=>{const authMode=authModeFromForm();applyAuthFields(authMode==='custom'?{authMode,authType:'none'}:{authMode});syncActiveWorkspaceTab(true);});byId('save-auth-default').onclick=()=>void saveAuthDefault();byId('body-mode').addEventListener('change',updateBodyModeUi);byId('multipart-add-text').onclick=()=>addMultipartField('text');byId('multipart-add-file').onclick=()=>addMultipartField('file');byId('graphql-load-schema').onclick=()=>void loadGraphqlSchema();byId('graphql-schema-type').addEventListener('change',renderGraphqlSchemaFields);const graphqlQueryField=byId('graphql-query');graphqlQueryField.addEventListener('input',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keyup',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('click',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keydown',handleGraphqlAutocompleteKeydown);byId('format-graphql-variables').onclick=formatGraphqlVariables;for(const id of ['graphql-query','graphql-variables','graphql-operation-name']){byId(id).addEventListener('input',()=>{byId('confirm-test-data').checked=false;updateGuard();});byId(id).addEventListener('change',()=>{byId('confirm-test-data').checked=false;updateGuard();});}byId('clear-cookie-jar').onclick=clearCookieJar;
+  byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('auth-inheritance-mode').addEventListener('change',()=>{const authMode=authModeFromForm();applyAuthFields(authMode==='custom'?{authMode,authType:'none'}:{authMode});syncActiveWorkspaceTab(true);});byId('save-auth-default').onclick=()=>void saveAuthDefault();byId('body-mode').addEventListener('change',updateBodyModeUi);byId('multipart-add-text').onclick=()=>addMultipartField('text');byId('multipart-add-file').onclick=()=>addMultipartField('file');byId('graphql-load-schema').onclick=()=>void loadGraphqlSchema();byId('graphql-schema-type').addEventListener('change',renderGraphqlSchemaFields);const graphqlQueryField=byId('graphql-query');graphqlQueryField.addEventListener('input',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keyup',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('click',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keydown',handleGraphqlAutocompleteKeydown);byId('format-graphql-variables').onclick=formatGraphqlVariables;for(const id of ['graphql-query','graphql-variables','graphql-operation-name']){byId(id).addEventListener('input',()=>{byId('confirm-test-data').checked=false;updateGuard();});byId(id).addEventListener('change',()=>{byId('confirm-test-data').checked=false;updateGuard();});}byId('clear-cookie-jar').onclick=clearCookieJar;byId('inspect-references').onclick=refreshRequestInspector;byId('request-inspector').addEventListener('toggle',()=>{if(byId('request-inspector').open)refreshRequestInspector();});byId('runner-datasets').addEventListener('input',()=>{if(byId('runner-dialog').open)renderRunnerPlan(runnerEntries);});
   for(const id of ['token-route','token-client-id-field','token-client-secret-field','token-credential-mode']){byId(id).addEventListener('input',updateTokenButton);byId(id).addEventListener('change',()=>void persistTokenRequestConfig());}
     for(const id of ['oauth2-token-url','oauth2-client-id','oauth2-scope'])byId(id).addEventListener('input',updateOAuth2TokenButton);
   for(const id of ['oauth2-token-url','oauth2-client-id','oauth2-scope','oauth2-client-auth-method'])byId(id).addEventListener('change',()=>void persistOAuth2TokenConfig(true));
@@ -2510,7 +2803,7 @@ function addEventListeners(){
 }
 async function startApp(){
   addEventListeners();renderQueryParams([]);renderMultipartFields([]);renderGraphqlFields({});updateAuthTypeUi();updateBodyModeUi();renderBodyHighlight();
-  try{await initializeHostingMode();await initializeDb();await loadTokenRequestConfig();await loadOAuth2TokenConfig();applyTheme(activeTheme);applyTypography();applyUiScale();renderCollectionTree();renderEnvironmentSelect();await loadOAuthPkceConfig();if(!byId('base-url').value)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';await renderHistory();await initializeWorkspaceTabs();updateGuard();updateCopyButtons();updateTokenButton();updateJsonTools();updateResponseCaptureUi();
+  try{await initializeHostingMode();await initializeDb();await loadSecretVaultForActiveEnvironment();await loadTokenRequestConfig();await loadOAuth2TokenConfig();applyTheme(activeTheme);applyTypography();applyUiScale();renderCollectionTree();renderEnvironmentSelect();await loadOAuthPkceConfig();if(!byId('base-url').value)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';await renderHistory();await initializeWorkspaceTabs();updateGuard();updateCopyButtons();updateTokenButton();updateJsonTools();updateResponseCaptureUi();
     byId('protect-existing-secrets').hidden=hostedMode;
     if(hostedMode){byId('sidebar-storage-note').textContent='Coleções e histórico neste navegador';document.querySelector('.sidebar-bottom strong').textContent='Workspace do navegador';byId('history-panel').querySelector('.history-hint').textContent='Histórico e dados ficam neste navegador; exporte backups para transferi-los.';byId('app-storage-note').textContent='Coleções, ambientes, requests e histórico ficam no IndexedDB deste navegador, sem criptografia automática. Use Backup com senha para transportar uma cópia protegida.';}
     else byId('sidebar-storage-note').textContent='SQLite local · proteção de dados';}
