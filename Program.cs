@@ -1291,7 +1291,7 @@ static bool TryParseCookieJarRestore(JsonElement request, out Dictionary<string,
 {
     jars = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
     if (request.ValueKind != JsonValueKind.Object || !request.TryGetProperty("jars", out var jarArray) ||
-        jarArray.ValueKind != JsonValueKind.Array || jarArray.GetArrayLength() > 1000)
+        jarArray.ValueKind != JsonValueKind.Array || jarArray.GetArrayLength() > LocalDataStore.MaxHostedCookieJarEnvironmentCount)
         return false;
 
     foreach (var item in jarArray.EnumerateArray())
