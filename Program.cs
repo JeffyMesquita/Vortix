@@ -4,15 +4,14 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Security.Cryptography;
-using System.Security.Claims;
 using System.Threading.RateLimiting;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
 
 const long maxWorkspaceBackupBytes = 15 * 1024 * 1024;
 const string graphqlIntrospectionQuery = """
@@ -82,7 +81,6 @@ if (hostingMode is not ("local" or "render"))
 }
 var hostedMode = hostingMode == "render";
 var publicOrigin = string.Empty;
-var accessPassword = builder.Configuration["ApiStudio:AccessPassword"] ?? string.Empty;
 if (hostedMode)
 {
     var configuredOrigin = builder.Configuration["ApiStudio:PublicOrigin"];
@@ -91,13 +89,6 @@ if (hostedMode)
         parsedOrigin.AbsolutePath != "/" || !string.IsNullOrEmpty(parsedOrigin.Query) || !string.IsNullOrEmpty(parsedOrigin.Fragment))
     {
         throw new InvalidOperationException("ApiStudio:PublicOrigin precisa ser uma origem HTTPS, por exemplo https://apicliente.example.com.");
-    }
-    var accessPasswordCodePointCount = 0;
-    foreach (var _ in accessPassword.EnumerateRunes()) accessPasswordCodePointCount++;
-    // Match the browser's Array.from(password).length validation for the 12-character minimum.
-    if (accessPasswordCodePointCount < 12 || accessPassword.Length > 256)
-    {
-        throw new InvalidOperationException("ApiStudio:AccessPassword precisa ter entre 12 e 256 caracteres.");
     }
     publicOrigin = parsedOrigin.GetLeftPart(UriPartial.Authority).TrimEnd('/');
     builder.Configuration["ApiStudio:PublicOrigin"] = publicOrigin;
@@ -129,37 +120,33 @@ builder.WebHost.ConfigureKestrel(options =>
     else options.Listen(IPAddress.Loopback, port);
 });
 
-using var httpClient = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
+var httpHandler = new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false };
+if (hostedMode) httpHandler.ConnectCallback = ConnectPublicInternetAsync;
+using var httpClient = new HttpClient(httpHandler)
 {
     Timeout = TimeSpan.FromSeconds(30),
     MaxResponseContentBufferSize = 5 * 1024 * 1024
 };
 
 builder.Services.AddDataProtection().SetApplicationName("ApiPublicacaoTester");
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-    .AddCookie(options =>
+if (hostedMode)
+{
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
     {
-        options.Cookie.Name = "__Host-Vortix.Auth";
-        options.Cookie.Path = "/";
-        options.Cookie.HttpOnly = true;
-        options.Cookie.SameSite = SameSiteMode.Lax;
-        options.Cookie.SecurePolicy = hostedMode ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
-        options.ExpireTimeSpan = TimeSpan.FromHours(12);
-        options.SlidingExpiration = true;
-        options.Events.OnRedirectToLogin = context =>
-        {
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            return Task.CompletedTask;
-        };
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        options.KnownIPNetworks.Clear();
+        options.KnownProxies.Clear();
+        options.ForwardLimit = 1;
     });
+}
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.AddPolicy("hosted-login", context => RateLimitPartition.GetFixedWindowLimiter(
+    options.AddPolicy("hosted-proxy", context => RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions
         {
-            PermitLimit = 5,
+            PermitLimit = 30,
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0,
             AutoReplenishment = true
@@ -171,6 +158,7 @@ var localDataStore = new LocalDataStore(databasePath, dataProtector, hostedMode 
 var cookieJarLocks = new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal);
 var oauthPkceFlows = new ConcurrentDictionary<string, OAuthPkceFlow>(StringComparer.Ordinal);
 await localDataStore.InitializeAsync();
+if (hostedMode) app.UseForwardedHeaders();
 app.Use(async (context, next) =>
 {
     context.Response.Headers["Cache-Control"] = "no-store";
@@ -180,15 +168,12 @@ app.Use(async (context, next) =>
     await next();
 });
 app.UseRouting();
-app.UseAuthentication();
 app.UseRateLimiter();
 app.Use(async (context, next) =>
 {
-    if (hostedMode && context.Request.Path.StartsWithSegments("/api") &&
-        context.Request.Path != "/api/runtime" && context.Request.Path != "/api/auth/login" &&
-        context.User.Identity?.IsAuthenticated != true)
+    if (hostedMode && context.Request.Path.StartsWithSegments("/api/storage"))
     {
-        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
         return;
     }
     await next();
@@ -197,42 +182,75 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 app.MapGet("/health", () => Results.Json(new { status = "ok", app = "ApiPublicacaoTester", product = "VortixApiClient", hostingMode }));
 app.MapGet("/api/runtime", () => Results.Json(new { hostingMode, product = "VortixApiClient" }));
-app.MapPost("/api/auth/login", async (HttpContext context, JsonElement request) =>
+var publicSessionEndpoint = app.MapGet("/api/session", (HttpContext context) =>
 {
     if (!hostedMode) return Results.NotFound();
-    if (!IsTrustedHostedOriginRequest(context, publicOrigin)) return Results.StatusCode(StatusCodes.Status403Forbidden);
-    var suppliedPassword = request.ValueKind == JsonValueKind.Object && request.TryGetProperty("password", out var passwordElement) && passwordElement.ValueKind == JsonValueKind.String
-        ? passwordElement.GetString() ?? string.Empty
-        : string.Empty;
-    var expectedHash = SHA256.HashData(Encoding.UTF8.GetBytes(accessPassword));
-    var suppliedHash = SHA256.HashData(Encoding.UTF8.GetBytes(suppliedPassword));
-    if (!CryptographicOperations.FixedTimeEquals(expectedHash, suppliedHash))
-    {
-        await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-        return Results.StatusCode(StatusCodes.Status401Unauthorized);
-    }
-    var identity = new ClaimsIdentity([new Claim(ClaimTypes.Name, "vortix-user")], CookieAuthenticationDefaults.AuthenticationScheme);
-    await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity), new AuthenticationProperties { IsPersistent = false, AllowRefresh = true });
-    return Results.NoContent();
-}).RequireRateLimiting("hosted-login");
-app.MapPost("/api/auth/logout", async (HttpContext context) =>
-{
-    if (!hostedMode) return Results.NotFound();
-    if (!IsTrustedHostedOriginRequest(context, publicOrigin) || context.User.Identity?.IsAuthenticated != true)
-        return Results.StatusCode(StatusCodes.Status403Forbidden);
-    await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    EnsureHostedSession(context);
     return Results.NoContent();
 });
-app.MapPost("/api/oauth/pkce/redirect-uri", (HttpContext context, OAuthPkceRedirectPreviewRequest request) =>
+app.MapGet("/api/cookie-jar/{environmentId}", async (HttpContext context, string environmentId, CancellationToken cancellationToken) =>
+{
+    if (!hostedMode) return Results.NotFound();
+    if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!IsValidEnvironmentId(environmentId)) return StorageError();
+    var sessionId = EnsureHostedSession(context);
+    JsonElement? record;
+    try { record = await localDataStore.ReadAsync("settings", HostedCookieStorageKey(sessionId, environmentId), cancellationToken); }
+    catch (CryptographicException)
+    {
+        await localDataStore.DeleteAsync("settings", HostedCookieStorageKey(sessionId, environmentId), cancellationToken);
+        return Results.Json(new { key = "cookiejar:" + environmentId, value = new { cookies = Array.Empty<StoredCookie>() } });
+    }
+    if (!record.HasValue || record.Value.ValueKind != JsonValueKind.Object || !record.Value.TryGetProperty("value", out var value))
+        return Results.Json(new { key = "cookiejar:" + environmentId, value = new { cookies = Array.Empty<StoredCookie>() } });
+    return Results.Json(new { key = "cookiejar:" + environmentId, value });
+});
+var cookieJarWriteEndpoint = app.MapPut("/api/cookie-jar/{environmentId}", async (HttpContext context, string environmentId, JsonElement value, CancellationToken cancellationToken) =>
+{
+    if (!hostedMode) return Results.NotFound();
+    if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!IsValidEnvironmentId(environmentId) || value.ValueKind != JsonValueKind.Object ||
+        !value.TryGetProperty("cookies", out var cookies) || cookies.ValueKind != JsonValueKind.Array || cookies.GetArrayLength() > 200)
+        return StorageError();
+    var sessionId = EnsureHostedSession(context);
+    var record = JsonSerializer.SerializeToElement(new { key = HostedCookieStorageKey(sessionId, environmentId), value }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    try
+    {
+        await localDataStore.WriteAsync("settings", record, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (WorkspaceSnapshotLimitExceededException exception)
+    {
+        return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status413PayloadTooLarge);
+    }
+});
+var cookieJarDeleteEndpoint = app.MapDelete("/api/cookie-jar/{environmentId}", async (HttpContext context, string environmentId, CancellationToken cancellationToken) =>
+{
+    if (!hostedMode) return Results.NotFound();
+    if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!IsValidEnvironmentId(environmentId)) return StorageError();
+    var sessionId = EnsureHostedSession(context);
+    await localDataStore.DeleteAsync("settings", HostedCookieStorageKey(sessionId, environmentId), cancellationToken);
+    return Results.NoContent();
+});
+if (hostedMode)
+{
+    publicSessionEndpoint.RequireRateLimiting("hosted-proxy");
+    cookieJarWriteEndpoint.RequireRateLimiting("hosted-proxy");
+    cookieJarDeleteEndpoint.RequireRateLimiting("hosted-proxy");
+}
+var oauthRedirectEndpoint = app.MapPost("/api/oauth/pkce/redirect-uri", (HttpContext context, OAuthPkceRedirectPreviewRequest request) =>
 {
     if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     if (!TryParseOAuthEndpoint(request.AuthorizationUrl, out var endpoint, out var endpointError))
         return Error(StatusCodes.Status400BadRequest, endpointError);
     if (ContainsOAuthAuthorizationParameter(endpoint) || ContainsOAuthCredentialParameter(endpoint))
         return Error(StatusCodes.Status400BadRequest, "Remova parâmetros OAuth ou credenciais da URL de autorização.");
-    return Results.Json(new { redirectUri = BuildOAuthRedirectUri(publicOrigin, port, CreateOAuthProviderKey(endpoint)) });
+    var callbackOrigin = hostedMode ? context.Request.Headers["Origin"].ToString() : publicOrigin;
+    return Results.Json(new { redirectUri = BuildOAuthRedirectUri(callbackOrigin, port, CreateOAuthProviderKey(endpoint)) });
 });
-app.MapPost("/api/oauth/pkce/start", async (HttpContext context, OAuthPkceStartRequest request, CancellationToken cancellationToken) =>
+var oauthStartEndpoint = app.MapPost("/api/oauth/pkce/start", async (HttpContext context, OAuthPkceStartRequest request, CancellationToken cancellationToken) =>
 {
     if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     if (!TryParseOAuthEndpoint(request.AuthorizationUrl, out var authorizationEndpoint, out var endpointError))
@@ -250,21 +268,24 @@ app.MapPost("/api/oauth/pkce/start", async (HttpContext context, OAuthPkceStartR
     if (ContainsOAuthCredentialParameter(tokenEndpoint))
         return Error(StatusCodes.Status400BadRequest, "A URL do token endpoint não pode conter credenciais ou tokens.");
 
+    var sessionId = hostedMode ? EnsureHostedSession(context) : string.Empty;
     var now = DateTimeOffset.UtcNow;
     foreach (var item in oauthPkceFlows)
         if (item.Value.ExpiresAtUtc <= now) oauthPkceFlows.TryRemove(item.Key, out _);
-    if (oauthPkceFlows.Count >= 16)
+    if (oauthPkceFlows.Values.Count(flow => flow.SessionId == sessionId) >= 16)
         return Error(StatusCodes.Status429TooManyRequests, "Já existem fluxos OAuth pendentes. Cancele um ou aguarde a expiração.");
 
     var state = CreateOAuthRandomValue();
     var verifier = CreateOAuthRandomValue();
     var challenge = CreateOAuthCodeChallenge(verifier);
     var providerKey = CreateOAuthProviderKey(authorizationEndpoint);
-    var redirectUri = BuildOAuthRedirectUri(publicOrigin, port, providerKey);
+    var callbackOrigin = hostedMode ? context.Request.Headers["Origin"].ToString() : publicOrigin;
+    var redirectUri = BuildOAuthRedirectUri(callbackOrigin, port, providerKey);
     var authorizationUrl = await BuildOAuthAuthorizationUrlAsync(authorizationEndpoint, clientId, scope, redirectUri, state, challenge, cancellationToken);
     var flow = new OAuthPkceFlow
     {
         State = state,
+        SessionId = sessionId,
         CodeVerifier = verifier,
         ClientId = clientId,
         ProviderKey = providerKey,
@@ -277,14 +298,20 @@ app.MapPost("/api/oauth/pkce/start", async (HttpContext context, OAuthPkceStartR
 
     return Results.Json(new { state, redirectUri, authorizationUrl, expiresAt = flow.ExpiresAtUtc });
 });
-app.MapGet("/oauth/callback/{providerKey}", async (HttpContext context, string providerKey, CancellationToken cancellationToken) =>
+if (hostedMode)
+{
+    oauthRedirectEndpoint.RequireRateLimiting("hosted-proxy");
+    oauthStartEndpoint.RequireRateLimiting("hosted-proxy");
+}
+var oauthCallbackEndpoint = app.MapGet("/oauth/callback/{providerKey}", async (HttpContext context, string providerKey, CancellationToken cancellationToken) =>
 {
     if (!IsTrustedOAuthCallback(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     var states = context.Request.Query["state"];
     if (states.Count != 1 || string.IsNullOrWhiteSpace(states[0]) || states[0]!.Length > 128)
         return Results.Redirect("/oauth/pkce/invalid");
     if (!oauthPkceFlows.TryGetValue(states[0]!, out var flow) ||
-        !string.Equals(flow.ProviderKey, providerKey, StringComparison.Ordinal))
+        !string.Equals(flow.ProviderKey, providerKey, StringComparison.Ordinal) ||
+        !IsHostedFlowOwnedByRequest(context, flow))
         return Results.Redirect("/oauth/pkce/invalid");
 
     var errors = context.Request.Query["error"];
@@ -375,6 +402,7 @@ app.MapGet("/oauth/callback/{providerKey}", async (HttpContext context, string p
         return Results.Redirect("/oauth/pkce/complete");
     }
 });
+if (hostedMode) oauthCallbackEndpoint.RequireRateLimiting("hosted-proxy");
 
 app.MapGet("/oauth/pkce/complete", (HttpContext context) =>
 {
@@ -389,7 +417,7 @@ app.MapGet("/oauth/pkce/invalid", (HttpContext context) =>
 app.MapGet("/api/oauth/pkce/status/{state}", (HttpContext context, string state) =>
 {
     if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
-    if (state.Length is < 43 or > 128 || !oauthPkceFlows.TryGetValue(state, out var flow))
+    if (state.Length is < 43 or > 128 || !oauthPkceFlows.TryGetValue(state, out var flow) || !IsHostedFlowOwnedByRequest(context, flow))
         return Results.NotFound();
     lock (flow.SyncRoot)
     {
@@ -407,7 +435,8 @@ app.MapGet("/api/oauth/pkce/status/{state}", (HttpContext context, string state)
 app.MapDelete("/api/oauth/pkce/status/{state}", (HttpContext context, string state) =>
 {
     if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
-    if (!oauthPkceFlows.TryRemove(state, out var flow)) return Results.NotFound();
+    if (state.Length is < 43 or > 128 || !oauthPkceFlows.TryGetValue(state, out var flow) || !IsHostedFlowOwnedByRequest(context, flow)) return Results.NotFound();
+    oauthPkceFlows.TryRemove(state, out _);
     lock (flow.SyncRoot) flow.ClearSecrets();
     return Results.NoContent();
 });
@@ -549,7 +578,7 @@ app.MapDelete("/api/storage/{store}", async (HttpContext context, string store, 
         return StorageError();
     }
 });
-app.MapPost("/api/graphql/introspection", async (HttpContext context, ApiCall request) =>
+var graphqlIntrospectionEndpoint = app.MapPost("/api/graphql/introspection", async (HttpContext context, ApiCall request) =>
 {
     if (!IsTrustedLocalRequest(context, port)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     if (request is null || string.IsNullOrWhiteSpace(request.BaseUrl) || string.IsNullOrWhiteSpace(request.Route))
@@ -578,7 +607,12 @@ app.MapPost("/api/graphql/introspection", async (HttpContext context, ApiCall re
     };
     return await HandleRequest(context, introspectionCall, httpClient, localDataStore, cookieJarLocks, port);
 });
-app.MapPost("/api/request", (HttpContext context, ApiCall call) => HandleRequest(context, call, httpClient, localDataStore, cookieJarLocks, port));
+var requestEndpoint = app.MapPost("/api/request", (HttpContext context, ApiCall call) => HandleRequest(context, call, httpClient, localDataStore, cookieJarLocks, port));
+if (hostedMode)
+{
+    graphqlIntrospectionEndpoint.RequireRateLimiting("hosted-proxy");
+    requestEndpoint.RequireRateLimiting("hosted-proxy");
+}
 await app.RunAsync();
 
 static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, HttpClient httpClient, LocalDataStore localDataStore, ConcurrentDictionary<string, SemaphoreSlim> cookieJarLocks, int port)
@@ -597,7 +631,7 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
     }
 
     var environmentId = string.IsNullOrWhiteSpace(call.EnvironmentId) ? "default" : call.EnvironmentId.Trim();
-    var cookieStorageKey = "cookiejar:" + environmentId;
+    var cookieStorageKey = GetCookieJarStorageKey(context, environmentId);
     var providedAuthType = call.AuthType?.Trim() ?? string.Empty;
     var authType = providedAuthType.Length == 0
         ? (string.IsNullOrEmpty(call.BearerToken) ? "none" : "bearer")
@@ -912,7 +946,7 @@ static async Task<IResult> SendWithCookieJarAsync(
             }
             catch (Exception error) when (error is SqliteException or CryptographicException or JsonException or InvalidOperationException or ArgumentException)
             {
-                cookieJarWarning = "A resposta chegou, mas o Cookie jar não foi atualizado no SQLite local.";
+                cookieJarWarning = "A resposta chegou, mas o Cookie jar deste navegador não foi atualizado.";
             }
         }
 
@@ -949,7 +983,9 @@ static async Task<IResult> SendWithCookieJarAsync(
 
 static async Task<CookieJarLoad> ReadCookieJarAsync(LocalDataStore localDataStore, string storageKey, CancellationToken cancellationToken)
 {
-    var record = await localDataStore.ReadAsync("settings", storageKey, cancellationToken);
+    JsonElement? record;
+    try { record = await localDataStore.ReadAsync("settings", storageKey, cancellationToken); }
+    catch (CryptographicException) { return new CookieJarLoad([], false); }
     if (!record.HasValue || record.Value.ValueKind != JsonValueKind.Object ||
         !record.Value.TryGetProperty("value", out var value) ||
         !value.TryGetProperty("cookies", out var cookieArray) ||
@@ -1101,14 +1137,9 @@ static bool IsTrustedLocalRequest(HttpContext context, int port)
     var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
     if (string.Equals(configuration["ApiStudio:HostingMode"], "render", StringComparison.OrdinalIgnoreCase))
     {
-        var publicOrigin = configuration["ApiStudio:PublicOrigin"];
-        if (!Uri.TryCreate(publicOrigin, UriKind.Absolute, out var parsedOrigin)) return false;
         var hostedRequestOrigin = context.Request.Headers["Origin"].ToString();
-        var hostedSafeReadWithoutOrigin = hostedRequestOrigin.Length == 0 && HttpMethods.IsGet(context.Request.Method);
-        return context.User.Identity?.IsAuthenticated == true &&
-            string.Equals(context.Request.Headers["X-Api-Studio"].ToString(), "1", StringComparison.Ordinal) &&
-            (string.Equals(hostedRequestOrigin, publicOrigin, StringComparison.OrdinalIgnoreCase) || hostedSafeReadWithoutOrigin) &&
-            string.Equals(context.Request.Host.Value, parsedOrigin.Authority, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(context.Request.Headers["X-Api-Studio"].ToString(), "1", StringComparison.Ordinal) &&
+            IsTrustedHostedOriginRequest(context, hostedRequestOrigin);
     }
     var origin = context.Request.Headers["Origin"].ToString();
     var sameOrigin = string.Equals(origin, $"http://127.0.0.1:{port}", StringComparison.OrdinalIgnoreCase);
@@ -1119,12 +1150,125 @@ static bool IsTrustedLocalRequest(HttpContext context, int port)
         string.Equals(context.Request.Host.Value, $"127.0.0.1:{port}", StringComparison.OrdinalIgnoreCase);
 }
 
-static bool IsTrustedHostedOriginRequest(HttpContext context, string publicOrigin)
+static bool IsTrustedHostedOriginRequest(HttpContext context, string requestOrigin)
 {
-    if (!Uri.TryCreate(publicOrigin, UriKind.Absolute, out var parsedOrigin)) return false;
-    return string.Equals(context.Request.Headers["X-Api-Studio"].ToString(), "1", StringComparison.Ordinal) &&
-        string.Equals(context.Request.Headers["Origin"].ToString(), publicOrigin, StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(context.Request.Host.Value, parsedOrigin.Authority, StringComparison.OrdinalIgnoreCase);
+    var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
+    foreach (var configuredOrigin in new[] { configuration["ApiStudio:PublicOrigin"], configuration["RENDER_EXTERNAL_URL"] })
+    {
+        if (!Uri.TryCreate(configuredOrigin, UriKind.Absolute, out var parsedOrigin) ||
+            parsedOrigin.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(parsedOrigin.UserInfo) ||
+            parsedOrigin.AbsolutePath != "/" || !string.IsNullOrEmpty(parsedOrigin.Query) || !string.IsNullOrEmpty(parsedOrigin.Fragment) ||
+            !string.Equals(context.Request.Host.Value, parsedOrigin.Authority, StringComparison.OrdinalIgnoreCase))
+            continue;
+
+        if (requestOrigin.Length == 0 && HttpMethods.IsGet(context.Request.Method)) return true;
+        var normalizedOrigin = parsedOrigin.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+        if (string.Equals(requestOrigin, normalizedOrigin, StringComparison.OrdinalIgnoreCase)) return true;
+    }
+    return false;
+}
+
+static string EnsureHostedSession(HttpContext context)
+{
+    const string cookieName = "__Host-Vortix.Session";
+    if (context.Request.Cookies.TryGetValue(cookieName, out var existing) &&
+        existing.Length == 43 && existing.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_'))
+        return existing;
+
+    var sessionId = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+        .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    context.Response.Cookies.Append(cookieName, sessionId, new CookieOptions
+    {
+        HttpOnly = true,
+        Secure = true,
+        SameSite = SameSiteMode.Lax,
+        Path = "/"
+    });
+    return sessionId;
+}
+
+static string GetCookieJarStorageKey(HttpContext context, string environmentId)
+{
+    var isHosted = string.Equals(context.RequestServices.GetRequiredService<IConfiguration>()["ApiStudio:HostingMode"], "render", StringComparison.OrdinalIgnoreCase);
+    return isHosted
+        ? HostedCookieStorageKey(EnsureHostedSession(context), environmentId)
+        : "cookiejar:" + environmentId;
+}
+
+static string HostedCookieStorageKey(string sessionId, string environmentId) => "cookiejar:" + sessionId + ":" + environmentId;
+
+static bool IsValidEnvironmentId(string environmentId) =>
+    environmentId.Length is > 0 and <= 128 && !environmentId.Contains('\r') && !environmentId.Contains('\n');
+
+static bool IsHostedFlowOwnedByRequest(HttpContext context, OAuthPkceFlow flow)
+{
+    var isHosted = string.Equals(context.RequestServices.GetRequiredService<IConfiguration>()["ApiStudio:HostingMode"], "render", StringComparison.OrdinalIgnoreCase);
+    if (!isHosted) return flow.SessionId.Length == 0;
+    return context.Request.Cookies.TryGetValue("__Host-Vortix.Session", out var sessionId) &&
+        sessionId.Length == 43 && string.Equals(flow.SessionId, sessionId, StringComparison.Ordinal);
+}
+
+static async ValueTask<Stream> ConnectPublicInternetAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
+{
+    var host = context.DnsEndPoint.Host;
+    IPAddress[] addresses;
+    if (IPAddress.TryParse(host, out var literal)) addresses = [literal];
+    else addresses = await Dns.GetHostAddressesAsync(host, cancellationToken);
+
+    foreach (var candidate in addresses)
+    {
+        if (!IsPublicInternetAddress(candidate)) continue;
+        var socket = new Socket(candidate.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+        try
+        {
+            await socket.ConnectAsync(new IPEndPoint(candidate, context.DnsEndPoint.Port), cancellationToken);
+            return new NetworkStream(socket, ownsSocket: true);
+        }
+        catch (SocketException)
+        {
+            socket.Dispose();
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
+    }
+
+    throw new HttpRequestException("Destino não resolve para um endereço público.");
+}
+
+static bool IsPublicInternetAddress(IPAddress address)
+{
+    if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+    var bytes = address.GetAddressBytes();
+    if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+    {
+        // Allow global unicast only; conservatively reject special-purpose allocations.
+        if ((bytes[0] & 0xE0) != 0x20 || address.IsIPv6LinkLocal || address.IsIPv6Multicast || address.IsIPv6UniqueLocal ||
+            (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0xC0) ||
+            (bytes[0] == 0x20 && bytes[1] == 0x01 && (bytes[2] == 0x00 || (bytes[2] == 0x01 && (bytes[3] & 0x80) == 0))) ||
+            (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x00 && bytes[3] == 0x02 && bytes[4] == 0x00 && bytes[5] == 0x00) ||
+            (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0D && bytes[3] == 0xB8) ||
+            (bytes[0] == 0x20 && bytes[1] == 0x02) ||
+            (bytes[0] == 0x3F && (bytes[1] & 0xF0) == 0xF0)) return false;
+        return true;
+    }
+    if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) return false;
+
+    var first = bytes[0];
+    var second = bytes[1];
+    var third = bytes[2];
+    return first != 0 && first != 10 && first != 100 && first != 127 && first < 224 &&
+        !(first == 169 && second == 254) &&
+        !(first == 172 && second is >= 16 and <= 31) &&
+        !(first == 192 && second == 168) &&
+        !(first == 192 && second == 0 && third == 0) &&
+        !(first == 192 && second == 0 && third == 2) &&
+        !(first == 192 && second == 88 && third == 99) &&
+        !(first == 198 && second is 18 or 19) &&
+        !(first == 198 && second == 51 && third == 100) &&
+        !(first == 203 && second == 0 && third == 113);
 }
 
 static IResult StorageError() => Results.Json(new { error = "Registro local inválido." }, statusCode: StatusCodes.Status400BadRequest);
@@ -1386,12 +1530,7 @@ static bool IsTrustedOAuthCallback(HttpContext context, int port)
 {
     var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
     if (string.Equals(configuration["ApiStudio:HostingMode"], "render", StringComparison.OrdinalIgnoreCase))
-    {
-        var publicOrigin = configuration["ApiStudio:PublicOrigin"];
-        return context.User.Identity?.IsAuthenticated == true &&
-            Uri.TryCreate(publicOrigin, UriKind.Absolute, out var parsedOrigin) &&
-            string.Equals(context.Request.Host.Value, parsedOrigin.Authority, StringComparison.OrdinalIgnoreCase);
-    }
+        return IsTrustedHostedOriginRequest(context, string.Empty);
     var remoteAddress = context.Connection.RemoteIpAddress;
     return remoteAddress is not null && IPAddress.IsLoopback(remoteAddress) &&
         string.Equals(context.Request.Host.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase) &&
@@ -1613,6 +1752,9 @@ internal sealed class OAuthPkceFlow
 
     /// <summary>Gets or sets the one-time anti-forgery state value.</summary>
     public string State { get; init; } = string.Empty;
+
+    /// <summary>Gets the anonymous browser session that owns this hosted flow.</summary>
+    public string SessionId { get; init; } = string.Empty;
 
     /// <summary>Gets or sets the one-time PKCE verifier retained only in memory.</summary>
     public string CodeVerifier { get; set; } = string.Empty;

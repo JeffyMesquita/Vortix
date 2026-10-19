@@ -696,18 +696,17 @@ test('hosted workspace vault encrypts repeated snapshots and reopens with the sa
   await assert.rejects(createWorkspaceBackupVault('incorrect horse battery staple', first.salt, webcrypto).then(instance => instance.decrypt(JSON.stringify(first))), /incorreta|danificado/i);
 });
 
-test('hosted mode stores only the encrypted workspace snapshot in its dedicated IndexedDB store', () => {
+test('public hosted mode keeps workspace data in the browser without a shared password', () => {
   const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
   const page = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
   const render = fs.readFileSync(path.join(__dirname, 'render.yaml'), 'utf8');
 
-  assert.match(app, /DB_VERSION\s*=\s*2/);
-  assert.match(app, /createObjectStore\('hostedSnapshots'/);
-  assert.match(app, /RunnerLogic\.createWorkspaceBackupVault/);
-  assert.match(app, /await writeHostedSnapshot\(encrypted\)/);
-  assert.match(app, /await restoreHostedSnapshot\(snapshot,passphrase\)/);
-  assert.match(page, /id="hosted-login-dialog"/);
-  assert.match(render, /key: ApiStudio__AccessPassword\s+sync: false/);
+  assert.match(app, /if\(hostedMode\)return browserDbWrite\(store,value,remove\)/);
+  assert.match(app, /runtime\.hostingMode==='render'/);
+  assert.match(app, /fetch\('\/api\/session'/);
+  assert.doesNotMatch(app, /hosted-login-dialog|ApiStudio__AccessPassword/);
+  assert.doesNotMatch(page, /hosted-login-dialog|hosted-access-password/);
+  assert.doesNotMatch(render, /ApiStudio__AccessPassword/);
   assert.doesNotMatch(app, /localStorage\.setItem\([^,]*(?:password|passphrase)/i);
 });
 

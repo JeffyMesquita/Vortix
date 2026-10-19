@@ -31,8 +31,7 @@ let currentResponseExample = null;
 let graphqlSchema = null, graphqlSchemaEndpointKey = '', graphqlSchemaLoading = false, graphqlAutocompleteSuggestions = [], graphqlAutocompleteIndex = 0;
 let tokenRequestConfig = RunnerLogic.normalizeTokenRequestConfig(), oauth2TokenConfig = RunnerLogic.normalizeOAuthClientCredentialsConfig();
 let oauthPkceConfig = RunnerLogic.normalizeOAuthPkceConfig(), oauthPkceBusy = false, oauthPkceCancelRequested = false, oauthPkcePopup = null, oauthPkcePreviewTimer = 0;
-let hostedMode = false, hostedVault = null, hostedNeedsLegacyMigration = false, hostedLegacyStoresCleared = false;
-let hostedSnapshotVersion = 0, hostedSnapshotWarningShown = false, hostedSnapshotSync = Promise.resolve();
+let hostedMode = false;
 
 function openLegacyDb() {
   if (legacyDbPromise) return legacyDbPromise;
@@ -58,36 +57,9 @@ async function legacyDbRead(store) {
     request.onerror = () => reject(request.error || Error('Falha ao ler o banco local.'));
   });
 }
-async function readHostedSnapshot() {
-  const db = await openLegacyDb();
-  return new Promise((resolve,reject) => {
-    const request = db.transaction('hostedSnapshots','readonly').objectStore('hostedSnapshots').get('workspace');
-    request.onsuccess = () => resolve(request.result || null);
-    request.onerror = () => reject(request.error || Error('Falha ao ler o backup criptografado deste navegador.'));
-  });
-}
-async function writeHostedSnapshot(encrypted) {
-  const db = await openLegacyDb();
-  return new Promise((resolve,reject) => {
-    const transaction = db.transaction('hostedSnapshots','readwrite');
-    transaction.objectStore('hostedSnapshots').put({id:'workspace',encrypted,savedAt:new Date().toISOString()});
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error || Error('Falha ao gravar o backup criptografado neste navegador.'));
-    transaction.onabort = () => reject(transaction.error || Error('A gravação do backup criptografado foi cancelada.'));
-  });
-}
-async function clearLegacyWorkspaceStores() {
-  const db = await openLegacyDb();
-  return new Promise((resolve,reject) => {
-    const transaction = db.transaction(DB_STORES,'readwrite');
-    for(const store of DB_STORES)transaction.objectStore(store).clear();
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error || Error('Falha ao limpar dados antigos do navegador.'));
-    transaction.onabort = () => reject(transaction.error || Error('A limpeza dos dados antigos do navegador foi cancelada.'));
-  });
-}
 async function migrateLegacyDb() {
-  try{if(localStorage.getItem(STORAGE_MIGRATION_KEY)==='done'&&!(hostedMode&&hostedNeedsLegacyMigration))return;}catch{}
+  if(hostedMode)return;
+  try{if(localStorage.getItem(STORAGE_MIGRATION_KEY)==='done')return;}catch{}
   const legacy = {};
   for (const store of DB_STORES) legacy[store] = await legacyDbRead(store);
   let legacyHistory='',legacyHistoryImported=false;try{legacyHistory=localStorage.getItem(LEGACY_HISTORY_KEY)||'';}catch{}
@@ -106,9 +78,43 @@ async function migrateLegacyDb() {
     }
   }
   try{localStorage.setItem(STORAGE_MIGRATION_KEY,'done');if(legacyHistoryImported)localStorage.removeItem(LEGACY_HISTORY_KEY);}catch{}
-  hostedNeedsLegacyMigration=false;
+}
+async function browserDbWrite(store,value,remove=false) {
+  const db=await openLegacyDb();
+  return new Promise((resolve,reject)=>{
+    const transaction=db.transaction(store,'readwrite'),objectStore=transaction.objectStore(store);
+    let removed=0;
+    if(remove==='clear')objectStore.clear();
+    else if(remove)objectStore.delete(value);
+    else{
+      objectStore.put(value);
+      if(store==='history'){
+        const request=objectStore.getAll();
+        request.onsuccess=()=>{
+          const entries=request.result.sort((a,b)=>(Date.parse(b.savedAt||'')||0)-(Date.parse(a.savedAt||'')||0));
+          for(const entry of entries.slice(historySettings.limit)){objectStore.delete(entry.id);removed++;}
+        };
+      }
+    }
+    transaction.oncomplete=()=>resolve(store==='history'&&!remove?{removed}:null);
+    transaction.onerror=()=>reject(transaction.error||Error('Falha ao gravar no banco local.'));
+    transaction.onabort=()=>reject(transaction.error||Error('A gravação no banco local foi cancelada.'));
+  });
 }
 async function dbRead(store,key) {
+  if(hostedMode&&store==='settings'&&typeof key==='string'&&key.startsWith('cookiejar:')){
+    const environmentId=key.slice('cookiejar:'.length),response=await fetch(`/api/cookie-jar/${encodeURIComponent(environmentId)}`,{headers:{'X-Api-Studio':'1'},cache:'no-store'});
+    if(!response.ok)throw Error('Falha ao ler os cookies deste navegador.');
+    return response.json();
+  }
+  if(hostedMode){
+    const db=await openLegacyDb();
+    return new Promise((resolve,reject)=>{
+      const request=key===undefined?db.transaction(store,'readonly').objectStore(store).getAll():db.transaction(store,'readonly').objectStore(store).get(key);
+      request.onsuccess=()=>resolve(key===undefined?(request.result||[]):(request.result||null));
+      request.onerror=()=>reject(request.error||Error('Falha ao ler o banco deste navegador.'));
+    });
+  }
   const url=`/api/storage/${encodeURIComponent(store)}${key===undefined?'':'?key='+encodeURIComponent(key)}`;
   const response=await fetch(url,{headers:{'X-Api-Studio':'1'},cache:'no-store'});
   if(!response.ok)throw Error('Falha ao ler o banco local.');
@@ -116,101 +122,58 @@ async function dbRead(store,key) {
   return response.json();
 }
 async function dbWrite(store,value,remove=false) {
+  if(hostedMode&&store==='settings'){
+    const key=typeof value==='string'?value:value?.key;
+    if(typeof key==='string'&&key.startsWith('cookiejar:')){
+      const environmentId=key.slice('cookiejar:'.length),response=await fetch(`/api/cookie-jar/${encodeURIComponent(environmentId)}`,{method:remove?'DELETE':'PUT',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:remove?undefined:JSON.stringify(value.value)});
+      if(!response.ok)throw Error('Falha ao atualizar os cookies deste navegador.');
+      return null;
+    }
+  }
+  if(hostedMode)return browserDbWrite(store,value,remove);
   const url=remove==='clear'?`/api/storage/${encodeURIComponent(store)}`:remove?`/api/storage/${encodeURIComponent(store)}?key=${encodeURIComponent(value)}`:`/api/storage/${encodeURIComponent(store)}${store==='history'?`?retentionLimit=${historySettings.limit}`:''}`;
   const response=await fetch(url,{method:remove?'DELETE':'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:remove?undefined:JSON.stringify(value)});
   if(!response.ok){const error=await response.json().catch(()=>null);throw Error(error?.error||'Falha ao gravar no banco local.');}
   const result=response.status===204?null:await response.json().catch(()=>null);
-  await scheduleHostedWorkspaceSnapshot();
   return result;
 }
-function hostedWorkspaceIsEmpty(workspace) {
-  return ['history','collections','environments','settings'].every(store=>Array.isArray(workspace?.[store])&&workspace[store].length===0);
-}
-async function readServerWorkspace() {
-  const response=await fetch('/api/storage/workspace',{headers:{'X-Api-Studio':'1'},cache:'no-store'});
-  if(!response.ok)throw Error('Não foi possível ler o SQLite hospedado.');
-  return response.json();
-}
-async function restoreHostedSnapshot(snapshot,passphrase) {
-  if(!snapshot?.encrypted)return false;
-  const vault=await RunnerLogic.createWorkspaceBackupVault(passphrase,snapshot.encrypted.salt);
-  const parsed=await vault.decrypt(JSON.stringify(snapshot.encrypted));
-  const backup=RunnerLogic.createWorkspaceBackup(parsed.data,parsed.exportedAt||new Date().toISOString());
-  const response=await fetch('/api/storage/workspace/restore',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify(backup)});
-  if(!response.ok)throw Error('O SQLite temporário não aceitou o backup do navegador.');
-  hostedVault=vault;hostedNeedsLegacyMigration=false;
-  try{localStorage.setItem(STORAGE_MIGRATION_KEY,'done');}catch{}
-  return true;
-}
-async function initializeHostedPersistence(passphrase) {
-  hostedVault=null;hostedNeedsLegacyMigration=false;
-  const snapshot=await readHostedSnapshot();
-  let workspace=null,serverReadError=null;
-  try{workspace=await readServerWorkspace();}catch(error){serverReadError=error;}
-  if((!workspace||hostedWorkspaceIsEmpty(workspace))&&snapshot?.encrypted){
-    try{await restoreHostedSnapshot(snapshot,passphrase);return;}
-    catch(error){throw Error('Não foi possível recuperar o backup criptografado deste navegador. Confira se a senha de acesso não foi alterada. '+(error.message||''));}
+async function readWorkspace(){
+  if(!hostedMode){
+    const response=await fetch('/api/storage/workspace',{headers:{'X-Api-Studio':'1'},cache:'no-store'});
+    if(!response.ok)throw Error('Não foi possível ler o workspace local.');
+    return response.json();
   }
-  if(!workspace){
-    if(serverReadError)throw serverReadError;
-    throw Error('Workspace hospedado indisponível.');
-  }
-  hostedVault=await RunnerLogic.createWorkspaceBackupVault(passphrase);
-  hostedNeedsLegacyMigration=hostedWorkspaceIsEmpty(workspace);
+  const workspace=Object.fromEntries(await Promise.all(DB_STORES.map(async store=>[store,await dbRead(store)])));
+  const jars=await Promise.all(workspace.environments.map(environment=>dbRead('settings','cookiejar:'+environment.id)));
+  workspace.settings.push(...jars.filter(record=>record?.value?.cookies?.length));
+  return workspace;
 }
-async function persistHostedWorkspaceSnapshot(workspace) {
-  if(!hostedMode||!hostedVault)return false;
-  const current=workspace||await readServerWorkspace();
-  if(!Array.isArray(current?.collections)||!current.collections.length||!Array.isArray(current?.environments)||!current.environments.length)return false;
-  const backup=RunnerLogic.createWorkspaceBackup(current),encrypted=await hostedVault.encrypt(JSON.stringify(backup));
-  await writeHostedSnapshot(encrypted);
-  try{localStorage.setItem(STORAGE_MIGRATION_KEY,'done');localStorage.removeItem(LEGACY_HISTORY_KEY);}catch{}
-  if(!hostedLegacyStoresCleared){
-    await clearLegacyWorkspaceStores();hostedLegacyStoresCleared=true;
+async function replaceWorkspace(backup){
+  if(!hostedMode){
+    const response=await fetch('/api/storage/workspace/restore',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify(backup)});
+    const result=await response.json().catch(()=>null);
+    if(!response.ok)throw Error(result?.error||'Não foi possível restaurar o backup local.');
+    return result;
   }
-  hostedSnapshotWarningShown=false;
-  return true;
-}
-function scheduleHostedWorkspaceSnapshot() {
-  if(!hostedMode||!hostedVault)return Promise.resolve();
-  const version=++hostedSnapshotVersion;
-  hostedSnapshotSync=hostedSnapshotSync.catch(()=>{}).then(async()=>{
-    if(version!==hostedSnapshotVersion)return;
-    const workspace=await readServerWorkspace();
-    if(version!==hostedSnapshotVersion)return;
-    await persistHostedWorkspaceSnapshot(workspace);
+  const previousEnvironments=await dbRead('environments'),db=await openLegacyDb();
+  const cookieRecords=(backup.settings||[]).filter(record=>String(record?.key||'').startsWith('cookiejar:'));
+  await new Promise((resolve,reject)=>{
+    const transaction=db.transaction(DB_STORES,'readwrite');
+    for(const store of DB_STORES){const objectStore=transaction.objectStore(store);objectStore.clear();for(const record of backup[store]||[])if(store!=='settings'||!String(record?.key||'').startsWith('cookiejar:'))objectStore.put(record);}
+    transaction.oncomplete=resolve;transaction.onerror=()=>reject(transaction.error||Error('Falha ao restaurar o banco deste navegador.'));transaction.onabort=()=>reject(transaction.error||Error('A restauração do banco deste navegador foi cancelada.'));
   });
-  void hostedSnapshotSync.catch(error=>{if(!hostedSnapshotWarningShown){hostedSnapshotWarningShown=true;showToast('Backup do navegador pendente',error.message||'O SQLite foi atualizado, mas o backup criptografado ainda não foi salvo.','error',0);}});
-  return hostedSnapshotSync;
+  const environmentIds=new Set([...previousEnvironments,...(backup.environments||[])].map(environment=>environment.id));
+  for(const environmentId of environmentIds)await dbWrite('settings','cookiejar:'+environmentId,true);
+  for(const record of cookieRecords)await dbWrite('settings',record);
+  return {restored:true};
 }
 async function initializeHostingMode() {
   const runtimeResponse=await fetch('/api/runtime',{cache:'no-store'});
   if(!runtimeResponse.ok)throw Error('Não foi possível identificar o modo de hospedagem.');
   const runtime=await runtimeResponse.json();hostedMode=runtime.hostingMode==='render';
   if(!hostedMode)return;
-  const dialog=byId('hosted-login-dialog'),form=byId('hosted-login-form'),input=byId('hosted-access-password'),error=byId('hosted-login-error'),button=byId('hosted-login-submit');
-  dialog.addEventListener('cancel',event=>event.preventDefault(),{once:true});
-  await new Promise(resolve=>{
-    const submit=async event=>{
-      event.preventDefault();error.hidden=true;button.disabled=true;button.textContent='Desbloqueando…';
-      const passphrase=input.value;
-      try{
-        const response=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify({password:passphrase})});
-        if(response.status===401)throw Error('Senha incorreta.');
-        if(response.status===403)throw Error('A origem HTTPS não corresponde à configuração do serviço.');
-        if(response.status===429)throw Error('Muitas tentativas. Aguarde um minuto e tente novamente.');
-        if(!response.ok)throw Error('Não foi possível iniciar a sessão.');
-        await initializeHostedPersistence(passphrase);
-        input.value='';dialog.close();resolve();
-      }catch(failure){
-        hostedVault=null;
-        await fetch('/api/auth/logout',{method:'POST',headers:{'X-Api-Studio':'1'},cache:'no-store'}).catch(()=>{});
-        error.textContent=failure.message||'Não foi possível desbloquear o workspace.';error.hidden=false;
-      }finally{button.disabled=false;button.textContent='Desbloquear';}
-    };
-    form.addEventListener('submit',submit);
-    dialog.showModal();input.focus();
-  });
+  const response=await fetch('/api/session',{headers:{'X-Api-Studio':'1'},cache:'no-store'});
+  if(!response.ok)throw Error('Não foi possível iniciar uma sessão isolada neste navegador.');
 }
 const newId = () => crypto.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 async function initializeDb() {
@@ -895,9 +858,13 @@ function syncHistorySettingsControls(){
   if(saveBody)saveBody.checked=historySettings.saveResponseBody;
 }
 async function trimHistory(limit=historySettings.limit){
+  if(hostedMode){
+    const entries=(await dbRead('history')).sort((a,b)=>(Date.parse(b.savedAt||'')||0)-(Date.parse(a.savedAt||'')||0)),removed=entries.slice(limit);
+    for(const entry of removed)await dbWrite('history',entry.id,true);
+    return {removed:removed.length};
+  }
   const response=await fetch('/api/storage/history/trim',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify({limit})});
   if(!response.ok)throw Error('O servidor local não aplicou o limite do histórico.');
-  await scheduleHostedWorkspaceSnapshot();
   return response.json();
 }
 async function saveHistorySettings(){
@@ -915,7 +882,7 @@ async function saveHistorySettings(){
   if(removedCount){
     try{const result=await trimHistory(next.limit);showToast('Limite aplicado',`${result.removed} registros antigos removidos.`,'success');}
     catch{showToast('Limite salvo; limpeza pendente','O servidor não removeu os registros antigos. Tente novamente após atualizar o Vortix.','warning');}
-  }else showToast('Histórico atualizado',next.saveResponseBody?'Bodies serão guardados com proteção local, exceto respostas de token.':'Bodies novos não serão guardados.','success',3500);
+  }else showToast('Histórico atualizado',next.saveResponseBody?(hostedMode?'Bodies serão guardados neste navegador, exceto respostas de token.':'Bodies serão guardados com proteção local, exceto respostas de token.'):'Bodies novos não serão guardados.','success',3500);
   await renderHistory();
 }
 function showHistoryResponse(entry){
@@ -1564,9 +1531,7 @@ async function exportWorkspaceBackup(){
   try{
     syncActiveWorkspaceTab(false);
     await dbWrite('settings',{key:WORKSPACE_TABS_KEY,value:persistableWorkspaceTabs()});
-    const response=await fetch('/api/storage/workspace',{headers:{'X-Api-Studio':'1'},cache:'no-store'});
-    if(!response.ok)throw Error('Não foi possível ler o workspace local.');
-    const payload=RunnerLogic.createWorkspaceBackup(await response.json());
+    const payload=RunnerLogic.createWorkspaceBackup(await readWorkspace());
     const serialized=JSON.stringify(payload,null,2),blob=new Blob([serialized],{type:'application/json'});
     if(blob.size>RunnerLogic.maxWorkspaceBackupBytes)throw Error('Backup excede o limite de 15 MB.');
     const url=URL.createObjectURL(blob),link=document.createElement('a');
@@ -1589,9 +1554,7 @@ async function exportEncryptedWorkspaceBackup(){
   try{
     syncActiveWorkspaceTab(false);
     await dbWrite('settings',{key:WORKSPACE_TABS_KEY,value:persistableWorkspaceTabs()});
-    const response=await fetch('/api/storage/workspace',{headers:{'X-Api-Studio':'1'},cache:'no-store'});
-    if(!response.ok)throw Error('Não foi possível ler o workspace local.');
-    const payload=RunnerLogic.createWorkspaceBackup(await response.json()),serialized=JSON.stringify(payload,null,2);
+    const payload=RunnerLogic.createWorkspaceBackup(await readWorkspace()),serialized=JSON.stringify(payload,null,2);
     if(new Blob([serialized]).size>RunnerLogic.maxWorkspaceBackupBytes)throw Error('Backup excede o limite de 15 MB.');
     const encrypted=await RunnerLogic.encryptWorkspaceBackup(serialized,passphrase),protectedJson=JSON.stringify(encrypted,null,2),blob=new Blob([protectedJson],{type:'application/vnd.api-studio.encrypted-workspace+json'});
     if(blob.size>RunnerLogic.maxEncryptedWorkspaceBackupBytes)throw Error('Backup protegido excede o limite de 22 MB.');
@@ -1616,15 +1579,13 @@ async function restoreWorkspaceBackup(event){
     const warning=encrypted?'A senha foi validada. A restauração substitui todos os dados locais.':'Este JSON pode conter tokens e dados sensíveis em texto puro. A restauração substitui todos os dados locais.';
     if(!(await confirmWithDialog({eyebrow:'RESTAURAÇÃO',title:'Substituir workspace atual?',description:'O arquivo “'+file.name+'” substituirá o histórico, coleções, pastas, ambientes e configurações atuais.',detail,warning,confirmLabel:'Restaurar backup',danger:true})))return;
     const backup=RunnerLogic.createWorkspaceBackup(parsed.data,parsed.exportedAt||new Date().toISOString());
-    const response=await fetch('/api/storage/workspace/restore',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify(backup)});
-    const result=await response.json().catch(()=>null);
-    if(!response.ok)throw Error(result?.error||'Não foi possível restaurar o backup local.');
-    if(hostedMode)await persistHostedWorkspaceSnapshot();
+    await replaceWorkspace(backup);
     byId('settings-dialog').close();showToast('Workspace restaurado','Dados substituídos. Recarregando…','success',0);setTimeout(()=>window.location.reload(),1200);
   }catch(error){showToast('Falha ao restaurar backup',error.message||'Revise o arquivo e tente novamente.','error');}
   finally{event.target.value='';}
 }
 async function protectExistingSecrets(){
+  if(hostedMode){showToast('Proteção não disponível','Dados hospedados ficam apenas no armazenamento deste navegador. Use Backup com senha para exportar uma cópia protegida.','info');return;}
   const confirmation=await promptWithDialog({eyebrow:'PROTEÇÃO DOS DADOS',title:'Proteger dados existentes?',description:'Baixe um backup completo antes. Bodies e campos reconhecidos como sensíveis serão protegidos pelo ASP.NET Core Data Protection.',warning:'O backup JSON fica em texto puro. A migração protege o SQLite, mas não apaga cópias antigas do IndexedDB. A leitura depende das chaves e da identidade desta instalação. Digite BACKUP após baixar a cópia.',inputLabel:'Confirmação',placeholder:'Digite BACKUP',maxLength:12,confirmLabel:'Proteger dados',danger:true});
   if(String(confirmation||'').trim().toUpperCase()!=='BACKUP'){if(confirmation!==null)showToast('Migração cancelada','Baixe um backup completo e digite BACKUP para continuar.','info');return;}
   const button=byId('protect-existing-secrets');button.disabled=true;button.textContent='Protegendo…';
@@ -1837,7 +1798,7 @@ async function importCollectionFile(event){
     else if(typeof document.openapi==='string'){const parsed=RunnerLogic.parseOpenApiSpec(document);sourceCollection=parsed.collection;environmentSources=parsed.environment?[parsed.environment]:[];importWarnings=parsed.warnings;sourceName='OpenAPI';}
     else{const environment=importPostmanEnvironment(document);if(environment)environmentSources.push(environment);else throw Error('Formato não reconhecido. Use Vortix JSON, arquivos API Studio JSON legados, Insomnia v4, Postman v2.1 ou um ambiente Postman.');}
     const containsCredentials=(sourceCollection&&collectionHasAuthCredentials(sourceCollection))||environmentSources.some(environment=>environmentHasAuthCredentials(environment.variables));
-    const keepCredentials=containsCredentials?await confirmWithDialog({eyebrow:'DADOS SENSÍVEIS',title:'Credenciais encontradas',description:'Salvar Bearer, Basic, API Keys e variáveis sensíveis no SQLite local protegido?',warning:'A escolha Importar sem credenciais descarta esses valores. A proteção depende das chaves e da identidade desta instalação.',confirmLabel:'Importar credenciais',cancelLabel:'Importar sem credenciais',danger:true}):false;
+    const keepCredentials=containsCredentials?await confirmWithDialog({eyebrow:'DADOS SENSÍVEIS',title:'Credenciais encontradas',description:hostedMode?'Salvar Bearer, Basic, API Keys e variáveis sensíveis neste navegador? O IndexedDB não é criptografado automaticamente.':'Salvar Bearer, Basic, API Keys e variáveis sensíveis no SQLite local protegido?',warning:hostedMode?'Esses valores ficam neste perfil de navegador. Use Backup com senha para criar uma cópia protegida. A escolha Importar sem credenciais descarta os valores.':'A escolha Importar sem credenciais descarta esses valores. A proteção depende das chaves e da identidade desta instalação.',confirmLabel:'Importar credenciais',cancelLabel:'Importar sem credenciais',danger:true}):false;
     let imported=null;
     if(sourceCollection){
       imported=normalizeImportedNode(sourceCollection,keepCredentials,0,true,enableCapture,allowInsecureHttp);
@@ -2347,8 +2308,8 @@ async function captureResponseVariable(request,result,quiet=false){
 async function executeApiRequest(request){
   const {graphqlQuery,graphqlVariables,graphqlOperationName,...proxyRequest}=request;delete proxyRequest.authMode;delete proxyRequest.authSource;delete proxyRequest.collectionId;delete proxyRequest.folderId;delete proxyRequest.saveBearerToken;
   const response=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify(proxyRequest)});
-  let result;try{result=await response.json();}catch{throw Error('O servidor local devolveu uma resposta inválida.');}
-  void renderCookieJar();if(result.cookieJarWarning)showToast('Cookie não salvo',result.cookieJarWarning,'warning');await scheduleHostedWorkspaceSnapshot();
+  let result;try{result=await response.json();}catch{throw Error('O proxy Vortix devolveu uma resposta inválida.');}
+  void renderCookieJar();if(result.cookieJarWarning)showToast('Cookie não salvo',result.cookieJarWarning,'warning');
   return{proxyStatus:response.status,result};
 }
 async function performApiRequest(request,button,save,historyRequest=request){
@@ -2479,7 +2440,7 @@ async function requestTokenFromHelper(){
       const token=result?.status>=200&&result.status<300?extractToken(result.body??''):'';
       if(token){
         byId('bearer-token').value=token;byId('auth-type').value='bearer';updateAuthTypeUi();syncActiveWorkspaceTab(true);let savedEnvironment=null;
-        if(byId('save-token-environment').checked){try{savedEnvironment=await saveEnvironmentVariable('token',token);}catch(error){showToast('Token não salvo no ambiente',error.message||'Não foi possível gravar {{token}} no SQLite local.','error');}}
+        if(byId('save-token-environment').checked){try{savedEnvironment=await saveEnvironmentVariable('token',token);}catch(error){showToast('Token não salvo no ambiente',error.message||(hostedMode?'Não foi possível gravar {{token}} neste navegador.':'Não foi possível gravar {{token}} no SQLite local.'),'error');}}
         showToast('Token obtido',savedEnvironment?`Preenchido em Bearer e salvo como {{token}} no ambiente “${savedEnvironment.name}”.`:'Token preenchido em Bearer. Nada foi copiado para a área de transferência.','success');
       }
       else if(result?.status>=200&&result.status<300)showToast('Resposta recebida','Confira o corpo e preencha Token Bearer manualmente.','info');
@@ -2545,8 +2506,9 @@ function addEventListeners(){
 async function startApp(){
   addEventListeners();renderQueryParams([]);renderMultipartFields([]);renderGraphqlFields({});updateAuthTypeUi();updateBodyModeUi();renderBodyHighlight();
   try{await initializeHostingMode();await initializeDb();await loadTokenRequestConfig();await loadOAuth2TokenConfig();applyTheme(activeTheme);applyTypography();applyUiScale();renderCollectionTree();renderEnvironmentSelect();await loadOAuthPkceConfig();if(!byId('base-url').value)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';await renderHistory();await initializeWorkspaceTabs();updateGuard();updateCopyButtons();updateTokenButton();updateJsonTools();updateResponseCaptureUi();
-    if(hostedMode){await hostedSnapshotSync.catch(()=>{});await persistHostedWorkspaceSnapshot();byId('sidebar-storage-note').textContent='SQLite temporário · backup criptografado neste navegador';document.querySelector('.sidebar-bottom strong').textContent='Workspace por navegador';byId('history-panel').querySelector('.history-hint').textContent='Respostas no SQLite ativo, com recuperação criptografada neste navegador.';}
+    byId('protect-existing-secrets').hidden=hostedMode;
+    if(hostedMode){byId('sidebar-storage-note').textContent='Coleções e histórico neste navegador';document.querySelector('.sidebar-bottom strong').textContent='Workspace do navegador';byId('history-panel').querySelector('.history-hint').textContent='Histórico e dados ficam neste navegador; exporte backups para transferi-los.';byId('app-storage-note').textContent='Coleções, ambientes, requests e histórico ficam no IndexedDB deste navegador, sem criptografia automática. Use Backup com senha para transportar uma cópia protegida.';}
     else byId('sidebar-storage-note').textContent='SQLite local · proteção de dados';}
-  catch(error){showToast(hostedMode?'Workspace hospedado indisponível':'Banco local indisponível',error.message||'Confira o acesso ao armazenamento e tente recarregar.','error',0);updateGuard();updateCopyButtons();updateTokenButton();}
+  catch(error){showToast(hostedMode?'Armazenamento do navegador indisponível':'Banco local indisponível',error.message||'Confira o acesso ao armazenamento e tente recarregar.','error',0);updateGuard();updateCopyButtons();updateTokenButton();}
 }
 startApp();

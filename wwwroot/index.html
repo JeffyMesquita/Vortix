@@ -53,7 +53,7 @@
 
       <div class="sidebar-bottom">
         <span class="local-dot"></span>
-        <div><strong>Somente neste computador</strong><small id="sidebar-storage-note">SQLite local · proteção de dados</small></div>
+        <div><strong>Workspace local</strong><small id="sidebar-storage-note">SQLite local · proteção de dados</small></div>
       </div>
     </aside>
 
@@ -182,9 +182,9 @@
             </div>
             <label class="check-row history-token-option" for="save-token-history">
               <input id="save-token-history" type="checkbox" checked>
-              <span>Salvar credenciais de Auth nas requests locais</span>
+              <span>Salvar credenciais de Auth nas requests deste workspace</span>
             </label>
-            <p class="hint token-history-warning">Segredos salvos usam prote&ccedil;&atilde;o de dados no SQLite. Desmarque para mant&ecirc;-los apenas nesta sess&atilde;o.</p>
+            <p class="hint token-history-warning">No modo local, segredos salvos usam prote&ccedil;&atilde;o de dados no SQLite. No modo p&uacute;blico, ficam no IndexedDB deste navegador sem criptografia autom&aacute;tica. Desmarque para mant&ecirc;-los apenas nesta sess&atilde;o.</p>
             <details class="cookie-jar-panel" id="cookie-jar-panel">
               <summary><span>Cookies do ambiente ativo</span><span class="cookie-jar-count" id="cookie-jar-count">0</span></summary>
               <p class="hint">O Vortix reaproveita cookies neste ambiente. Valores não aparecem nesta lista. SameSite fica como metadado; regras de navegação do navegador não se aplicam ao cliente HTTP.</p>
@@ -193,7 +193,7 @@
             </details>
             <details class="token-helper" id="token-helper">
               <summary>Solicitar token</summary>
-              <p class="hint">Configure a rota e os nomes dos campos conforme a API. Essas prefer&ecirc;ncias ficam salvas localmente; valores de credencial s&atilde;o pedidos a cada envio e nunca entram no hist&oacute;rico.</p>
+              <p class="hint">Configure a rota e os nomes dos campos conforme a API. Essas prefer&ecirc;ncias ficam salvas no workspace; valores de credencial s&atilde;o pedidos a cada envio e nunca entram no hist&oacute;rico.</p>
               <label for="token-route">Rota do endpoint de token</label>
               <input id="token-route" type="text" autocomplete="off" spellcheck="false" placeholder="/oauth/token">
               <div class="token-config-fields">
@@ -208,7 +208,7 @@
               <select id="token-credential-mode"><option value="body">JSON no corpo (recomendado)</option><option value="query">Params da URL (se o endpoint exigir; pode aparecer em logs)</option></select>
               <p class="warning-text">HTTP n&atilde;o cifra credenciais. Confirme o destino antes de solicitar token.</p>
               <label class="check-row token-environment-option" for="save-token-environment"><input id="save-token-environment" type="checkbox" checked><span>Salvar o token obtido como <code>{{token}}</code> no ambiente ativo.</span></label>
-              <p class="hint">Depois, use <code>{{token}}</code> em Params, body ou URL base. Novos tokens usam prote&ccedil;&atilde;o local; migre registros antigos em Configura&ccedil;&otilde;es.</p>
+              <p class="hint">Depois, use <code>{{token}}</code> em Params, body ou URL base. No modo local, tokens salvos usam prote&ccedil;&atilde;o no SQLite; no modo p&uacute;blico, ficam no IndexedDB sem criptografia autom&aacute;tica.</p>
               <button class="button secondary" id="request-token" type="button" disabled>Obter token</button>
             </details>
             <details class="token-helper oauth2-helper" id="oauth2-helper">
@@ -224,13 +224,13 @@
               <label class="check-row token-environment-option" for="oauth2-allow-insecure-http"><input id="oauth2-allow-insecure-http" type="checkbox"><span>Permitir HTTP sem TLS neste endpoint remoto.</span></label>
               <p class="warning-text">HTTP remoto expõe client_secret e token na rede. Prefira HTTPS; HTTP local é permitido.</p>
               <label class="check-row token-environment-option" for="oauth2-save-token-environment"><input id="oauth2-save-token-environment" type="checkbox" checked><span>Salvar access token como <code>{{token}}</code> no ambiente ativo.</span></label>
-              <p class="hint">Perfil (URL, client ID e scopes) é salvo por ambiente. Client secret fica só na memória. O token salvo usa proteção local.</p>
+              <p class="hint">Perfil (URL, client ID e scopes) é salvo por ambiente. Client secret fica só na memória. No modo público, tokens salvos ficam no IndexedDB sem criptografia automática.</p>
               <p class="oauth2-token-status" id="oauth2-token-status" role="status" aria-live="polite" data-state="info">Nenhum token OAuth salvo neste ambiente.</p>
               <button class="button secondary" id="oauth2-request-token" type="button" disabled>Obter token OAuth</button>
             </details>
             <details class="token-helper oauth2-helper" id="oauth-pkce-helper">
               <summary>OAuth 2.0 · Authorization Code + PKCE</summary>
-              <p class="hint">Use quando a API acessa dados em nome de um usuário. O Vortix abre o provedor em outra aba, usa PKCE S256 e recebe o retorno por loopback. Este fluxo público não pede <code>client_secret</code>.</p>
+              <p class="hint">Use quando a API acessa dados em nome de um usuário. O Vortix abre o provedor em outra aba, usa PKCE S256 e recebe o retorno pela URI configurada. Este fluxo não pede <code>client_secret</code>.</p>
               <div class="oauth2-fields">
                 <div class="oauth2-wide"><label for="oauth-pkce-authorization-url">URL de autorização</label><input id="oauth-pkce-authorization-url" type="text" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://identity.example.com/oauth/authorize"></div>
                 <div class="oauth2-wide"><label for="oauth-pkce-token-url">URL do endpoint de token</label><input id="oauth-pkce-token-url" type="text" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://identity.example.com/oauth/token"></div>
@@ -244,10 +244,10 @@
                   <button class="button secondary compact-button" id="oauth-pkce-redirect-copy" type="button" disabled>Copiar</button>
                 </div>
               </div>
-              <p class="hint">Cadastre a URI exata mostrada. O Vortix só recebe callback em <code>127.0.0.1</code>; HTTP remoto é bloqueado. O provedor precisa aceitar Authorization Code com PKCE S256.</p>
+              <p class="hint">Cadastre a URI exata mostrada. O provedor precisa aceitar Authorization Code com PKCE S256. Fluxos remotos exigem HTTPS.</p>
               <label class="check-row token-environment-option" for="oauth-pkce-save-access-token"><input id="oauth-pkce-save-access-token" type="checkbox"><span>Salvar access token como <code>{{token}}</code> no ambiente ativo.</span></label>
               <label class="check-row token-environment-option" for="oauth-pkce-save-refresh-token"><input id="oauth-pkce-save-refresh-token" type="checkbox"><span>Salvar refresh token como <code>{{refresh_token}}</code> se o provedor retornar.</span></label>
-              <p class="hint">Os tokens ficam só em memória até você marcar cada opção. Valores salvos usam proteção local; renovação automática ainda não está disponível.</p>
+              <p class="hint">Os tokens ficam só em memória até você marcar cada opção. No modo público, valores salvos ficam no IndexedDB sem criptografia automática; renovação automática ainda não está disponível.</p>
               <p class="oauth2-token-status" id="oauth-pkce-flow-status" role="status" aria-live="polite" data-state="info">Informe a URL de autorização para calcular a redirect URI exata.</p>
               <button class="button secondary" id="oauth-pkce-start" type="button" disabled>Autorizar no navegador</button>
               <button class="button secondary compact-button" id="oauth-pkce-cancel" type="button" hidden>Cancelar autorização</button>
@@ -271,7 +271,7 @@
               <input id="response-success-only" type="checkbox" checked>
               <span>Salvar somente quando o status for 2xx</span>
             </label>
-            <p class="hint">A variável fica no ambiente ativo e pode ser usada como <code>{{token}}</code>. Valores sensíveis novos usam proteção local; a resposta completa não é salva.</p>
+            <p class="hint">A variável fica no ambiente ativo e pode ser usada como <code>{{token}}</code>. No modo local, valores sensíveis usam proteção no SQLite; no modo público, o IndexedDB não é criptografado automaticamente. A resposta completa não é salva.</p>
             <details class="script-help">
               <summary>Como isso funciona no Insomnia</summary>
               <p>Depois de receber a resposta, o Insomnia usa <code>insomnia.response.json()</code> e <code>insomnia.environment.set()</code>. O código equivalente abaixo pode ser copiado para Scripts → After-response.</p>
@@ -366,7 +366,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
           <div class="response-footer"><span class="response-indicator"></span><span id="response-persistence-note">Resposta temporária · não armazenada</span></div>
         </section>
       </div>
-      <footer class="app-footer">Dados ficam num SQLite local. Novos segredos usam proteção de dados; baixe backup e migre os antigos em Configurações. Backup simples gera JSON sem criptografia; use a opção protegida para transportar o workspace.</footer>
+      <footer class="app-footer" id="app-storage-note">No modo local, dados ficam no SQLite deste computador. Backups simples não são criptografados; use backup com senha para transportar o workspace.</footer>
     </section>
   </main>
 
@@ -428,7 +428,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
           </label>
           <label class="check-row" for="history-save-response-body"><input id="history-save-response-body" type="checkbox"><span>Salvar body de resposta</span></label>
         </div>
-        <p class="hint history-body-setting-note">Bodies de resposta ficam desativados por padrão. Ao ativar, ficam protegidos no SQLite. Desativar não apaga bodies já salvos; limpe o histórico para removê-los. Bodies de token nunca são guardados.</p>
+        <p class="hint history-body-setting-note">Bodies de resposta ficam desativados por padrão. No modo local, são protegidos no SQLite; no modo público, ficam no IndexedDB sem criptografia automática. Desativar não apaga bodies já salvos; limpe o histórico para removê-los. Bodies de token nunca são guardados.</p>
       </section>
       <section class="settings-section settings-environment-section" aria-labelledby="settings-environments-title">
         <div><h3 id="settings-environments-title">Ambientes</h3><p class="hint">Separe variáveis de desenvolvimento, homologação e produção.</p></div>
@@ -594,18 +594,6 @@ insomnia.environment.set("token", body.access_token);</code></pre>
         </section>
       </div>
       <div class="dialog-actions"><button class="button primary" id="close-history-compare-done" type="button">Concluído</button></div>
-    </form>
-  </dialog>
-  <dialog class="app-dialog hosted-login-dialog" id="hosted-login-dialog" aria-labelledby="hosted-login-title">
-    <form id="hosted-login-form">
-      <div class="dialog-heading">
-        <div><p class="eyebrow">VORTIX WORKSPACE</p><h2 id="hosted-login-title">Desbloquear workspace</h2><p class="dialog-description">Entre com a senha definida nas configurações privadas do serviço.</p></div>
-      </div>
-      <label for="hosted-access-password">Senha de acesso e do backup</label>
-      <input id="hosted-access-password" type="password" autocomplete="current-password" minlength="12" maxlength="256" required>
-      <p class="hosted-login-note">O SQLite do plano gratuito é temporário. O Vortix mantém um backup criptografado neste navegador; use sempre o mesmo navegador para recuperar seus dados.</p>
-      <p id="hosted-login-error" class="hosted-login-error" role="alert" hidden></p>
-      <div class="dialog-actions"><button class="button primary" id="hosted-login-submit" type="submit">Desbloquear</button></div>
     </form>
   </dialog>
 </body>
