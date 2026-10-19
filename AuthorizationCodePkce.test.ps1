@@ -39,7 +39,7 @@ New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
 try {
     $env:ApiStudio__Port = [string]$port
     $env:ApiStudio__DatabasePath = $databasePath
-    $dll = Join-Path $projectRoot 'bin\Release\net8.0\VortixApiClient.dll'
+    $dll = Join-Path $projectRoot 'bin\Release\net10.0\VortixApiClient.dll'
     $server = Start-Process -FilePath 'dotnet' -ArgumentList @($dll) -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $temporaryRoot 'api.out') -RedirectStandardError (Join-Path $temporaryRoot 'api.err')
     $ready = $false
     for ($attempt = 0; $attempt -lt 40; $attempt++) {

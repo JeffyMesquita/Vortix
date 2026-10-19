@@ -15,7 +15,7 @@ try {
 $process = Start-Process -FilePath 'dotnet' -ArgumentList @('run', '--project', $project, '--no-launch-profile') -WorkingDirectory $projectDir -PassThru -WindowStyle Normal
 for ($attempt = 0; $attempt -lt 80; $attempt++) {
     if ($process.HasExited) {
-        Write-Error 'O servidor local encerrou antes de ficar pronto. Confira o .NET 8 e a porta 51873 na janela aberta.'
+        Write-Error 'O servidor local encerrou antes de ficar pronto. Confira o .NET 10 e a porta 51873 na janela aberta.'
         exit 1
     }
     try {

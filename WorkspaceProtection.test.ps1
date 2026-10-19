@@ -89,7 +89,7 @@ function Get-PlaintextScan([string[]]$secrets, [string]$pythonPath) {
 try {
     $env:ApiStudio__Port = [string]$port
     $env:ApiStudio__DatabasePath = $databasePath
-    $dll = Join-Path $projectRoot 'bin\Release\net8.0\VortixApiClient.dll'
+    $dll = Join-Path $projectRoot 'bin\Release\net10.0\VortixApiClient.dll'
     $server = Start-TestApi 'first'
     & (Join-Path $projectRoot 'Test-VortixApiClient.ps1') -BaseUrl $baseUrl
     $headers = @{ 'X-Api-Studio' = '1'; Origin = $baseUrl }

@@ -170,7 +170,7 @@ Só entram depois das features anteriores e dos testes de uso:
 - [x] Cobrir porta, login, cookie, origem, rate limit e redirect OAuth em teste integrado.
 - [x] Documentar limites do plano Free, subdomínio, senha, persistência por navegador e acesso a APIs privadas.
 - [x] Incluir `Dockerfile` e `render.yaml` sem credenciais.
-- [ ] Atualizar o target e a imagem de .NET 8 antes de 10/11/2026, fim do suporte oficial dessa versão.
+- [x] Atualizar o target e a imagem para .NET 10 LTS, com suporte oficial até 14/11/2028.
 - [ ] Criar o serviço Render e guardar `ApiStudio__AccessPassword` como segredo no painel.
 - [ ] Configurar CNAME de `apicliente.jeffymesquita.dev` e validar o TLS pelo subdomínio.
 - [ ] Conferir uma request a uma API pública e a recuperação do workspace após um cold start real.

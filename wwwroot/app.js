@@ -23,7 +23,7 @@ let legacyDbPromise, toastId = 0, queryId = 0, collections = [], environments = 
 let activeSaved = null, selectedContainer = { collectionId:'', folderId:'' }, collapsed = new Set(), baseUrlAuto = true;
 let runnerEntries = [], runnerFailedCases = [], runnerBusy = false, runnerStopRequested = false;
 let quickOpenEntries = [], quickOpenActiveIndex = 0;
-let historySettings = RunnerLogic.normalizeHistorySettings(), historyRetentionWarningShown = false, historyComparisonIds = [];
+let historySettings = RunnerLogic.normalizeHistorySettings(), historyComparisonIds = [];
 const WORKSPACE_TABS_KEY = 'workspaceTabs', MAX_WORKSPACE_TABS = RunnerLogic.maxWorkspaceTabs;
 let workspaceTabs = [], activeWorkspaceTabId = '', workspaceTabsSaveTimer = 0, workspaceTabsStorageWarning = false, workspaceTabsLoading = false;
 let responseBodyState = RunnerLogic.parseResponseBody(''), responseBodyView = 'pretty', responseTreeSource = null;
@@ -116,10 +116,12 @@ async function dbRead(store,key) {
   return response.json();
 }
 async function dbWrite(store,value,remove=false) {
-  const url=remove==='clear'?`/api/storage/${encodeURIComponent(store)}`:remove?`/api/storage/${encodeURIComponent(store)}?key=${encodeURIComponent(value)}`:`/api/storage/${encodeURIComponent(store)}`;
+  const url=remove==='clear'?`/api/storage/${encodeURIComponent(store)}`:remove?`/api/storage/${encodeURIComponent(store)}?key=${encodeURIComponent(value)}`:`/api/storage/${encodeURIComponent(store)}${store==='history'?`?retentionLimit=${historySettings.limit}`:''}`;
   const response=await fetch(url,{method:remove?'DELETE':'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:remove?undefined:JSON.stringify(value)});
-  if(!response.ok)throw Error('Falha ao gravar no banco local.');
+  if(!response.ok){const error=await response.json().catch(()=>null);throw Error(error?.error||'Falha ao gravar no banco local.');}
+  const result=response.status===204?null:await response.json().catch(()=>null);
   await scheduleHostedWorkspaceSnapshot();
+  return result;
 }
 function hostedWorkspaceIsEmpty(workspace) {
   return ['history','collections','environments','settings'].every(store=>Array.isArray(workspace?.[store])&&workspace[store].length===0);
@@ -908,7 +910,7 @@ async function saveHistorySettings(){
     if(removedCount&&!(await confirmWithDialog({eyebrow:'HISTÓRICO',title:'Aplicar limite do histórico?',description:`Serão removidas ${removedCount} requests mais antigas, incluindo responses e bodies salvos.`,warning:'A remoção não pode ser desfeita.',confirmLabel:'Aplicar limite',danger:true}))){syncHistorySettingsControls();return;}
   }
   try{await dbWrite('settings',{key:'historyPreferences',value:next});}
-  catch{syncHistorySettingsControls();showToast('Preferência não salva','Não foi possível salvar as opções do histórico.','error');return;}
+  catch(error){syncHistorySettingsControls();showToast('Preferência não salva',error.message||'Não foi possível salvar as opções do histórico.','error');return;}
   historySettings=next;syncHistorySettingsControls();
   if(removedCount){
     try{const result=await trimHistory(next.limit);showToast('Limite aplicado',`${result.removed} registros antigos removidos.`,'success');}
@@ -952,7 +954,7 @@ async function renderHistory(){
 async function saveHistoryResponse(entry,result,durationMs){
   if(!entry||!result)return;
   try{entry.response=RunnerLogic.createResponseHistorySnapshot(result,durationMs,{...historySettings,tokenRequest:entry.tokenRequest===true});await dbWrite('history',entry);await renderHistory();byId('response-persistence-note').textContent='Resposta salva no histórico';}
-  catch{showToast('Resposta não salva no histórico','A request foi mantida, mas os metadados da resposta não puderam ser gravados.','warning');}
+  catch(error){showToast('Resposta não salva no histórico',error.message||'A request foi mantida, mas os metadados da resposta não puderam ser gravados.','warning');}
 }
 async function saveHistory(request){
   const base=sanitizeBase(request.baseUrl),path=sanitizeRoute(request.route),headers=sanitizeHeaders(request.headers),payload=sanitizeBody(request.body),multipart=normalizePersistableMultipartFields(request.multipartFields,true),graphql=normalizePersistableGraphqlFields(request);
@@ -971,11 +973,11 @@ async function saveHistory(request){
     responseTests:RunnerLogic.normalizeResponseTests(request.responseTests)
   };
   try{
-    await dbWrite('history',entry);byId('history-panel').open=true;
-    let removed=0;try{removed=(await trimHistory(historySettings.limit)).removed||0;}catch{if(!historyRetentionWarningShown){historyRetentionWarningShown=true;showToast('Limite pendente','A request foi salva, mas o servidor não aplicou retenção do histórico.','warning',8000);}}
+    const retention=await dbWrite('history',entry);byId('history-panel').open=true;
+    const removed=retention?.removed||0;
     await renderHistory();const message=entry.redacted?'Campos sensíveis foram omitidos conforme a opção de salvamento.':saveAuth&&hasAuthCredentials(entry)?'Request e credenciais de Auth salvas no banco local.':'Request salva sem credenciais de Auth.';
     showToast('Histórico salvo',removed?`${message} ${removed} registros antigos foram removidos pela retenção.`:message,'success',3500);return entry;
-  }catch{showToast('Histórico indisponível','O navegador não permitiu salvar; a requisição seguirá normalmente.','warning');return null;}
+  }catch(error){showToast('Histórico indisponível',error.message||'A chamada terminou, mas o registro não pôde ser salvo.','warning');return null;}
 }
 function applyHistoryEntry(entry,notify=true){
   selectedContainer={collectionId:'',folderId:''};
@@ -1040,7 +1042,7 @@ async function saveAuthDefault(){
   try{
     await dbWrite('collections',collection);byId('auth-inheritance-mode').value='inherit';applyAuthFields({authMode:'inherit'});syncActiveWorkspaceTab(true);renderCollectionTree();
     showToast('Auth padrão salva','Esta coleção/pasta será usada pelas requests que herdarem Auth.','success');
-  }catch{if(previous===undefined)delete container.auth;else container.auth=previous;showToast('Falha ao salvar Auth','Não foi possível salvar o padrão nesta coleção/pasta.','error');}
+  }catch(error){if(previous===undefined)delete container.auth;else container.auth=previous;showToast('Falha ao salvar Auth',error.message||'Não foi possível salvar o padrão nesta coleção/pasta.','error');}
 }
 function findParent(collection,id,parent=collection){for(const folder of parent?.folders||[]){if(folder.id===id)return parent;const found=findParent(collection,id,folder);if(found)return found;}return null;}
 function selectContainer(collectionId,folderId=''){
@@ -1214,7 +1216,7 @@ function renderWorkspaceTabs(){
 function persistableWorkspaceTabs(){return RunnerLogic.normalizeWorkspaceTabs({activeId:activeWorkspaceTabId,tabs:workspaceTabs.map(({id,title,request,activeSaved,collectionId,folderId,editorSection,saveBearerToken,dirty})=>({id,title,request,activeSaved,collectionId,folderId,editorSection,saveBearerToken,dirty}))});}
 async function persistWorkspaceTabsNow(){
   try{await dbWrite('settings',{key:WORKSPACE_TABS_KEY,value:persistableWorkspaceTabs()});workspaceTabsStorageWarning=false;}
-  catch{if(!workspaceTabsStorageWarning){showToast('Abas não salvas','O banco local não conseguiu persistir as abas abertas.','warning');workspaceTabsStorageWarning=true;}}
+  catch(error){if(!workspaceTabsStorageWarning){showToast('Abas não salvas',error.message||'O banco local não conseguiu persistir as abas abertas.','warning');workspaceTabsStorageWarning=true;}}
 }
 function scheduleWorkspaceTabsPersist(){clearTimeout(workspaceTabsSaveTimer);workspaceTabsSaveTimer=setTimeout(()=>void persistWorkspaceTabsNow(),250);}
 function syncActiveWorkspaceTab(markDirty=false){
@@ -1399,7 +1401,7 @@ async function addCollection(){
   if(!name?.trim())return;
   const item={id:newId(),name:name.trim(),folders:[],requests:[]};collections.push(item);selectedContainer={collectionId:item.id,folderId:''};
   try{await dbWrite('collections',item);renderCollectionTree();showToast('Coleção criada','“'+item.name+'” está pronta para organizar requests.','success');}
-  catch{collections=collections.filter(x=>x.id!==item.id);showToast('Falha ao salvar','Não foi possível criar a coleção local.','error');}
+  catch(error){collections=collections.filter(x=>x.id!==item.id);showToast('Falha ao salvar',error.message||'Não foi possível criar a coleção local.','error');}
 }
 async function addFolder(collectionId,parentId=''){
   const name=await promptWithDialog({eyebrow:'PASTAS',title:'Nova pasta',description:'Crie uma pasta ou subpasta para organizar as requisições.',inputLabel:'Nome da pasta',placeholder:'Ex.: Consultas',confirmLabel:'Criar pasta'});
@@ -1407,7 +1409,7 @@ async function addFolder(collectionId,parentId=''){
   const collection=findCollection(collectionId),parent=findFolder(collection,parentId);if(!collection||!parent)return;
   const folder={id:newId(),name:name.trim(),folders:[],requests:[]};parent.folders||=[];parent.folders.push(folder);collapsed.delete(parent.id);selectedContainer={collectionId,folderId:folder.id};
   try{await persistCollections();showToast('Pasta criada','Pasta “'+folder.name+'” adicionada.','success');}
-  catch{parent.folders=parent.folders.filter(x=>x.id!==folder.id);showToast('Falha ao salvar','Não foi possível criar a pasta.','error');}
+  catch(error){parent.folders=parent.folders.filter(x=>x.id!==folder.id);showToast('Falha ao salvar',error.message||'Não foi possível criar a pasta.','error');}
 }
 async function manageNode(collectionId,folderId,kind){
   const collection=findCollection(collectionId),item=kind==='collection'?collection:findFolder(collection,folderId);if(!item)return;
@@ -1418,7 +1420,7 @@ async function manageNode(collectionId,folderId,kind){
     if(!name?.trim())return;
     item.name=name.trim();
     try{await persistCollections();showToast('Nome atualizado',item.name,'success');}
-    catch{showToast('Falha ao salvar','Não foi possível renomear.','error');}
+    catch(error){showToast('Falha ao salvar',error.message||'Não foi possível renomear.','error');}
     return;
   }
   if(choice.value!=='delete')return;
@@ -1439,7 +1441,7 @@ async function deleteCollectionRequest(collectionId,folderId,id){
   const container=findFolder(findCollection(collectionId),folderId);if(!container)return;
   container.requests=(container.requests||[]).filter(x=>x.id!==id);
   try{await persistCollections();if(activeSaved?.id===id){activeSaved=null;clearCurrentResponseExample();updateCopyButtons();}showToast('Requisição excluída','Item removido da coleção.','info');}
-  catch{showToast('Falha ao excluir','Não foi possível atualizar a coleção.','error');}
+  catch(error){showToast('Falha ao excluir',error.message||'Não foi possível atualizar a coleção.','error');}
 }
 function exportAuthConfig(source,includeCredentials=true,preserveMode=false){
   const auth=RunnerLogic.persistAuthFields({...source,authMode:preserveMode?source.authMode:'custom'},includeCredentials);delete auth.authOmitted;if(!preserveMode)delete auth.authMode;return auth;
@@ -1889,7 +1891,7 @@ async function saveCollectionRequest(event){
     await dbWrite('collections',collection);activeSaved={id:saved.id,name,collectionId,folderId};clearCurrentResponseExample();selectedContainer={collectionId,folderId};
     byId('request-title').textContent=name;byId('save-request-dialog').close();renderCollectionTree();markActiveWorkspaceTabSaved(saved);
     showToast('Requisição salva',saved.redacted?'Params, headers e body salvos; campos sensíveis foram omitidos.':'Request guardada na coleção e no banco local.','success');
-  }catch{showToast('Falha ao salvar','Não foi possível salvar a request na coleção.','error');}
+  }catch(error){showToast('Falha ao salvar',error.message||'Não foi possível salvar a request na coleção.','error');}
 }
 function loadCollectionRequest(request,collectionId,folderId,notify=true){
   clearCurrentResponseExample();
@@ -2070,7 +2072,7 @@ async function saveFont(name){
   if(!fontFamilies.has(name))return;
   activeFont=name;applyTypography();
   try{await dbWrite('settings',{key:'fontFamily',value:activeFont});showToast('Fonte salva','Preferência aplicada neste navegador.','success',2500);}
-  catch{showToast('Fonte aplicada','Não foi possível salvar a preferência local.','warning');}
+  catch(error){showToast('Fonte aplicada',error.message||'Não foi possível salvar a preferência local.','warning');}
 }
 function applyUiScale(){
   document.documentElement.style.setProperty('--ui-scale',String(activeScale));
@@ -2084,7 +2086,7 @@ async function setUiScale(value){
   if(next===activeScale)return;
   activeScale=next;applyUiScale();if(byId('runner-dialog')?.open)fitRunnerDialog();
   try{await dbWrite('settings',{key:'uiScale',value:activeScale});}
-  catch{showToast('Escala aplicada','Não foi possível salvar a preferência local.','warning');}
+  catch(error){showToast('Escala aplicada',error.message||'Não foi possível salvar a preferência local.','warning');}
 }
 function handleScaleShortcut(event){
   if(!(event.ctrlKey||event.metaKey)||event.altKey)return;
@@ -2104,7 +2106,7 @@ async function saveTheme(name){
   if(!themes.has(name))return;
   applyTheme(name);
   try{await dbWrite('settings',{key:'activeTheme',value:activeTheme});showToast('Tema salvo','Tema '+activeTheme+' aplicado neste navegador.','success',2500);}
-  catch{showToast('Tema aplicado','Não foi possível salvar a preferência local.','warning');}
+  catch(error){showToast('Tema aplicado',error.message||'Não foi possível salvar a preferência local.','warning');}
 }
 function getEnvironment(){return environments.find(x=>x.id===activeEnvironmentId)||environments[0]||{variables:{}};}
 function applyEnvironment(value){
@@ -2195,7 +2197,7 @@ async function saveEnvironmentDraft(event){
     environmentDraft=[];await dbWrite('settings',{key:'activeEnvironmentId',value:activeEnvironmentId});renderEnvironmentSelect();await loadTokenRequestConfig();await loadOAuth2TokenConfig();await loadOAuthPkceConfig();
     if(baseUrlAuto)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';
     byId('environment-dialog').close();showToast('Ambientes salvos','Grupos e variáveis persistidos no banco local.','success');
-  }catch{showToast('Falha ao salvar','Não foi possível persistir os ambientes.','error');}
+  }catch(error){showToast('Falha ao salvar',error.message||'Não foi possível persistir os ambientes.','error');}
 }
 function tokenCandidate(value){if(typeof value!=='string')return'';const token=value.trim().replace(/^Bearer\s+/i,'');return token.length>=16&&!/\s/.test(token)?token:'';}
 function findToken(value,depth=0){if(!value||typeof value!=='object'||depth>4)return'';for(const[key,child]of Object.entries(value))if(['access_token','accesstoken','token','bearer','jwt'].includes(key.toLowerCase())){const token=tokenCandidate(child);if(token)return token;}for(const child of Object.values(value)){const token=findToken(child,depth+1);if(token)return token;}return'';}
@@ -2275,7 +2277,7 @@ async function deleteSavedResponseExample(exampleId){
   const saved=container.requests[index],examples=RunnerLogic.normalizeResponseExamples(saved.responseExamples);
   container.requests[index]={...saved,responseExamples:examples.filter(example=>example.id!==exampleId)};
   try{await dbWrite('collections',collection);}
-  catch{container.requests[index]=saved;showToast('Falha ao excluir','A coleção não foi atualizada no banco local.','error');return;}
+  catch(error){container.requests[index]=saved;showToast('Falha ao excluir',error.message||'A coleção não foi atualizada no banco local.','error');return;}
   renderCollectionTree();updateCopyButtons();showToast('Exemplo excluído','O exemplo foi removido da request.','success',3000);
 }
 function resolveSavedResponseExampleRoute(value){

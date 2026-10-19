@@ -5,7 +5,7 @@
 <h1 align="center">Vortix</h1>
 
 <p align="center">Cliente HTTP agnóstico para criar, organizar, executar e repetir requisições de API.</p>
-<p align="center">ASP.NET Core 8 · SQLite · IndexedDB criptografado no modo hospedado</p>
+<p align="center">ASP.NET Core 10 · SQLite · IndexedDB criptografado no modo hospedado</p>
 
 ---
 
@@ -75,7 +75,7 @@ Requests novas começam vazias. A URL base e os demais valores vêm do ambiente 
 
 ## Requisitos
 
-- **.NET 8 SDK** para executar, compilar ou publicar o projeto.
+- **.NET 10 SDK** para executar, compilar ou publicar o projeto.
 - Navegador moderno com suporte a IndexedDB e Web Crypto.
 - **Node.js 18 ou superior** para os testes de lógica JavaScript.
 - **PowerShell e Python 3** para o teste integrado de proteção do SQLite.
@@ -137,13 +137,13 @@ Se preferir testar primeiro pela URL <code>onrender.com</code>, atualize <code>A
 
 ### Persistência e limites do plano Free
 
-O SQLite do serviço hospedado é um banco de trabalho temporário. O Vortix cria uma cópia AES-GCM no IndexedDB do navegador, protegida pela senha de acesso, e a restaura no SQLite quando o servidor volta sem dados. A cópia fica vinculada à origem e ao perfil do navegador usados para entrar. Use **Configurações → Backup do workspace** para exportar uma cópia protegida independente.
+O SQLite do serviço hospedado é um banco de trabalho temporário. O Vortix cria uma cópia AES-GCM no IndexedDB do navegador, protegida pela senha de acesso, e a restaura no SQLite quando o servidor volta sem dados. A cópia fica vinculada à origem e ao perfil do navegador usados para entrar. O workspace hospedado respeita o limite de **15 MiB** e as quantidades máximas do formato de backup; gravações que ultrapassariam esses limites são recusadas com orientação para reduzir dados ou bodies do histórico. Use **Configurações → Backup do workspace** para exportar uma cópia protegida independente.
 
 O Render Free suspende serviços após 15 minutos sem tráfego, pode reiniciá-los e apaga arquivos locais ao dormir, reiniciar ou publicar uma nova versão. O primeiro acesso após suspensão pode levar cerca de um minuto. O plano Free não oferece disco persistente e a própria Render o recomenda para projetos de teste/hobby, não para aplicações de produção. Veja os [limites oficiais do plano Free](https://render.com/docs/free).
 
 O backup automático **não sincroniza com segurança vários navegadores ou dispositivos**. Use sempre o mesmo perfil e a mesma origem. A sessão pode precisar de novo login após um reinício. Mantenha a senha de acesso estável: se o SQLite já tiver sido apagado e a senha mudar, o snapshot existente não poderá ser aberto com a senha nova. Se limpar os dados do navegador ou esquecer a senha, a cópia automática também não poderá ser recuperada; mantenha um backup exportado com senha.
 
-O container acompanha o target atual do projeto, .NET 8. O suporte oficial dessa versão termina em **10 de novembro de 2026**; para manter a hospedagem depois dessa data, atualize o projeto e a imagem Docker para uma versão suportada, como .NET 10. Consulte a [política de suporte do .NET](https://learn.microsoft.com/en-us/dotnet/core/releases-and-support).
+O projeto e o container usam .NET 10 LTS. O suporte oficial vai até **14 de novembro de 2028**. Consulte a [política de suporte do .NET](https://learn.microsoft.com/en-us/dotnet/core/releases-and-support).
 
 Como as requests são encaminhadas pelo servidor hospedado, ele só alcança endereços disponíveis a partir da rede do Render. <code>localhost</code>, <code>192.168.x.x</code> e outros endereços privados do computador não apontam para sua máquina e não serão acessíveis. Use o modo local para APIs da rede privada ou uma infraestrutura local/túnel separado.
 
