@@ -17,9 +17,11 @@ internal sealed class LocalDataStore
     private const string LegacyProtectedPrefix = "APISTUDIO:DPAPI:v1:";
     private const string WorkspaceBackupFormat = "api-studio-workspace";
     private const string WorkspaceBackupTimestampForSize = "2000-01-01T00:00:00.000Z";
+    private const int WorkspaceRecordLimit = 1000;
     private const int HostedCookieJarSessionLimitBytes = 256 * 1024;
     private const int HostedCookieJarStoreLimitBytes = 4 * 1024 * 1024;
-    private const int HostedCookieJarEnvironmentLimit = 1000;
+    /// <summary>Gets the maximum number of environments accepted in a hosted cookie-jar restore.</summary>
+    internal const int MaxHostedCookieJarEnvironmentCount = WorkspaceRecordLimit;
     /// <summary>Gets the maximum number of cookies allowed in one environment jar.</summary>
     internal const int MaxHostedCookieJarCookieCount = 300;
     private static readonly JsonSerializerOptions WorkspaceBackupSizeJsonOptions = new()
@@ -178,7 +180,7 @@ internal sealed class LocalDataStore
     public async Task ReplaceHostedCookieJarsAsync(string sessionId, IReadOnlyDictionary<string, JsonElement> jars, CancellationToken cancellationToken = default)
     {
         ValidateHostedCookieSession(sessionId);
-        if (jars.Count > HostedCookieJarEnvironmentLimit) throw new ArgumentException("O backup contém ambientes demais.", nameof(jars));
+        if (jars.Count > MaxHostedCookieJarEnvironmentCount) throw new ArgumentException("O backup contém ambientes demais.", nameof(jars));
         foreach (var (environmentId, value) in jars)
         {
             ValidateHostedCookieEnvironment(environmentId);
@@ -207,25 +209,31 @@ internal sealed class LocalDataStore
         var retained = entries.Where(entry => entry.SessionId != sessionId || (!replaceSession && !replacedEnvironments!.Contains(entry.EnvironmentId))).ToList();
         var sessionEntries = retained.Where(entry => entry.SessionId == sessionId).ToArray();
         var newSessionBytes = incoming.Values.Sum(entry => entry.Size);
-        if (sessionEntries.Length + incoming.Count > HostedCookieJarEnvironmentLimit ||
+        await using var settingsCountCommand = connection.CreateCommand();
+        settingsCountCommand.Transaction = transaction;
+        settingsCountCommand.CommandText = "SELECT COUNT(*) FROM api_studio_data WHERE store = 'settings'";
+        var nonCookieSettingsCount = Convert.ToInt64(await settingsCountCommand.ExecuteScalarAsync(cancellationToken)) - entries.Count;
+        if (sessionEntries.Length + incoming.Count > MaxHostedCookieJarEnvironmentCount ||
             sessionEntries.Sum(entry => entry.Size) + newSessionBytes > HostedCookieJarSessionLimitBytes)
             throw new HostedCookieJarLimitExceededException();
 
         var remainingBytes = retained.Sum(entry => entry.Size) + newSessionBytes;
+        var remainingSettingsCount = nonCookieSettingsCount + retained.Count + incoming.Count;
         var evictedSessions = new HashSet<string>(StringComparer.Ordinal);
-        if (remainingBytes > HostedCookieJarStoreLimitBytes)
+        if (remainingBytes > HostedCookieJarStoreLimitBytes || remainingSettingsCount > WorkspaceRecordLimit)
         {
             foreach (var inactiveSession in retained.Where(entry => entry.SessionId != sessionId)
                          .GroupBy(entry => entry.SessionId)
-                         .Select(group => new { SessionId = group.Key, Size = group.Sum(entry => entry.Size), LastWrite = group.Max(entry => entry.LastWriteUtc) })
+                         .Select(group => new { SessionId = group.Key, Size = group.Sum(entry => entry.Size), Count = group.Count(), LastWrite = group.Max(entry => entry.LastWriteUtc) })
                          .OrderBy(group => group.LastWrite))
             {
                 evictedSessions.Add(inactiveSession.SessionId);
                 remainingBytes -= inactiveSession.Size;
-                if (remainingBytes <= HostedCookieJarStoreLimitBytes) break;
+                remainingSettingsCount -= inactiveSession.Count;
+                if (remainingBytes <= HostedCookieJarStoreLimitBytes && remainingSettingsCount <= WorkspaceRecordLimit) break;
             }
         }
-        if (remainingBytes > HostedCookieJarStoreLimitBytes) throw new HostedCookieJarLimitExceededException();
+        if (remainingBytes > HostedCookieJarStoreLimitBytes || remainingSettingsCount > WorkspaceRecordLimit) throw new HostedCookieJarLimitExceededException();
 
         await using (var delete = connection.CreateCommand())
         {
@@ -432,7 +440,7 @@ internal sealed class LocalDataStore
         var stores = new[] { "history", "collections", "environments", "settings" };
         var limits = new Dictionary<string, int>(StringComparer.Ordinal)
         {
-            ["history"] = 25000, ["collections"] = 1000, ["environments"] = 1000, ["settings"] = 1000
+            ["history"] = 25000, ["collections"] = WorkspaceRecordLimit, ["environments"] = WorkspaceRecordLimit, ["settings"] = WorkspaceRecordLimit
         };
         if (backup.ValueKind != JsonValueKind.Object ||
             !backup.TryGetProperty("format", out var format) || format.ValueKind != JsonValueKind.String || format.GetString() != "api-studio-workspace" ||
@@ -497,8 +505,8 @@ internal sealed class LocalDataStore
         if (_maxWorkspaceBackupBytes is not long limit) return;
 
         var data = await ReadWorkspaceAsync(connection, transaction, cancellationToken);
-        if (data["history"].Count > 25000 || data["collections"].Count > 1000 ||
-            data["environments"].Count > 1000 || data["settings"].Count > 1000)
+        if (data["history"].Count > 25000 || data["collections"].Count > WorkspaceRecordLimit ||
+            data["environments"].Count > WorkspaceRecordLimit || data["settings"].Count > WorkspaceRecordLimit)
         {
             throw new WorkspaceSnapshotLimitExceededException();
         }
@@ -793,7 +801,7 @@ internal sealed class HostedCookieJarLimitExceededException : Exception
 {
     /// <summary>Initializes a new instance of the <see cref="HostedCookieJarLimitExceededException"/> class.</summary>
     public HostedCookieJarLimitExceededException()
-        : base("Os cookies deste navegador excedem o limite de 256 KiB por sessão.")
+        : base("Os Cookie jars excedem o limite por sessão ou o limite compartilhado do serviço.")
     {
     }
 }

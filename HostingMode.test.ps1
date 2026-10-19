@@ -119,6 +119,27 @@ try {
     $replacementJars = @(($bulkReadAfterReplacement.Content | ConvertFrom-Json).jars)
     if ([int]$bulkReplacement.Response.StatusCode -ne 204 -or $replacementJars.Count -ne 1 -or $replacementJars[0].environmentId -ne 'restored-b') { throw 'Bulk cookie-jar restore must replace, not merge, the current session jars.' }
 
+    $oldestRecordCookieSession = ''
+    $latestRecordCookieSession = ''
+    for ($sessionIndex = 0; $sessionIndex -lt 40; $sessionIndex++) {
+        $clientIp = "198.51.100.$(140 + $sessionIndex)"
+        $newSession = Send-HostedRequest 'GET' '/api/session' '' '' '' $clientIp
+        $newSessionCookie = $newSession.Response.Headers.GetValues('Set-Cookie') | Select-Object -First 1
+        $sessionId = $newSessionCookie.Split(';')[0]
+        $jars = @()
+        for ($environmentIndex = 0; $environmentIndex -lt 30; $environmentIndex++) {
+            $jars += @{ environmentId = "record-$environmentIndex"; value = @{ cookies = @(@{ cookieName = 'session'; cookieHeader = 'session=small'; cookieOrigin = 'https://api.example.test' }) } }
+        }
+        $jarWrite = Send-HostedRequest 'PUT' '/api/cookie-jar' $publicOrigin (ConvertTo-Json -InputObject @{ jars = $jars } -Depth 8 -Compress) $sessionId $clientIp
+        if ([int]$jarWrite.Response.StatusCode -ne 204) { throw "Small cookie jars were rejected at settings record limit for session $sessionIndex with HTTP $([int]$jarWrite.Response.StatusCode)." }
+        if ($sessionIndex -eq 0) { $oldestRecordCookieSession = $sessionId }
+        $latestRecordCookieSession = $sessionId
+        Start-Sleep -Milliseconds 20
+    }
+    $evictedRecordCookieJars = Send-HostedRequest 'GET' '/api/cookie-jar' '' '' $oldestRecordCookieSession
+    $latestRecordCookieJars = Send-HostedRequest 'GET' '/api/cookie-jar' '' '' $latestRecordCookieSession
+    if (@((($evictedRecordCookieJars.Content | ConvertFrom-Json).jars)).Count -ne 0 -or @((($latestRecordCookieJars.Content | ConvertFrom-Json).jars)).Count -ne 30) { throw 'The hosted cookie-jar pool must evict sessions before reaching the SQLite settings record limit.' }
+
     $oldestCookieSession = ''
     $latestCookieSession = ''
     for ($sessionIndex = 0; $sessionIndex -lt 35; $sessionIndex++) {
