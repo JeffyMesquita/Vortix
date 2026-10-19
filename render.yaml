@@ -13,5 +13,3 @@ services:
         value: render
       - key: ApiStudio__PublicOrigin
         value: https://apicliente.jeffymesquita.dev
-      - key: ApiStudio__AccessPassword
-        sync: false

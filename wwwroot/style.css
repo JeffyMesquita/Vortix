@@ -891,8 +891,3 @@ textarea.compact { min-height: 165px; }
 .cookie-jar-panel > .button { width: 100%; }
 .auth-bearer-fields[hidden], .auth-credentials[hidden], #api-key-query-warning[hidden], #token-helper[hidden] { display: none !important; }
 @media (max-width: 600px) { .auth-basic, .auth-api-key { grid-template-columns: 1fr; } }
-.hosted-login-dialog { width: min(460px, calc(100vw - 32px)); }
-.hosted-login-dialog .dialog-description { max-width: 360px; }
-.hosted-login-note { border: 1px solid var(--border); border-radius: 9px; margin: 15px 24px 0; padding: 11px 12px; color: var(--muted); background: var(--surface-raised); font-size: 11px; line-height: 1.55; }
-.hosted-login-error { margin: 12px 24px 0; color: var(--danger); font-size: 12px; line-height: 1.45; }
-.hosted-login-dialog .dialog-actions { margin-top: 16px; }

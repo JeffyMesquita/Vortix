@@ -160,20 +160,21 @@ Só entram depois das features anteriores e dos testes de uso:
 - [x] Importar HTTPie CLI como formato adicional, sem executar o comando; filtrar credenciais e recusar arquivos/opções desconhecidas.
 - [x] Schema GraphQL por introspecção com confirmação explícita, cache em memória, browser de tipos e autocomplete.
 
-### 11. Hospedagem pessoal gratuita
+### 11. Hospedagem pública gratuita
 
-**Status: preparação e validação local concluídas; provisionamento externo pendente.**
+**Status: modo público implementado e validado localmente; provisionamento externo pendente.**
 
-- [x] Manter o modo local preso ao loopback e criar modo Render com `PORT`, origem HTTPS configurada e senha.
-- [x] Proteger endpoints hospedados com sessão HttpOnly/Secure, validação de origem e limite de tentativas de login.
-- [x] Manter SQLite como banco ativo e criar snapshot AES-GCM no IndexedDB do navegador para recuperação após suspensão/reinício.
-- [x] Cobrir porta, login, cookie, origem, rate limit e redirect OAuth em teste integrado.
-- [x] Documentar limites do plano Free, subdomínio, senha, persistência por navegador e acesso a APIs privadas.
+- [x] Manter o modo local preso ao loopback e criar modo Render com `PORT` e origem HTTPS configurada.
+- [x] Abrir acesso sem senha compartilhada e manter workspace de cada perfil no IndexedDB do navegador.
+- [x] Isolar Cookie jars e fluxos OAuth por sessão aleatória `HttpOnly`/`Secure`; esconder os endpoints do SQLite do workspace.
+- [x] Validar a origem, bloquear destinos IP não públicos no proxy e limitar chamadas por IP encaminhado.
+- [x] Cobrir acesso anônimo, isolamento de sessões e OAuth, bloqueio de workspace, SSRF e rate limit em teste integrado.
+- [x] Documentar persistência no navegador, backups protegidos, limites do plano Free e acesso a APIs privadas.
 - [x] Incluir `Dockerfile` e `render.yaml` sem credenciais.
 - [x] Atualizar o target e a imagem para .NET 10 LTS, com suporte oficial até 14/11/2028.
-- [ ] Criar o serviço Render e guardar `ApiStudio__AccessPassword` como segredo no painel.
+- [ ] Criar o serviço web público no Render, sem senha compartilhada.
 - [ ] Configurar CNAME de `apicliente.jeffymesquita.dev` e validar o TLS pelo subdomínio.
-- [ ] Conferir uma request a uma API pública e a recuperação do workspace após um cold start real.
+- [ ] Conferir uma request a uma API pública, persistência do IndexedDB e Cookie jar após um cold start real.
 
 ## Regra de sequência
 

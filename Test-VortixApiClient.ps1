@@ -22,9 +22,9 @@ foreach ($requiredText in @(
     'id="run-collection"', 'id="runner-dialog"', 'id="runner-datasets"', 'id="runner-write-phrase"',
     'id="response-view-modes"', 'data-response-view="tree"', 'id="response-search"', 'id="response-tree"',
     'id="response-example-save-hint"', 'id="save-response-example"', 'id="response-example-save-form"', 'id="response-example-name"', 'id="response-examples-panel"', 'id="response-examples-list"',
-    'id="hosted-login-dialog"', 'id="hosted-access-password"',
     'Insomnia JSON (v4)', 'Postman Collection v2.1', 'id="export-workspace"', 'id="restore-workspace"', 'id="restore-workspace-file"', 'id="protect-existing-secrets"'
 )) {
     if (-not $page.Contains($requiredText)) { throw "Page is missing required label: $requiredText" }
 }
-'Local smoke test passed: request methods, Params, Auth, SQLite, response viewer and capture, tests, settings, themes, JSON editor, collection formats, and workspace snapshot, backup, restore, and data-protection migration controls are present.'
+if ($page.Contains('hosted-login-dialog') -or $page.Contains('hosted-access-password')) { throw 'Public app shell must not require a shared workspace password.' }
+'Local smoke test passed: request methods, Params, Auth, SQLite, response viewer and capture, tests, settings, themes, JSON editor, collection formats, and backup, restore, and data-protection migration controls are present without a hosted login.'
