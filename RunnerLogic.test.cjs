@@ -1510,3 +1510,261 @@ test('hosted workspace limit guidance reaches the primary save toasts', () => {
     assert.match(app.slice(start, end), /catch\(error\)\{[^}]*error\.message/, `save flow must show the server error: ${startMarker}`);
   }
 });
+
+async function localVaultFixture(api, marker) {
+  const { webcrypto } = require('node:crypto');
+  const passphrase = 'correct horse battery staple';
+  const vault = await api.createLocalSecretVault(passphrase, undefined, webcrypto);
+  await vault.set('apiToken', marker);
+  const envelope = await vault.toEnvelope();
+  return { webcrypto, passphrase, vault, envelope };
+}
+
+test('Resolver com provenance usa dataset acima do cofre acima do ambiente e não expõe valores na origem', () => {
+  const api = runnerLogic();
+  const environmentMarker = 'ENV_SENTINEL_7c1a';
+  const datasetMarker = 'DATASET_SENTINEL_84b2';
+  const vaultMarker = 'VAULT_SENTINEL_1f9e';
+
+  const result = api.resolveTemplateWithProvenance(
+    '{{baseUrl}}/items/{{id}}?token={{token}}&region={{region}}',
+    { baseUrl: 'https://api.example.test', id: environmentMarker, token: environmentMarker, region: 'west' },
+    { id: datasetMarker },
+    { id: 'vault-id-must-lose-to-runner', token: vaultMarker }
+  );
+
+  assert.equal(result.text, `https://api.example.test/items/${datasetMarker}?token=${vaultMarker}&region=west`);
+  assert.deepEqual(result.provenance, {
+    baseUrl: 'environment',
+    id: 'dataset',
+    token: 'vault',
+    region: 'environment'
+  });
+  const provenance = JSON.stringify(result.provenance);
+  for (const marker of [environmentMarker, datasetMarker, vaultMarker]) {
+    assert.doesNotMatch(provenance, new RegExp(marker), 'a origem não pode carregar o valor substituído');
+  }
+});
+
+test('Resolver com provenance bloqueia nome conhecido do cofre mesmo com valor obsoleto no ambiente', () => {
+  const api = runnerLogic();
+  const staleToken = 'STALE_ENV_TOKEN_SENTINEL';
+  let resolved;
+
+  assert.throws(() => {
+    resolved = api.resolveTemplateWithProvenance('{{apiToken}}', { apiToken: staleToken }, {}, { locked: true, names: ['apiToken'] });
+  }, error => {
+    assert.match(error.message, /cofre/i);
+    assert.match(error.message, /bloquead/i);
+    assert.doesNotMatch(error.message, new RegExp(staleToken));
+    return true;
+  });
+  assert.equal(resolved, undefined, 'o template não pode retornar o token obsoleto do ambiente');
+});
+
+test('Resolver com provenance mantém erro claro para ausentes e preserva resolveTemplate existente', () => {
+  const api = runnerLogic();
+  assert.throws(() => api.resolveTemplateWithProvenance('/items/{{missingSecret}}', { present: 'value' }, {}, { other: 'value' }), /missingSecret/);
+  assert.equal(api.resolveTemplate('{{id}}/{{token}}', { id: 'environment-id', token: 'environment-token' }, { id: 'runner-id' }), 'runner-id/environment-token');
+});
+
+test('Cofre local persiste apenas envelope cifrado, desbloqueia com a senha certa e bloqueia os valores', async () => {
+  const { webcrypto } = require('node:crypto');
+  const api = runnerLogic();
+  const passphrase = 'correct horse battery staple';
+  const marker = 'LOCAL_VAULT_SECRET_SENTINEL_5d42';
+
+  const vault = await api.createLocalSecretVault(passphrase, undefined, webcrypto);
+  assert.ok(vault && typeof vault === 'object', 'createLocalSecretVault deve retornar um cofre.');
+  await vault.set('apiToken', marker);
+  assert.equal(await vault.get('apiToken'), marker);
+
+  const envelope = await vault.toEnvelope();
+  const serialized = JSON.stringify(envelope);
+  assert.equal(typeof envelope.ciphertext, 'string', 'O envelope deve conter ciphertext.');
+  assert.ok(envelope.ciphertext.length > 0, 'O envelope cifrado não pode ficar vazio.');
+  assert.doesNotMatch(serialized, new RegExp(marker), 'O envelope não pode conter o segredo em plaintext.');
+  assert.equal(Object.hasOwn(envelope, 'key'), false, 'A chave criptográfica não pode ser serializada no envelope.');
+  assert.doesNotMatch(serialized, /"key"\s*:/i, 'A chave criptográfica não pode ser persistida.');
+
+  await vault.lock();
+  await assert.rejects(vault.get('apiToken'), /bloquead|locked|inacess|cofre/i, 'valores bloqueados devem falhar com mensagem clara.');
+  assert.doesNotMatch(JSON.stringify(vault), new RegExp(marker), 'Após lock, a serialização do cofre não pode conter o segredo.');
+  assert.doesNotMatch(JSON.stringify(vault), /"key"\s*:/i, 'Após lock, a chave criptográfica não pode ser serializada.');
+
+  await vault.unlock(passphrase);
+  assert.equal(await vault.get('apiToken'), marker);
+
+  const reopened = await api.openLocalSecretVault(serialized, passphrase, webcrypto);
+  assert.equal(await reopened.get('apiToken'), marker);
+
+  await assert.rejects(
+    api.openLocalSecretVault(serialized, 'incorrect horse battery staple', webcrypto),
+    /incorreta|danific|senha|inválid/i,
+    'Senha incorreta deve falhar sem revelar o segredo.'
+  );
+
+  const tampered = { ...envelope, ciphertext: envelope.ciphertext.slice(0, -4) + 'AAAA' };
+  await assert.rejects(
+    api.openLocalSecretVault(JSON.stringify(tampered), passphrase, webcrypto),
+    /incorreta|danific|inválid/i,
+    'Envelope adulterado deve falhar.'
+  );
+});
+
+test('Cofre local gera um IV novo em cada snapshot mesmo ao regravar o mesmo nome e valor', async () => {
+  const { webcrypto } = require('node:crypto');
+  const api = runnerLogic();
+  const vault = await api.createLocalSecretVault('correct horse battery staple', undefined, webcrypto);
+  const marker = 'LOCAL_VAULT_SAME_VALUE_SENTINEL_6a1d';
+
+  await vault.set('apiToken', marker);
+  const first = await vault.toEnvelope();
+  await vault.set('apiToken', marker);
+  const second = await vault.toEnvelope();
+
+  assert.equal(typeof first.iv, 'string', 'O envelope deve expor o IV usado na cifragem.');
+  assert.ok(first.iv.length > 0, 'O IV do primeiro snapshot não pode ficar vazio.');
+  assert.equal(typeof second.iv, 'string', 'O segundo snapshot também deve expor o IV.');
+  assert.ok(second.iv.length > 0, 'O IV do segundo snapshot não pode ficar vazio.');
+  assert.notEqual(second.iv, first.iv, 'Cada gravação deve gerar um novo IV no snapshot, mesmo com o mesmo nome e valor.');
+  assert.doesNotMatch(JSON.stringify([first, second]), new RegExp(marker), 'Os snapshots não podem conter o segredo em plaintext.');
+});
+
+test('Cofre local rejeita senha abaixo de 12 caracteres com erro claro', async () => {
+  const { webcrypto } = require('node:crypto');
+  const api = runnerLogic();
+  const minLength = api.workspaceBackupPassphraseMinLength;
+  assert.equal(minLength, 12, 'O cofre local deve usar o mínimo já definido para backups.');
+  const shortPassphrase = 'x'.repeat(minLength - 1);
+
+  await assert.rejects(
+    api.createLocalSecretVault(shortPassphrase, undefined, webcrypto),
+    error => {
+      assert.match(error.message, /pelo menos 12 caracteres/i, 'O erro deve explicar o mínimo de 12 caracteres.');
+      return true;
+    },
+    'Senha curta deve ser rejeitada.'
+  );
+});
+
+test('Backup simples guarda só o envelope opaco do cofre e o backup protegido continua o round-trip', async () => {
+  const { webcrypto } = require('node:crypto');
+  const api = runnerLogic();
+  const marker = 'WORKSPACE_VAULT_SECRET_SENTINEL_9b31';
+  const fixture = await localVaultFixture(api, marker);
+  const source = {
+    collections: [{
+      id: 'collection-1', name: 'Coleção', folders: [],
+      requests: [{ id: 'request-1', name: 'Token', method: 'POST', route: '/token', body: '{"token":"{{apiToken}}"}' }]
+    }],
+    environments: [{ id: 'environment-1', name: 'Local', variables: { baseUrl: 'https://api.example.test' } }],
+    history: [],
+    settings: [{ key: 'localSecretVault', value: fixture.envelope }]
+  };
+
+  const backup = api.createWorkspaceBackup(source, '2026-10-19T12:00:00.000Z');
+  const serialized = JSON.stringify(backup);
+  assert.doesNotMatch(serialized, new RegExp(marker), 'Backup JSON simples não pode conter o segredo em plaintext.');
+  assert.ok(serialized.includes(fixture.envelope.ciphertext), 'O backup deve manter o envelope cifrado opaco do cofre.');
+  assert.doesNotMatch(JSON.stringify(backup.data.collections), new RegExp(marker), 'Coleções exportadas não podem carregar valores do cofre.');
+  assert.doesNotMatch(JSON.stringify(backup.data.collections), /ciphertext/i, 'Coleções exportadas não podem embutir o envelope do cofre.');
+  assert.doesNotMatch(JSON.stringify(backup.data.environments), new RegExp(marker), 'Ambientes exportados não podem carregar valores do cofre.');
+
+  const restored = api.parseWorkspaceBackup(serialized);
+  const restoredText = JSON.stringify(restored);
+  assert.ok(restoredText.includes(fixture.envelope.ciphertext), 'O envelope deve voltar no restore do backup simples.');
+  assert.doesNotMatch(restoredText, new RegExp(marker));
+
+  const protectedBackup = await api.encryptWorkspaceBackup(serialized, fixture.passphrase, webcrypto);
+  const protectedText = JSON.stringify(protectedBackup);
+  assert.doesNotMatch(protectedText, new RegExp(marker), 'Backup protegido não pode expor o segredo do cofre.');
+  const decrypted = await api.decryptWorkspaceBackup(protectedText, fixture.passphrase, webcrypto);
+  assert.ok(JSON.stringify(decrypted).includes(fixture.envelope.ciphertext), 'Backup protegido deve preservar o envelope do cofre.');
+  assert.doesNotMatch(JSON.stringify(decrypted), new RegExp(marker));
+});
+
+test('Contrato existente de captura de variável de resposta permanece compatível', () => {
+  const { prepareSavedRequest } = runnerLogic();
+  const prepared = prepareSavedRequest({
+    method: 'POST', route: '/token', body: '{}',
+    captureResponseVariable: true, responseVariableName: 'apiToken',
+    responseValueSource: 'json', responseJsonPath: 'data.token', responseSuccessOnly: true
+  }, {}, {}, true);
+  assert.equal(prepared.captureResponseVariable, true);
+  assert.equal(prepared.responseVariableName, 'apiToken');
+  assert.equal(prepared.responseValueSource, 'json');
+  assert.equal(prepared.responseJsonPath, 'data.token');
+  assert.equal(prepared.responseSuccessOnly, true);
+});
+
+test('Resolver falha fechado com cofre indisponível e não expõe token obsoleto do ambiente', () => {
+  const { resolveTemplateWithProvenance } = runnerLogic();
+  const staleToken = 'STALE_ENV_TOKEN_SENTINEL';
+
+  assert.throws(
+    () => resolveTemplateWithProvenance('{{apiToken}}', { apiToken: staleToken }, {}, { unavailable: true }),
+    error => {
+      assert.match(error.message, /cofre/i);
+      assert.match(error.message, /indispon/i);
+      assert.doesNotMatch(error.message, new RegExp(staleToken));
+      return true;
+    }
+  );
+});
+
+test('Captura no cofre falha fechado quando a request ou o cofre não pertencem ao ambiente ativo', () => {
+  const { vaultCaptureEnvironmentError } = runnerLogic();
+  const current = { unlocked: true, activeEnvironmentId: 'env-a', vaultEnvironmentId: 'env-a', requestEnvironmentId: 'env-a' };
+  assert.equal(vaultCaptureEnvironmentError(current), '');
+  assert.match(vaultCaptureEnvironmentError({ ...current, loading: true }), /carregando/i);
+  assert.match(vaultCaptureEnvironmentError({ ...current, unavailable: true }), /indispon/i);
+  assert.match(vaultCaptureEnvironmentError({ ...current, vaultEnvironmentId: 'env-b' }), /outro ambiente/i);
+  assert.match(vaultCaptureEnvironmentError({ ...current, requestEnvironmentId: 'env-b' }), /ambiente ativo mudou/i);
+  assert.match(vaultCaptureEnvironmentError({ ...current, requestEnvironmentId: null }), /ambiente ativo mudou/i);
+  assert.match(vaultCaptureEnvironmentError({ ...current, unlocked: false }), /bloqueado/i);
+});
+
+test('Redige valores do cofre em origens e URLs antes de exibir destinos', () => {
+  const { redactSecretValues } = runnerLogic();
+  const secret = 'tenant secret/A';
+  assert.equal(redactSecretValues(`http://${secret}.example.test:8080`, { tenant: secret }), 'http://{{segredo}}.example.test:8080');
+  assert.equal(redactSecretValues(`http://api.example.test/${encodeURIComponent(secret)}`, { tenant: secret }), 'http://api.example.test/{{segredo}}');
+  assert.equal(redactSecretValues('http://api.example.test', null), 'http://api.example.test');
+});
+
+test('Inspetor puro lista referências de ambiente, dataset, cofre e ausentes sem expor valores', () => {
+  const { inspectTemplateReferences } = runnerLogic();
+  const environmentMarker = 'ENV_TOKEN_SENTINEL';
+  const datasetMarker = 'DATASET_ID_SENTINEL';
+  const vaultMarker = 'VAULT_TOKEN_SENTINEL';
+  const references = inspectTemplateReferences({
+    baseUrl: '{{baseUrl}}',
+    route: '/items/{{id}}/{{apiToken}}/{{missing}}'
+  }, { baseUrl: 'https://api.example.test', id: 'ENV_ID_SENTINEL', apiToken: environmentMarker }, { id: datasetMarker }, { apiToken: vaultMarker });
+
+  assert.deepEqual(references, [
+    { field: 'baseUrl', name: 'baseUrl', source: 'environment' },
+    { field: 'route', name: 'id', source: 'dataset' },
+    { field: 'route', name: 'apiToken', source: 'vault' },
+    { field: 'route', name: 'missing', source: 'missing' }
+  ]);
+  const serialized = JSON.stringify(references);
+  for (const marker of ['ENV_ID_SENTINEL', environmentMarker, datasetMarker, vaultMarker]) {
+    assert.doesNotMatch(serialized, new RegExp(marker));
+  }
+});
+
+test('Inspetor puro marca como locked nome conhecido do cofre mesmo com valor obsoleto no ambiente', () => {
+  const { inspectTemplateReferences } = runnerLogic();
+  const staleToken = 'STALE_ENV_TOKEN_SENTINEL';
+  const references = inspectTemplateReferences(
+    { route: '/items/{{apiToken}}' },
+    { apiToken: staleToken },
+    {},
+    { locked: true, names: ['apiToken'] }
+  );
+
+  assert.deepEqual(references, [{ field: 'route', name: 'apiToken', source: 'locked' }]);
+  assert.doesNotMatch(JSON.stringify(references), new RegExp(staleToken));
+});

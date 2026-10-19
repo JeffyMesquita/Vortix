@@ -429,6 +429,21 @@ textarea.compact { min-height: 165px; }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .settings-grid label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
 .settings-grid select { width: 100%; }
+.secret-vault-status { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+.secret-vault-locked, .secret-vault-unlocked { display: grid; gap: 9px; }
+.secret-vault-locked[hidden], .secret-vault-unlocked[hidden] { display: none !important; }
+.secret-vault-locked label, .secret-vault-add label { color: var(--muted); font-size: 12px; }
+.secret-vault-locked > input { max-width: 360px; }
+.secret-vault-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.secret-vault-add { display: grid; grid-template-columns: minmax(120px, .8fr) minmax(160px, 1.2fr) auto; align-items: end; gap: 9px; }
+.secret-vault-add > div { display: grid; gap: 5px; }
+.secret-vault-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; }
+.secret-vault-list { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.secret-vault-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--border); border-radius: 7px; padding: 7px 10px; background: var(--surface); }
+.secret-vault-item strong { overflow-wrap: anywhere; color: var(--text); font: 12px/1.4 var(--app-font-family); }
+.secret-vault-item-actions { display: flex; flex: 0 0 auto; gap: 6px; }
+.secret-vault-empty { color: var(--muted); font-size: 12px; }
+@media (max-width: 760px) { .secret-vault-add { grid-template-columns: 1fr; } }
 .settings-scale { display: flex; align-items: center; gap: 10px; margin-top: 14px; color: var(--muted); font-size: 12px; }
 .settings-scale .font-scale { margin-left: auto; }
 .settings-scale .hint { margin: 0; }
@@ -891,3 +906,12 @@ textarea.compact { min-height: 165px; }
 .cookie-jar-panel > .button { width: 100%; }
 .auth-bearer-fields[hidden], .auth-credentials[hidden], #api-key-query-warning[hidden], #token-helper[hidden] { display: none !important; }
 @media (max-width: 600px) { .auth-basic, .auth-api-key { grid-template-columns: 1fr; } }
+.request-inspector { margin: 10px 0 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.request-inspector summary { display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text); font-size: 12px; font-weight: 700; }
+.request-inspector-count { display: grid; min-width: 22px; height: 22px; place-items: center; border: 1px solid var(--border); border-radius: 999px; color: var(--accent); background: var(--surface-raised); font-size: 11px; }
+.request-inspector-body { display: grid; gap: 8px; margin-top: 9px; }
+.request-inspector-output { display: grid; gap: 5px; max-height: 180px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+.request-inspector-output li { overflow-wrap: anywhere; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-raised); color: var(--muted); font: 11px/1.45 var(--app-font-family); }
+.request-inspector-output li[data-source="vault"] { border-color: var(--accent); color: var(--accent); }
+.request-inspector-output li[data-source="locked"], .request-inspector-output li[data-source="unavailable"], .request-inspector-output li[data-source="missing"] { border-color: var(--danger); color: var(--danger); }
+.runner-origin-note { display: block; margin-top: 4px; overflow-wrap: anywhere; color: var(--muted); font-size: 10px; }

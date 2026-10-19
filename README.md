@@ -34,6 +34,7 @@
   - [Importar HTTPie](#importar-httpie)
 - [Importar OpenAPI JSON](#importar-openapi-json)
 - [Ambientes e variáveis](#ambientes-e-variáveis)
+  - [Cofre local de segredos](#cofre-local-de-segredos)
 - [Scripts, testes e Runner](#scripts-testes-e-runner)
 - [Importação e exportação](#importação-e-exportação)
 - [Histórico de respostas](#histórico-de-respostas)
@@ -60,6 +61,7 @@ O modo público permite uso sem senha compartilhada. Cada navegador recebe uma s
 - **Coleções:** coleções, pastas e subpastas para organizar requests.
 - **Busca rápida:** encontre requests por texto ou filtre por método, status salvo e coleção/pasta usando `Ctrl+K`.
 - **Ambientes:** variáveis próprias e Cookie jar isolado por ambiente, com substituição por templates como <code>{{baseUrl}}</code> e <code>{{token}}</code>.
+- **Cofre local opcional:** segredos cifrados no navegador com PBKDF2-SHA-256 e AES-GCM-256, escopo por ambiente, bloqueio manual e uso por templates sem exibir valores.
 - **Abas e histórico:** até 12 requests abertas; requests, status, duração e cabeçalhos filtrados ficam no SQLite local ou no IndexedDB do navegador. Bodies de resposta são opcionais e desativados por padrão.
 - **Resposta:** visualização Pretty, Árvore ou Raw, cópia de cabeçalhos e body, busca, exemplos nomeados por request e simulação local sem chamar a API.
 - **Captura de variáveis:** salve um campo JSON da resposta ou o texto completo no ambiente ativo.
@@ -500,6 +502,20 @@ Use <code>{{nomeDaVariavel}}</code> em URL base, rota, Params, Headers e Body. O
 
 Ao capturar uma variável de resposta, escolha o nome, a origem (campo JSON ou texto completo) e, para JSON, o caminho desejado. Por padrão, a captura ocorre apenas em respostas 2xx e salva o valor no ambiente ativo.
 
+### Cofre local de segredos
+
+O cofre é opcional e existe por ambiente. Abra **Configurações → Cofre de segredos**, defina uma senha de pelo menos 12 caracteres (máximo 256) e clique **Criar cofre**. Depois de desbloqueado, adicione nomes e valores; a lista mostra apenas os nomes. Use **Editar** para substituir um valor, **Remover** para excluir um nome e **Bloquear cofre** para descartar os valores descriptografados da memória desta aba. Recarregar a página também volta ao estado bloqueado.
+
+O envelope persistido contém <code>ciphertext</code>, salt, IV, contagem de iterações e os nomes do índice — nunca o valor em texto claro nem a chave <code>CryptoKey</code>. Salt e IV são aleatórios; cada gravação e cada snapshot gera um IV novo. No modo local, o registro usa o SQLite existente; no modo público, usa o IndexedDB do navegador. Os dois caminhos passam por <code>dbRead</code>/<code>dbWrite('settings', …)</code>. Não há endpoint, tabela, autenticação de servidor nem senha compartilhada do cofre.
+
+Use <code>{{nome}}</code> em URL base, rota, Params, Headers, Auth, Body, GraphQL e campos multipart. A precedência é: dados do Runner/dataset &gt; cofre &gt; variável do ambiente. As origens são registradas apenas como <code>environment</code>, <code>vault</code>, <code>dataset</code>, <code>missing</code>, <code>locked</code> ou <code>unavailable</code>; valores nunca entram no mapa de origens, no histórico, no relatório do Runner ou em toasts. O editor e o Runner exibem o inspetor de referências com campo, nome e origem, sem valores resolvidos. Se o cofre estiver bloqueado e o template citar um nome conhecido do índice, o envio falha com erro explícito antes de reutilizar um valor antigo do ambiente. Se a leitura do cofre falhar ou o envelope for inválido, o estado fica <code>unavailable</code> e o envio com templates é bloqueado; ausência real de registro continua significando que o ambiente não tem cofre.
+
+Para capturar uma resposta diretamente no cofre, na aba **Scripts** escolha **Destino → Cofre cifrado**. A captura só ocorre com o cofre desbloqueado e o mesmo ambiente ativo; se estiver bloqueado, indisponível ou o armazenamento falhar, nada é gravado no ambiente (sem fallback). O valor capturado só se torna utilizável depois que o novo envelope é confirmado por <code>dbWrite</code>; se a gravação falhar, o cofre é bloqueado e o envelope persistido é recarregado quando possível. O destino padrão continua sendo o ambiente ativo, preservando o comportamento anterior.
+
+**Backup:** o envelope opaco do cofre entra no backup simples e no backup com senha como qualquer outro registro de <code>settings</code>. Coleções e ambientes não recebem valores do cofre nem o envelope; um backup restaurado mantém o cofre bloqueado e exige a senha original. O backup protegido adiciona outra camada AES-GCM, mas não altera o envelope interno.
+
+**Limites:** a senha do cofre não é armazenada nem recuperável; sem ela, os valores são inutilizáveis. Os nomes do índice podem aparecer em texto claro no envelope. Enquanto o cofre está desbloqueado, valores e chave existem em memória JavaScript; XSS, extensões do navegador, DevTools ou outro código na mesma origem podem lê-los. Bloquear/recarregar reduz a janela de exposição, mas a limpeza de memória em JavaScript não é garantida de forma criptográfica pelo coletor de lixo, e o sistema operacional pode manter cópias temporárias. O cofre protege o armazenamento em repouso no navegador, não uma sessão comprometida. A senha nunca é enviada ao servidor; por isso o cofre é por navegador/workspace e não é compartilhado entre dispositivos. Para transferir, use backup e informe a senha no outro navegador.
+
 ## Scripts, testes e Runner
 
 ### Captura de resposta
@@ -517,7 +533,7 @@ Ao capturar uma variável de resposta, escolha o nome, a origem (campo JSON ou t
 }
 ~~~
 
-Na aba **Scripts**, configure a captura de um valor, como <code>data.access_token</code>, para uma variável como <code>token</code>. O painel também mostra o código equivalente para o fluxo After-response do Insomnia, que pode ser copiado.
+Na aba **Scripts**, configure a captura de um valor, como <code>data.access_token</code>, para uma variável como <code>token</code>. Escolha o destino **Ambiente ativo** (padrão) ou **Cofre cifrado**. O cofre precisa estar desbloqueado e a falha de storage nunca copia o valor para o ambiente. O painel também mostra o código equivalente para o fluxo After-response do Insomnia, que pode ser copiado.
 
 Scripts importados não são executados. O importador converte apenas formas simples de <code>insomnia.environment.set()</code> e <code>pm.environment.set()</code> em captura nativa. JavaScript arbitrário é ignorado e sinalizado.
 
@@ -565,7 +581,7 @@ Exemplo de conjunto de dados JSON para o Runner:
 ]
 ~~~
 
-Use <code>/v1/users/{{userId}}</code> na rota e <code>{"name":"{{name}}"}</code> no body. O Runner substitui as variáveis em cada iteração.
+Use <code>/v1/users/{{userId}}</code> na rota e <code>{"name":"{{name}}"}</code> no body. O Runner substitui as variáveis em cada iteração. Segredos do cofre desbloqueado do ambiente ativo também podem ser usados; a precedência é dataset do Runner &gt; cofre &gt; ambiente. Com o cofre bloqueado, um nome conhecido do índice interrompe a resolução em vez de usar um valor antigo do ambiente. O plano e o resultado do Runner mostram as origens sem valores; cofre indisponível também bloqueia a resolução em vez de cair para o ambiente.
 
 Cada rodada aceita até 500 requests. Credenciais solicitadas manualmente pelo helper de token permanecem no fluxo interativo e não são executadas pelo Runner. O relatório é temporário; requests e variáveis capturadas continuam salvas.
 
@@ -630,7 +646,7 @@ Em **Configurações → Backup do workspace**, escolha:
 - **Backup simples:** JSON sem criptografia. Pode conter dados sensíveis.
 - **Backup com senha:** arquivo protegido com AES-GCM de 256 bits e chave derivada por PBKDF2-SHA-256. Exige senha de pelo menos 12 caracteres; a senha não é salva nem recuperável.
 
-A restauração substitui o workspace local, incluindo histórico, coleções, ambientes e configurações. Faça um backup antes e guarde a senha do arquivo protegido separada dele.
+A restauração substitui o workspace local, incluindo histórico, coleções, ambientes e configurações. Faça um backup antes e guarde a senha do arquivo protegido separada dele. Se houver cofre de segredos, o envelope cifrado é preservado como dado opaco; ele continua exigindo a senha original e não é misturado às variáveis de ambiente nem às coleções.
 
 ## Segurança
 
@@ -643,6 +659,8 @@ A restauração substitui o workspace local, incluindo histórico, coleções, a
 - HTTPS é recomendado para a API de destino. HTTP em localhost funciona; HTTP em outros hosts exige habilitação explícita na request e confirmação antes do envio. HTTP não cifra tokens, headers ou body.
 - O Vortix valida URL base e rota, não permite trocar de host pela rota e bloqueia alguns cabeçalhos de transporte. Redirecionamentos HTTP não são seguidos automaticamente.
 - Configure a autenticação na aba **Auth**. O Vortix gera o header Authorization para Bearer e Basic; não informe esse header manualmente.
+- O cofre local é opcional e usa PBKDF2-SHA-256 + AES-GCM-256 no navegador. A senha nunca é enviada nem salva. Enquanto desbloqueado, os valores ficam em memória JavaScript e podem ser lidos por XSS, extensões, DevTools ou qualquer código da mesma origem; bloqueie ao terminar. A limpeza após lock/reload remove as referências da aplicação, mas o garbage collector e o sistema operacional não oferecem garantia criptográfica de apagamento imediato da memória.
+- Backups simples preservam o envelope opaco do cofre; eles não descriptografam segredos nem os copiam para coleções ou ambientes. O backup com senha protege o arquivo inteiro, mas a senha do cofre continua necessária para abrir o envelope restaurado.
 - Requests importadas não executam scripts arbitrários.
 - Arquivos SQLite, key rings, configurações locais e segredos estão excluídos pelo <code>.gitignore</code>. Não remova essas regras ao preparar um fork ou publicação.
 

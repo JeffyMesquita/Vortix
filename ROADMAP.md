@@ -160,7 +160,25 @@ Só entram depois das features anteriores e dos testes de uso:
 - [x] Importar HTTPie CLI como formato adicional, sem executar o comando; filtrar credenciais e recusar arquivos/opções desconhecidas.
 - [x] Schema GraphQL por introspecção com confirmação explícita, cache em memória, browser de tipos e autocomplete.
 
-### 11. Hospedagem pública gratuita
+### 11. Cofre local de segredos
+
+**Status: concluída nesta rodada.**
+
+- [x] Criar cofre opcional por ambiente usando o armazenamento existente do navegador (<code>dbRead</code>/<code>dbWrite('settings', …)</code>) sem endpoint, tabela, autenticação ou senha compartilhada.
+- [x] Cifrar com WebCrypto PBKDF2-SHA-256 + AES-GCM-256, salt/IV aleatórios e IV novo em cada gravação/snapshot; senha de 12 a 256 caracteres.
+- [x] Persistir apenas ciphertext e metadados; manter senha, chave e valores descriptografados somente em memória e descartá-los no lock/reload.
+- [x] Escopar segredos por <code>environmentId</code> e resolver templates com precedência dataset/runner &gt; cofre &gt; ambiente, com proveniência sem valores.
+- [x] Falhar fechado quando o cofre está bloqueado e o nome pertence ao índice, sem reutilizar valor obsoleto do ambiente.
+- [x] Tratar erro de <code>dbRead</code> ou envelope inválido como <code>unavailable</code>, bloqueando criar/desbloquear falsos e o envio com templates; só ausência real de registro significa nenhum cofre.
+- [x] Integrar a resolução no envio manual e no Runner, incluindo URL base, rota, Params, Headers, Auth, Body, GraphQL e multipart.
+- [x] Exibir inspetor acessível de referências no editor e no Runner com campo, nome e origem (<code>environment</code>, <code>vault</code>, <code>dataset</code>, <code>missing</code>, <code>locked</code>, <code>unavailable</code>) sem valores.
+- [x] Permitir captura de resposta com destino explícito ambiente/cofre; cofre bloqueado, indisponível ou erro de storage nunca cai para o ambiente, e o valor só é publicado após <code>dbWrite</code> confirmado.
+- [x] Preservar o envelope opaco em backups simples/protegidos sem misturar valores do cofre às variáveis de ambiente ou coleções.
+- [x] Adicionar UI acessível de criar, editar, remover, desbloquear e bloquear cofre, listando apenas nomes e mascarando valores.
+- [x] Documentar ativação, precedência, lock/reload, backup e limites no README.
+- [x] Cobrir resolução, envelope, IV, senha curta, lock/unlock e backup no teste Node.
+
+### 12. Hospedagem pública gratuita
 
 **Status: modo público implementado e validado localmente; provisionamento externo pendente.**
 

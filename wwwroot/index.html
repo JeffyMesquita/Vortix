@@ -90,6 +90,15 @@
           <p class="hint base-url-hint">Use URL base por ambiente. HTTPS é recomendado; HTTP em localhost funciona sem configuração adicional.</p>
           <label class="check-row insecure-http-option" for="allow-insecure-http"><input id="allow-insecure-http" type="checkbox"><span>Permitir HTTP sem TLS para esta request fora de localhost. A opção fica salva com a request.</span></label>
 
+          <details class="request-inspector" id="request-inspector">
+            <summary><span>Referências e origens</span> <span class="request-inspector-count" id="request-inspector-count">0</span></summary>
+            <div class="request-inspector-body">
+              <p class="hint">Mostra campo, nome e origem de cada <code>{{...}}</code> antes do envio: <code>environment</code>, <code>vault</code>, <code>dataset</code>, <code>missing</code>, <code>locked</code> ou <code>unavailable</code>. Valores resolvidos nunca aparecem aqui.</p>
+              <button class="button secondary compact-button" id="inspect-references" type="button">Atualizar origens</button>
+              <ul id="request-inspector-output" class="request-inspector-output" aria-live="polite"><li class="request-inspector-empty">Abra ou atualize para inspecionar as referências.</li></ul>
+            </div>
+          </details>
+
           <nav class="editor-tabs" aria-label="Seções da requisição" role="tablist">
             <button class="editor-tab active" type="button" role="tab" aria-selected="true" data-editor-tab="params">Params <span class="tab-count" id="params-count">0</span></button>
             <button class="editor-tab" type="button" role="tab" aria-selected="false" data-editor-tab="headers">Headers</button>
@@ -263,6 +272,7 @@
               <span>Salvar valor depois da resposta</span>
             </label>
             <div class="response-variable-fields">
+              <div><label for="response-capture-target">Destino</label><select id="response-capture-target"><option value="environment">Ambiente ativo</option><option value="vault">Cofre cifrado</option></select></div>
               <div><label for="response-value-source">Valor da resposta</label><select id="response-value-source"><option value="json">Campo JSON</option><option value="text">Texto inteiro</option></select></div>
               <div><label for="response-variable-name">Salvar como variável</label><input id="response-variable-name" type="text" value="token" autocomplete="off" placeholder="token"></div>
               <div class="response-json-path-wrap" id="response-json-path-wrap"><label for="response-json-path">Caminho JSON</label><input id="response-json-path" type="text" value="access_token" autocomplete="off" placeholder="data.access_token"></div>
@@ -271,7 +281,7 @@
               <input id="response-success-only" type="checkbox" checked>
               <span>Salvar somente quando o status for 2xx</span>
             </label>
-            <p class="hint">A variável fica no ambiente ativo e pode ser usada como <code>{{token}}</code>. No modo local, valores sensíveis usam proteção no SQLite; no modo público, o IndexedDB não é criptografado automaticamente. A resposta completa não é salva.</p>
+            <p class="hint">O destino padrão é o ambiente ativo. Escolha <strong>Cofre cifrado</strong> para gravar no cofre desbloqueado; se o cofre estiver bloqueado ou o armazenamento falhar, a captura falha e não copia o valor para o ambiente. No modo local, valores sensíveis usam proteção no SQLite; no modo público, o IndexedDB não é criptografado automaticamente. A resposta completa não é salva.</p>
             <details class="script-help">
               <summary>Como isso funciona no Insomnia</summary>
               <p>Depois de receber a resposta, o Insomnia usa <code>insomnia.response.json()</code> e <code>insomnia.environment.set()</code>. O código equivalente abaixo pode ser copiado para Scripts → After-response.</p>
@@ -433,6 +443,30 @@ insomnia.environment.set("token", body.access_token);</code></pre>
       <section class="settings-section settings-environment-section" aria-labelledby="settings-environments-title">
         <div><h3 id="settings-environments-title">Ambientes</h3><p class="hint">Separe variáveis de desenvolvimento, homologação e produção.</p></div>
         <button class="button secondary" id="settings-environments" type="button">Gerenciar ambientes</button>
+      </section>
+      <section class="settings-section settings-vault-section" aria-labelledby="settings-vault-title">
+        <div><h3 id="settings-vault-title">Cofre de segredos</h3><p class="hint">Opcional e por ambiente. Os valores são cifrados no navegador com WebCrypto PBKDF2-SHA-256 e AES-GCM-256 usando <code>dbRead</code>/<code>dbWrite('settings', …)</code>; a senha e a chave não são salvas nem enviadas ao servidor.</p></div>
+        <p id="secret-vault-status" class="secret-vault-status" role="status" aria-live="polite"></p>
+        <div id="secret-vault-locked" class="secret-vault-locked">
+          <label for="secret-vault-passphrase">Senha do cofre (mínimo 12 caracteres)</label>
+          <input id="secret-vault-passphrase" type="password" minlength="12" maxlength="256" autocomplete="new-password" spellcheck="false" aria-describedby="secret-vault-help">
+          <p class="hint" id="secret-vault-help">A senha não é armazenada e não pode ser recuperada. Ao recarregar ou bloquear, os valores descriptografados saem da memória.</p>
+          <div class="secret-vault-actions">
+            <button class="button secondary" id="secret-vault-create" type="button">Criar cofre</button>
+            <button class="button secondary" id="secret-vault-unlock" type="button">Desbloquear</button>
+            <button class="button secondary danger-button" id="secret-vault-remove" type="button">Remover cofre</button>
+          </div>
+        </div>
+        <div id="secret-vault-unlocked" class="secret-vault-unlocked" hidden>
+          <div class="secret-vault-add">
+            <div><label for="secret-vault-name">Nome do segredo</label><input id="secret-vault-name" type="text" maxlength="80" autocomplete="off" placeholder="apiToken"></div>
+            <div><label for="secret-vault-value">Valor (mascarado)</label><input id="secret-vault-value" type="password" autocomplete="new-password" spellcheck="false" placeholder="valor do segredo"></div>
+            <button class="button secondary" id="secret-vault-add" type="button">Adicionar ou substituir</button>
+          </div>
+          <div class="secret-vault-list-heading"><span>Nomes no cofre (valores nunca são exibidos)</span><button class="button secondary compact-button" id="secret-vault-lock" type="button">Bloquear cofre</button></div>
+          <ul id="secret-vault-list" class="secret-vault-list" aria-live="polite"></ul>
+          <p class="hint">Use <code>{{nome}}</code> em URL base, rota, Params, Headers, Auth, Body, GraphQL e multipart. A precedência é dados do Runner &gt; cofre &gt; ambiente.</p>
+        </div>
       </section>
       <section class="settings-section settings-backup-section" aria-labelledby="settings-backup-title">
         <div><h3 id="settings-backup-title">Backup do workspace</h3><p class="hint">Inclui histórico, coleções, pastas, ambientes e configurações. Você pode baixar JSON simples ou protegido por senha.</p></div>
