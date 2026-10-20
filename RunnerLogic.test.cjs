@@ -1768,3 +1768,81 @@ test('Inspetor puro marca como locked nome conhecido do cofre mesmo com valor ob
   assert.deepEqual(references, [{ field: 'route', name: 'apiToken', source: 'locked' }]);
   assert.doesNotMatch(JSON.stringify(references), new RegExp(staleToken));
 });
+
+test('Ambientes sem nome ou ainda não criados têm rótulos visíveis no seletor', () => {
+  const { normalizeEnvironmentPickerEntries } = runnerLogic();
+  assert.deepEqual(normalizeEnvironmentPickerEntries([]), [
+    { id: '', name: 'Nenhum ambiente criado', group: '', disabled: true }
+  ]);
+  assert.deepEqual(normalizeEnvironmentPickerEntries([
+    { id: 'local', name: '', group: 'Local' },
+    { id: 'test', name: 'Teste', group: 'API' }
+  ]), [
+    { id: 'local', name: 'Ambiente sem nome', group: 'Local', disabled: false },
+    { id: 'test', name: 'Teste', group: 'API', disabled: false }
+  ]);
+});
+
+test('Cabeçalho dá acesso direto à criação e gestão de ambientes', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.match(html, /id="manage-environments-direct"[^>]*>Gerenciar ambientes<\/button>/);
+  assert.match(app, /manage-environments-direct'\)\.onclick=openEnvironmentDialog/);
+});
+
+test('Resposta salva no histórico redige segredos do cofre em body, reason e headers', () => {
+  const { createResponseHistorySnapshot, normalizeHistorySettings } = runnerLogic();
+  const secret = 'VAULT_ECHO_SENTINEL_71a9';
+  const snapshot = createResponseHistorySnapshot({
+    status: 200,
+    reason: 'Echo ' + secret,
+    headers: { 'X-Echo': [secret], 'Content-Type': ['application/json'] },
+    body: JSON.stringify({ value: secret })
+  }, 12, normalizeHistorySettings({ saveResponseBody: true }), { token: secret });
+
+  assert.equal(snapshot.reason, 'Echo {{segredo}}');
+  assert.deepEqual(snapshot.headers, { 'X-Echo': ['{{segredo}}'], 'Content-Type': ['application/json'] });
+  assert.equal(snapshot.body, '{"value":"{{segredo}}"}');
+  assert.doesNotMatch(JSON.stringify(snapshot), new RegExp(secret));
+});
+
+test('Redação de preview usa apenas segredos que vieram do cofre', () => {
+  const { secretValuesUsedByProvenance, redactSecretValues } = runnerLogic();
+  const secret = 'RUNNER_ECHO_SENTINEL_248e';
+  const values = secretValuesUsedByProvenance({ token: 'vault', tenant: 'environment', rowId: 'dataset' }, {
+    token: secret, tenant: 'ordinary-env-value', rowId: 'dataset-value'
+  });
+
+  assert.deepEqual({ ...values }, { token: secret });
+  assert.equal(redactSecretValues(JSON.stringify({ value: secret }), values), '{"value":"{{segredo}}"}');
+});
+
+test('Runner aplica redação por request antes de renderizar body de resposta', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.ok(app.includes('runnerBodyPreview(RunnerLogic.redactSecretValues(result.body,responseVaultSecrets))'));
+  assert.match(app, /caseStatus=status\?RunnerLogic\.redactSecretValues\(`\$\{status\} \$\{result\.reason\|\|''\}`,responseVaultSecrets\)\.trim\(\):/);
+  assert.ok(app.includes('RunnerLogic.redactSecretValues(result.error,responseVaultSecrets)'));
+  assert.ok(app.includes('RunnerLogic.redactSecretValues(error.message,responseVaultSecrets)'));
+});
+
+test('Fluxos OAuth e token helper redigem segredos do cofre antes de salvar respostas no histórico', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  for (const functionName of ['requestOAuthClientCredentialsToken', 'requestTokenFromHelper']) {
+    const start = app.indexOf(`async function ${functionName}(){`);
+    assert.ok(start >= 0, `${functionName} deve existir`);
+    const nextFunction = app.slice(start + 1).search(/\n(?:async )?function /);
+    const source = app.slice(start, nextFunction < 0 ? app.length : start + 1 + nextFunction);
+    assert.match(source, /lastResolutionProvenance=\{\};/);
+    assert.match(source, /request\.resolutionProvenance=\{\.\.\.lastResolutionProvenance\}/);
+    assert.match(source, /responseVaultSecrets=RunnerLogic\.secretValuesUsedByProvenance\(request\.resolutionProvenance,secretVaultValues\|\|\{\}\)/);
+    assert.match(source, /saveHistoryResponse\(historyEntry,result,responseDuration,responseVaultSecrets\)/);
+  }
+});
+
+test('Abas restauram destino de captura salvo em cada rascunho', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const start = app.indexOf('function applyWorkspaceDraft(draft){');
+  const end = app.indexOf('\nfunction applyWorkspaceTab(tab){', start);
+  assert.ok(start >= 0 && end > start, 'applyWorkspaceDraft deve existir');
+  assert.match(app.slice(start, end), /response-capture-target'\)\.value=draft\.responseCaptureTarget==='vault'\?'vault':'environment'/);
+});

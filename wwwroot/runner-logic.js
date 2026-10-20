@@ -355,6 +355,19 @@
     const activeId = kept.some(tab => tab.id === requestedActiveId) ? requestedActiveId : kept.at(-1)?.id || '';
     return { activeId, tabs: kept };
   }
+
+  function normalizeEnvironmentPickerEntries(environments) {
+    const items = Array.isArray(environments)
+      ? environments.filter(environment => environment && typeof environment === 'object' && !Array.isArray(environment))
+      : [];
+    if (!items.length) return [{ id: '', name: 'Nenhum ambiente criado', group: '', disabled: true }];
+    return items.map(environment => ({
+      id: String(environment.id ?? ''),
+      name: String(environment.name ?? '').trim() || 'Ambiente sem nome',
+      group: String(environment.group ?? '').trim() || 'Geral',
+      disabled: false
+    }));
+  }
   function datasetValue(value) {
     if (typeof value === 'string') return value;
     if (value === null || typeof value === 'number' || typeof value === 'boolean') return String(value);
@@ -424,6 +437,17 @@
       if (encoded && encoded !== String(secret)) text = text.split(encoded).join('{{segredo}}');
     }
     return text;
+  }
+
+  function secretValuesUsedByProvenance(provenance, secrets) {
+    const used = Object.create(null);
+    if (!provenance || typeof provenance !== 'object' || Array.isArray(provenance) || !secrets || typeof secrets !== 'object' || Array.isArray(secrets)) return used;
+    for (const [name, source] of Object.entries(provenance)) {
+      if (source === 'vault' && Object.hasOwn(secrets, name)) {
+        Object.defineProperty(used, name, { value: secrets[name], enumerable: true, writable: true, configurable: true });
+      }
+    }
+    return used;
   }
 
   function vaultCaptureEnvironmentError(state = {}) {
@@ -953,18 +977,22 @@
     return headers;
   }
 
-  function createResponseHistorySnapshot(result, durationMs, settings = {}) {
+  function createResponseHistorySnapshot(result, durationMs, settings = {}, vaultSecrets = {}) {
     const preferences = normalizeHistorySettings(settings);
     const status = Number(result?.status);
-    const rawBody = String(result?.body ?? '');
+    const rawBody = redactSecretValues(String(result?.body ?? ''), vaultSecrets);
     const bodyRequested = preferences.saveResponseBody && settings?.tokenRequest !== true;
     const bodySaved = bodyRequested && rawBody.length <= maxHistoryResponseBody;
     const duration = Number(durationMs);
+    const headers = normalizeHistoryResponseHeaders(result?.headers);
+    for (const [name, values] of Object.entries(headers)) {
+      Object.defineProperty(headers, name, { value: values.map(value => redactSecretValues(value, vaultSecrets)), enumerable: true, writable: true, configurable: true });
+    }
     return {
       status: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
-      reason: String(result?.reason || '').slice(0, 256),
+      reason: redactSecretValues(String(result?.reason || ''), vaultSecrets).slice(0, 256),
       durationMs: Number.isFinite(duration) ? Math.max(0, Math.round(duration)) : 0,
-      headers: normalizeHistoryResponseHeaders(result?.headers),
+      headers,
       bodySaved,
       ...(bodyRequested && !bodySaved ? { bodyOmitted: 'size-limit' } : {}),
       ...(bodySaved ? { body: rawBody } : {})
@@ -1715,5 +1743,5 @@
     return makeLocalSecretVault({ salt: saltBytes, key, cryptoProvider, secrets, envelope: { ...envelope, names: [...secrets.keys()] } });
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

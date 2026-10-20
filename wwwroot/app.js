@@ -926,9 +926,9 @@ async function renderHistory(){
     }
   }catch{byId('history-count').textContent='–';byId('clear-history').disabled=true;updateHistoryComparisonControls();const e=document.createElement('p');e.className='history-empty';e.textContent='Banco local indisponível.';list.append(e);}
 }
-async function saveHistoryResponse(entry,result,durationMs){
+async function saveHistoryResponse(entry,result,durationMs,responseVaultSecrets){
   if(!entry||!result)return;
-  try{entry.response=RunnerLogic.createResponseHistorySnapshot(result,durationMs,{...historySettings,tokenRequest:entry.tokenRequest===true});await dbWrite('history',entry);await renderHistory();byId('response-persistence-note').textContent='Resposta salva no histórico';}
+  try{entry.response=RunnerLogic.createResponseHistorySnapshot(result,durationMs,{...historySettings,tokenRequest:entry.tokenRequest===true},responseVaultSecrets);await dbWrite('history',entry);await renderHistory();byId('response-persistence-note').textContent='Resposta salva no histórico';}
   catch(error){showToast('Resposta não salva no histórico',error.message||'A request foi mantida, mas os metadados da resposta não puderam ser gravados.','warning');}
 }
 async function saveHistory(request){
@@ -1125,27 +1125,28 @@ async function runRunnerCases(cases,options,allowWrites){
     const item=runCases[index];
     if(runnerStopRequested){for(let rest=index;rest<runCases.length;rest++){setRunnerCase(runCases[rest],'skipped','Parada solicitada');skipped++;}break;}
     byId('runner-progress-label').textContent=`${index+1} / ${runCases.length} · Conjunto ${item.datasetNumber}`;setRunnerCase(item,'running','Executando…');
-    const requestStarted=performance.now();let caseFailed=false,caseStatus='Falha',caseDetail='',responseBody='';
+    const requestStarted=performance.now();let caseFailed=false,caseStatus='Falha',caseDetail='',responseBody='',responseVaultSecrets={};
     const origins=inspectSavedRequestOrigins(item.request,item.dataset||{},item.authScopes);
     try{
       const request=RunnerLogic.prepareSavedRequest(item.request,getEnvironment().variables||{},item.dataset,allowWrites,item.authScopes,vaultResolutionInput());request.environmentId=activeEnvironmentId||'default';
+      const responseVaultSecrets=RunnerLogic.secretValuesUsedByProvenance(request.resolutionProvenance,secretVaultValues||{});
       if(request.captureResponseVariable&&request.responseCaptureTarget==='vault')assertVaultCaptureAvailable(request);
       const {proxyStatus,result}=await executeApiRequest(request),status=Number(result.status)||0,tests=RunnerLogic.evaluateResponseTests(request.responseTests,result),failedTests=tests.filter(item=>!item.passed),hasTests=tests.length>0;
-      responseBody=runnerBodyPreview(result.body);caseStatus=status?`${status} ${result.reason||''}`.trim():`Proxy ${proxyStatus}`;
+      responseBody=runnerBodyPreview(RunnerLogic.redactSecretValues(result.body,responseVaultSecrets));caseStatus=status?RunnerLogic.redactSecretValues(`${status} ${result.reason||''}`,responseVaultSecrets).trim():`Proxy ${proxyStatus}`;
       const details=[];const httpFailed=!!result.error||proxyStatus>=400||status<200||status>=300&&!hasTests;
       if(origins.length)details.push('Origens sem valores: '+formatInspectorOrigins(origins)+'.');
       const vaultOrigins=Object.keys(request.resolutionProvenance||{}).filter(name=>request.resolutionProvenance[name]==='vault');if(vaultOrigins.length)details.push('Cofre usado para: '+vaultOrigins.join(', ')+'.');
-      if(result.error||proxyStatus>=400)details.push(result.error||`Servidor local respondeu HTTP ${proxyStatus}.`);
+      if(result.error||proxyStatus>=400)details.push(RunnerLogic.redactSecretValues(result.error,responseVaultSecrets)||`Servidor local respondeu HTTP ${proxyStatus}.`);
       else if(status<200||status>=300&&!hasTests)details.push('A request não retornou status 2xx.');
       if(failedTests.length)details.push('Falharam: '+failedTests.map(item=>item.label).join('; '));
       else if(hasTests)details.push(`${tests.length}/${tests.length} testes passaram.`);
       if(!result.error&&proxyStatus<400&&status>=200&&status<300){
         const captured=await captureResponseVariable(request,result,true);
-        if(!captured.ok){caseFailed=true;details.push(captured.error||'Falha ao salvar variável de resposta.');}
+        if(!captured.ok){caseFailed=true;details.push(RunnerLogic.redactSecretValues(captured.error,responseVaultSecrets)||'Falha ao salvar variável de resposta.');}
         else if(captured.captured)details.push(captured.target==='vault'?`{{${captured.name}}} salva no cofre do ambiente ${captured.environment}.`:`{{${captured.name}}} salva no ambiente ${captured.environment}.`);
       }
       caseFailed=caseFailed||httpFailed||failedTests.length>0;caseDetail=details.join(' ');
-    }catch(error){caseFailed=true;caseStatus='Falha';caseDetail=[origins.length?'Origens sem valores: '+formatInspectorOrigins(origins)+'.':'',error.message||'Não foi possível preparar ou enviar esta request.'].filter(Boolean).join(' ');}
+    }catch(error){caseFailed=true;caseStatus='Falha';caseDetail=[origins.length?'Origens sem valores: '+formatInspectorOrigins(origins)+'.':'',RunnerLogic.redactSecretValues(error.message,responseVaultSecrets)||'Não foi possível preparar ou enviar esta request.'].filter(Boolean).join(' ');}
     caseStatus+=` · ${Math.round(performance.now()-requestStarted)} ms`;
     processed++;progress.value=processed;
     if(caseFailed){failed++;runnerFailedCases.push(item);setRunnerCase(item,'failure',caseStatus,caseDetail,responseBody);}
@@ -1220,7 +1221,7 @@ function syncActiveWorkspaceTab(markDirty=false){
 function clearWorkspaceResponse(){clearCurrentResponseExample();showResponse('Aguardando envio','idle','','');byId('response-variable-result').hidden=true;renderResponseTestResults([]);}
 function applyWorkspaceDraft(draft){
   method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(draft.method)?draft.method:'GET';byId('base-url').value=draft.baseUrl||'';baseUrlAuto=!!draft.baseUrlAuto;byId('allow-insecure-http').checked=draft.allowInsecureHttp===true;route.value=String(draft.route??'');renderQueryParams(Array.isArray(draft.params)?draft.params:[]);byId('headers').value=draft.headers||'';body.value=draft.body||'';applyBodyMode(draft.bodyMode);renderMultipartFields(draft.multipartFields||[]);renderGraphqlFields(draft);selectedContainer={collectionId:draft.collectionId||'',folderId:draft.folderId||''};byId('save-token-history').checked=draft.saveBearerToken!==false;applyAuthFields(draft);byId('token-client-id').value=draft.tokenClientId||'';byId('token-client-secret').value='';byId('token-helper').open=!!draft.tokenHelperOpen;
-  byId('capture-response-variable').checked=!!draft.captureResponseVariable;byId('response-variable-name').value=draft.responseVariableName||'token';byId('response-value-source').value=draft.responseValueSource==='text'?'text':'json';byId('response-json-path').value=draft.responseJsonPath||'access_token';byId('response-success-only').checked=draft.responseSuccessOnly!==false;byId('response-variable-result').hidden=true;restoreResponseTestDraft(draft.responseTests);
+  byId('capture-response-variable').checked=!!draft.captureResponseVariable;byId('response-variable-name').value=draft.responseVariableName||'token';byId('response-value-source').value=draft.responseValueSource==='text'?'text':'json';byId('response-json-path').value=draft.responseJsonPath||'access_token';byId('response-success-only').checked=draft.responseSuccessOnly!==false;byId('response-capture-target').value=draft.responseCaptureTarget==='vault'?'vault':'environment';byId('response-variable-result').hidden=true;restoreResponseTestDraft(draft.responseTests);
   clearCurrentResponseExample();activeSaved=draft.activeSaved||null;byId('request-title').textContent=draft.title||'Nova requisição';clearWriteConfirmation();updateGuard();updateTokenButton();updateCopyButtons();updateResponseCaptureUi();renderBodyHighlight();updateJsonTools();renderCollectionTree();setEditorTab(draft.editorSection||'params');
 }
 function applyWorkspaceTab(tab){
@@ -2200,7 +2201,9 @@ function releaseSecretVaultMemory(){
 }
 function renderEnvironmentSelect(){
   const select=byId('environment-select');select.replaceChildren();const groups=new Map();
-  for(const env of environments){const group=String(env.group||'Geral').trim()||'Geral';if(!groups.has(group)){const optionGroup=document.createElement('optgroup');optionGroup.label=group;groups.set(group,optionGroup);select.append(optionGroup);}
+  for(const env of RunnerLogic.normalizeEnvironmentPickerEntries(environments)){
+    if(env.disabled){const option=document.createElement('option');option.value='';option.textContent=env.name;option.disabled=true;option.selected=true;select.append(option);continue;}
+    const group=env.group||'Geral';if(!groups.has(group)){const optionGroup=document.createElement('optgroup');optionGroup.label=group;groups.set(group,optionGroup);select.append(optionGroup);}
     const option=document.createElement('option');option.value=env.id;option.textContent=env.name;option.selected=env.id===activeEnvironmentId;groups.get(group).append(option);}
   void renderCookieJar();
 }async function chooseEnvironment(id){
@@ -2609,14 +2612,15 @@ async function executeApiRequest(request){
 async function performApiRequest(request,button,save,historyRequest=request){
   clearCurrentResponseExample();
   button.disabled=true;byId('request-note').textContent='Aguardando resposta. Credenciais não serão armazenadas automaticamente.';showResponse('Enviando…','pending','','');renderResponseTestResults([]);
-  const vaultOrigins=Object.keys(request.resolutionProvenance||{}).filter(name=>request.resolutionProvenance[name]==='vault');
+  const responseVaultSecrets=RunnerLogic.secretValuesUsedByProvenance(request.resolutionProvenance,secretVaultValues||{});
+  const vaultOrigins=Object.keys(responseVaultSecrets);
   if(vaultOrigins.length)byId('request-note').textContent='Cofre usado para: '+vaultOrigins.join(', ')+'. Apenas nomes/origens são exibidos.';
   byId('response-persistence-note').textContent='Resposta temporária · não armazenada';
   const toast=showToast('Enviando requisição',request.method+' '+redactVaultValues(historyRequest.route.split('?')[0]),'info',0);let historyEntry=null;
   try{
     if(save)historyEntry=await saveHistory(historyRequest);
     const requestStartedAt=performance.now();const {proxyStatus,result}=await executeApiRequest(request);dismissToast(toast);
-    if(historyEntry)await saveHistoryResponse(historyEntry,result,performance.now()-requestStartedAt);
+    if(historyEntry)await saveHistoryResponse(historyEntry,result,performance.now()-requestStartedAt,responseVaultSecrets);
     if(result.error||proxyStatus>=400){const message=result.error||`Servidor local respondeu HTTP ${proxyStatus}.`;showResponse('Erro '+proxyStatus,'bad','',message);showToast('Requisição não enviada',message,'error');}
     else{const status=(result.status+' '+result.reason).trim();const output=result.body??'';showResponse(status,result.status>=200&&result.status<300?'ok':'bad',JSON.stringify(result.headers??{},null,2),output);apiStatusToast(result.status,result.reason);const testResults=RunnerLogic.evaluateResponseTests(request.responseTests,result);renderResponseTestResults(testResults);if(testResults.length){const failed=testResults.filter(item=>!item.passed);showToast(failed.length?'Testes da resposta falharam':'Testes da resposta passaram',`${testResults.length-failed.length}/${testResults.length} verificações passaram.`,failed.length?'error':'success');}await captureResponseVariable(request,result);}
     return result;
@@ -2673,6 +2677,7 @@ async function sendCurrentRequest(){
 async function requestOAuthClientCredentialsToken(){
   const secretField=byId('oauth2-client-secret');let request=null,responseDuration=0;
   try{
+    lastResolutionProvenance={};
     if(!(await persistOAuth2TokenConfig(true)))return;
     const config=oauth2TokenConfigFromForm();
     request=RunnerLogic.buildOAuthClientCredentialsRequest({
@@ -2683,6 +2688,8 @@ async function requestOAuthClientCredentialsToken(){
     request.environmentId=activeEnvironmentId||'default';
     request.oauthTokenUrl=applyEnvironment(config.tokenUrl);request.oauthClientId=applyEnvironment(config.clientId);
     request.oauthScope=applyEnvironment(config.scope);request.oauthClientAuthMethod=config.clientAuthMethod;
+    request.resolutionProvenance={...lastResolutionProvenance};
+    const responseVaultSecrets=RunnerLogic.secretValuesUsedByProvenance(request.resolutionProvenance,secretVaultValues||{});
     const insecureOrigin=RunnerLogic.remoteHttpOrigin(request.baseUrl);
     const authDescription=config.clientAuthMethod==='client_secret_basic'?'client_secret será enviado em HTTP Basic.':'client_id e client_secret serão enviados no formulário.';
     const transportWarning=insecureOrigin?remoteHttpWarning(insecureOrigin):'';
@@ -2703,7 +2710,7 @@ async function requestOAuthClientCredentialsToken(){
     const expiration=tokenInfo.expiresAt?' Expira em '+new Date(tokenInfo.expiresAt).toLocaleString()+'.':' O servidor não informou validade.';
     const message=savedEnvironment?'{{token}} salvo no ambiente "'+savedEnvironment.name+'".'+expiration:authModeFromForm()==='custom'?'Token preenchido em Bearer nesta sessão; não foi salvo no ambiente.'+expiration:'Token obtido. Configure a Auth herdada para usar {{token}}.'+expiration;
     showToast('OAuth token obtido',message,'success',7000);
-    const historyEntry=await saveHistory(tokenHistorySnapshot(request));if(historyEntry)await saveHistoryResponse(historyEntry,result,responseDuration);
+    const historyEntry=await saveHistory(tokenHistorySnapshot(request));if(historyEntry)await saveHistoryResponse(historyEntry,result,responseDuration,responseVaultSecrets);
   }catch(error){showToast('Falha no OAuth',error.message||'Confira endpoint, credenciais e ambiente.','error');}
   finally{
     secretField.value='';
@@ -2716,11 +2723,14 @@ async function requestTokenFromHelper(){
   if(!clientId||!secret){showToast('Dados incompletos','Informe os valores dos dois campos de credencial.','error');return;}
   let request,responseDuration=0;
   try{
+    lastResolutionProvenance={};
     if(!(await persistTokenRequestConfig(true)))return;
     const config=tokenRequestConfig,routeConfig=RunnerLogic.normalizeTokenRequestConfig({...config,route:applyEnvironment(config.route)});
     if(!routeConfig.route)throw Error('Configure a rota do endpoint de token.');
     const mode=config.credentialMode,baseUrl=applyEnvironment(byId('base-url').value.trim());
     request={baseUrl,route:routeConfig.route,method:'POST',...authFieldsFromForm(applyEnvironment,true),environmentId:activeEnvironmentId||'default',bodyMode:'json',headers:'Accept: application/json',body:'',confirmTestData:false,testDataPhrase:'',confirmTokenRequest:true,tokenClientId:applyEnvironment(clientId),tokenClientSecret:applyEnvironment(secret),tokenClientIdField:config.clientIdField,tokenClientSecretField:config.clientSecretField,tokenCredentialMode:mode,allowInsecureHttp:byId('allow-insecure-http').checked,saveBearerToken:byId('save-token-history').checked};
+    request.resolutionProvenance={...lastResolutionProvenance};
+    const responseVaultSecrets=RunnerLogic.secretValuesUsedByProvenance(request.resolutionProvenance,secretVaultValues||{});
     const target=new URL(request.baseUrl);
     if(!['http:','https:'].includes(target.protocol)||target.username||target.password||target.search||target.hash)throw Error('Informe URL base HTTP ou HTTPS sem credenciais, query ou fragmento.');
     const insecureOrigin=RunnerLogic.remoteHttpOrigin(request.baseUrl);
@@ -2741,7 +2751,7 @@ async function requestTokenFromHelper(){
         showToast('Token obtido',savedEnvironment?`Preenchido em Bearer e salvo como {{token}} no ambiente “${savedEnvironment.name}”.`:'Token preenchido em Bearer. Nada foi copiado para a área de transferência.','success');
       }
       else if(result?.status>=200&&result.status<300)showToast('Resposta recebida','Confira o corpo e preencha Token Bearer manualmente.','info');
-      const historyEntry=await saveHistory(tokenHistorySnapshot(request,token));if(historyEntry&&result)await saveHistoryResponse(historyEntry,result,responseDuration);byId('token-client-id').value='';byId('token-client-secret').value='';request.tokenClientId='';request.tokenClientSecret='';updateTokenButton();
+      const historyEntry=await saveHistory(tokenHistorySnapshot(request,token));if(historyEntry&&result)await saveHistoryResponse(historyEntry,result,responseDuration,responseVaultSecrets);byId('token-client-id').value='';byId('token-client-secret').value='';request.tokenClientId='';request.tokenClientSecret='';updateTokenButton();
     }
   }catch(error){showToast('Não foi possível solicitar token',error.message||'Confira ambiente e URL base.','error');byId('token-client-id').value='';byId('token-client-secret').value='';updateTokenButton();}
 }
@@ -2775,7 +2785,7 @@ function addEventListeners(){
   byId('export-workspace').onclick=exportWorkspaceBackup;byId('export-encrypted-workspace').onclick=exportEncryptedWorkspaceBackup;byId('restore-workspace').onclick=()=>byId('restore-workspace-file').click();byId('restore-workspace-file').addEventListener('change',restoreWorkspaceBackup);
   byId('protect-existing-secrets').onclick=protectExistingSecrets;
   byId('secret-vault-create').onclick=()=>void createSecretVaultFromUi();byId('secret-vault-unlock').onclick=()=>void unlockSecretVaultFromUi();byId('secret-vault-lock').onclick=()=>void lockSecretVaultFromUi();byId('secret-vault-remove').onclick=()=>void removeSecretVault();byId('secret-vault-add').onclick=event=>void addSecretVaultEntry(event);
-  byId('environment-form').addEventListener('submit',saveEnvironmentDraft);byId('close-environment').onclick=()=>{environmentDraft=[];byId('environment-dialog').close();};byId('cancel-environment').onclick=()=>{environmentDraft=[];byId('environment-dialog').close();};byId('manage-environments').onclick=openSettingsDialog;byId('settings-environments').onclick=()=>{byId('settings-dialog').close();openEnvironmentDialog();};byId('close-settings').onclick=()=>byId('settings-dialog').close();byId('close-settings-done').onclick=()=>byId('settings-dialog').close();byId('add-environment').onclick=addEnvironmentDraft;
+  byId('environment-form').addEventListener('submit',saveEnvironmentDraft);byId('close-environment').onclick=()=>{environmentDraft=[];byId('environment-dialog').close();};byId('cancel-environment').onclick=()=>{environmentDraft=[];byId('environment-dialog').close();};byId('manage-environments-direct').onclick=openEnvironmentDialog;byId('manage-environments').onclick=openSettingsDialog;byId('settings-environments').onclick=()=>{byId('settings-dialog').close();openEnvironmentDialog();};byId('close-settings').onclick=()=>byId('settings-dialog').close();byId('close-settings-done').onclick=()=>byId('settings-dialog').close();byId('add-environment').onclick=addEnvironmentDraft;
   byId('environment-select').onchange=event=>chooseEnvironment(event.target.value);byId('theme-select').onchange=event=>saveTheme(event.target.value);
   byId('font-select').onchange=event=>saveFont(event.target.value);byId('history-retention-limit').addEventListener('change',()=>void saveHistorySettings());byId('history-save-response-body').addEventListener('change',()=>void saveHistorySettings());byId('decrease-font').onclick=()=>setUiScale(activeScale-0.05);byId('increase-font').onclick=()=>setUiScale(activeScale+0.05);document.addEventListener('keydown',handleScaleShortcut);
   byId('environment-list').addEventListener('click',async event=>{
