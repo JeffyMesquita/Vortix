@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">Sua primeira request no Vortix em três passos</title>
+  <desc id="desc">Crie ambiente com URL base e token, envie uma request GET com Params e Bearer, depois confira resposta HTTP 200 e teste um campo JSON.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b2028"/>
+      <stop offset="1" stop-color="#15191f"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0 0 9 4.5 0 9Z" fill="#82d9bd"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="420" rx="24" fill="url(#background)"/>
+  <circle cx="1120" cy="46" r="118" fill="#b799ff" opacity=".06"/>
+  <text x="42" y="50" fill="#82d9bd" font-family="Segoe UI,Arial,sans-serif" font-size="12" font-weight="700" letter-spacing="1.8">GUIA RÁPIDO</text>
+  <text x="42" y="87" fill="#f0f4f8" font-family="Segoe UI,Arial,sans-serif" font-size="29" font-weight="700">Sua primeira request, em três passos</text>
+  <text x="42" y="113" fill="#aeb8c4" font-family="Segoe UI,Arial,sans-serif" font-size="15">Exemplo fictício: configure uma vez, envie e confira se a resposta corresponde ao esperado.</text>
+
+  <g font-family="Segoe UI,Arial,sans-serif">
+    <rect x="42" y="145" width="340" height="216" rx="16" fill="#222832" stroke="#3a4654"/>
+    <circle cx="72" cy="178" r="17" fill="#173b34"/>
+    <text x="67" y="184" fill="#82d9bd" font-size="16" font-weight="700">1</text>
+    <text x="101" y="183" fill="#e8edf2" font-size="18" font-weight="700">Prepare o ambiente</text>
+    <text x="66" y="227" fill="#82d9bd" font-size="11" font-weight="700" letter-spacing="1">DESENVOLVIMENTO</text>
+    <text x="66" y="263" fill="#c4ccd6" font-family="Consolas,monospace" font-size="13">baseUrl</text>
+    <text x="147" y="263" fill="#f0f4f8" font-family="Consolas,monospace" font-size="13">https://api.example.com</text>
+    <text x="66" y="295" fill="#c4ccd6" font-family="Consolas,monospace" font-size="13">token</text>
+    <text x="147" y="295" fill="#b799ff" font-family="Consolas,monospace" font-size="13">••••••••</text>
+    <text x="66" y="334" fill="#9ca8b5" font-size="12">Use valores de teste do seu ambiente.</text>
+
+    <path d="M390 252h30" fill="none" stroke="#82d9bd" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <rect x="430" y="145" width="340" height="216" rx="16" fill="#222832" stroke="#3a4654"/>
+    <circle cx="460" cy="178" r="17" fill="#302b40"/>
+    <text x="455" y="184" fill="#b799ff" font-size="16" font-weight="700">2</text>
+    <text x="489" y="183" fill="#e8edf2" font-size="18" font-weight="700">Monte e envie</text>
+    <rect x="456" y="214" width="60" height="28" rx="7" fill="#173b34"/>
+    <text x="468" y="233" fill="#82d9bd" font-family="Consolas,monospace" font-size="13" font-weight="700">GET</text>
+    <text x="530" y="233" fill="#f0f4f8" font-family="Consolas,monospace" font-size="14">/v1/users</text>
+    <text x="456" y="276" fill="#d6bd75" font-family="Consolas,monospace" font-size="13">Params   page=1</text>
+    <text x="456" y="306" fill="#c4ccd6" font-family="Consolas,monospace" font-size="12">Bearer {{token}}</text>
+    <text x="456" y="338" fill="#9ca8b5" font-size="12">GET deve consultar; confira o contrato.</text>
+
+    <path d="M778 252h30" fill="none" stroke="#82d9bd" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <rect x="818" y="145" width="340" height="216" rx="16" fill="#222832" stroke="#3a4654"/>
+    <circle cx="848" cy="178" r="17" fill="#33291e"/>
+    <text x="843" y="184" fill="#d6bd75" font-size="16" font-weight="700">3</text>
+    <text x="877" y="183" fill="#e8edf2" font-size="18" font-weight="700">Confira a resposta</text>
+    <rect x="844" y="214" width="82" height="28" rx="7" fill="#173b34"/>
+    <text x="857" y="233" fill="#82d9bd" font-family="Consolas,monospace" font-size="13" font-weight="700">200 OK</text>
+    <text x="844" y="277" fill="#f0f4f8" font-family="Consolas,monospace" font-size="13">{ "data": [{ "id": 42 }] }</text>
+    <text x="844" y="310" fill="#d6bd75" font-family="Segoe UI,Arial,sans-serif" font-size="13">Teste</text>
+    <text x="893" y="310" fill="#c4ccd6" font-family="Consolas,monospace" font-size="12">data[0].id existe</text>
+    <text x="844" y="338" fill="#9ca8b5" font-size="12">Salve a request na coleção.</text>
+  </g>
+
+  <text x="42" y="396" fill="#7f8b99" font-family="Segoe UI,Arial,sans-serif" font-size="12">Valores ilustrativos. Configure sua URL, autenticação e expectativas antes de enviar.</text>
+</svg>

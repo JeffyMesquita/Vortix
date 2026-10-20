@@ -122,6 +122,9 @@ O servidor usa a porta 51873 por padrão. Consulte [Configuração](#configuraç
 
 O endpoint <code>/health</code> preserva <code>app: ApiPublicacaoTester</code> para clientes antigos e informa <code>product: VortixApiClient</code> como identidade atual.
 
+> [!TIP]
+> Quer só experimentar? Inicie localmente e siga o [primeiro fluxo](#primeiro-fluxo). A seção do Render é apenas para hospedar uma cópia pública.
+
 ## Hospedagem pública no Render
 
 O repositório inclui <code>Dockerfile</code> e <code>render.yaml</code> para criar um serviço web Render Free. O Vortix fica aberto para qualquer visitante, sem senha compartilhada. Cada perfil de navegador mantém workspace independente; o serviço encaminha as requests e não expõe dados de outros visitantes.
@@ -156,24 +159,68 @@ Em hospedagem, o callback OAuth PKCE usa a origem pública configurada, não o c
 
 ## Primeiro fluxo
 
-1. Abra **Configurações → Ambientes** e crie um ambiente.
-2. Adicione uma variável chamada <code>baseUrl</code>, por exemplo <code>https://api.example.com</code>.
-3. Crie uma coleção e, se quiser, pastas para separar recursos ou cenários.
-4. Crie uma request, escolha o método e informe a rota começando por <code>/</code>.
-5. Preencha Params na aba **Params**. Os parâmetros são enviados na query string; nomes repetidos e valores vazios são aceitos.
-6. Adicione cabeçalhos, autenticação e body nas respectivas abas.
-7. Clique em **Enviar**. Depois, salve a request na coleção para reutilizá-la.
+<p align="center">
+  <img src="docs/images/vortix-quickstart.svg" alt="Tutorial em três passos: definir ambiente, enviar uma request e validar a resposta" width="100%">
+</p>
 
-Exemplo:
+Vamos montar uma consulta fictícia de usuários. Use um endpoint de teste seu quando repetir o fluxo; <code>api.example.com</code> abaixo é apenas exemplo.
 
-| Campo | Valor |
+### 1. Prepare um ambiente
+
+Abra **Configurações → Ambientes**, crie **Desenvolvimento** e adicione:
+
+| Variável | Valor de exemplo |
+|---|---|
+| <code>baseUrl</code> | <code>https://api.example.com</code> |
+
+Se sua API exige Bearer, crie também <code>token</code> e use um token descartável neste exemplo. Vortix substitui <code>{{baseUrl}}</code> e <code>{{token}}</code> antes de enviar. No modo público, variáveis comuns ficam no IndexedDB sem criptografia automática; para guardar um segredo real, use o [cofre cifrado](#cofre-local-de-segredos). O proxy público recebe a request já montada para encaminhá-la à API, então use apenas um host em que confia.
+
+### 2. Monte a request
+
+Crie uma coleção e uma request **GET**. Separe cada parte nos campos do editor:
+
+| Campo no Vortix | Valor |
 |---|---|
 | URL base | <code>{{baseUrl}}</code> |
 | Rota | <code>/v1/users</code> |
-| Params | <code>page=1</code> |
+| Params | <code>page=1</code> e <code>limit=20</code> |
 | Header | <code>Accept: application/json</code> |
+| Auth, se necessária | Bearer <code>{{token}}</code> |
 
-Escolha **Body** para selecionar JSON, texto, XML ou form URL-encoded. O modo define o Content-Type padrão; um header Content-Type informado manualmente o sobrescreve.
+O Vortix combina base, rota e Params. O resultado deste exemplo é:
+
+<p align="center">
+  <img src="docs/images/vortix-request-anatomy.svg" alt="Como URL base, rota e Params formam a URL final de uma request" width="100%">
+</p>
+
+Equivalente em cURL:
+
+~~~sh
+curl --request GET \
+  --url 'https://api.example.com/v1/users?page=1&limit=20' \
+  --header 'Accept: application/json'
+~~~
+
+O header Authorization é opcional: use-o só quando a API exigir autenticação. No Vortix, configure Auth como Bearer e referencie <code>{{token}}</code>; não cole um segredo real no texto da request.
+
+Para testar o importador, cole esse comando em **Importar cURL** e confira os campos extraídos antes de enviar.
+
+### 3. Envie, confira e reutilize
+
+Clique **Enviar**. Uma resposta fictícia pode ter este formato:
+
+~~~json
+{
+  "data": [
+    { "id": 42, "name": "Ana", "active": true }
+  ],
+  "page": { "number": 1, "size": 20 }
+}
+~~~
+
+Confira status, cabeçalhos e body. Na aba **Testes**, você pode exigir status <code>200</code> ou verificar um campo da resposta, como <code>data[0].id</code>. GET costuma consultar dados, mas confira o contrato do endpoint: o Vortix não consegue garantir que uma API não altere estado. Salve a request na coleção para abrir de novo ou executar pelo [Runner de coleção](#runner-de-coleção).
+
+Para enviar JSON, texto, XML ou form URL-encoded, escolha o formato na aba **Body**. O Vortix define o Content-Type padrão; um header Content-Type informado manualmente o sobrescreve. POST, PUT, PATCH e DELETE pedem confirmação de gravação; use dados descartáveis e confira a URL antes de confirmar.
 
 
 ## Busca rápida
@@ -551,6 +598,22 @@ A aba **Testes** permite até 20 verificações por request:
 - campo JSON contendo um valor.
 
 Os testes rodam depois do envio manual e durante o Runner. Uma falha de teste marca a request como falha na rodada. Ao exportar testes ou captura para Insomnia/Postman, o Vortix pede confirmação para gerar scripts no arquivo.
+
+Exemplo para uma resposta de criação:
+
+~~~json
+{
+  "data": { "id": 42, "enabled": true },
+  "tags": ["alpha", "beta"]
+}
+~~~
+
+| Alvo | Caminho ou valor esperado | Regra |
+|---|---|---|
+| Status HTTP | <code>201</code> | Igual a |
+| JSON | <code>data.id</code> | Existe |
+| JSON | <code>data.enabled</code> | Igual a <code>true</code> |
+| JSON | <code>tags</code> | Contém <code>beta</code> |
 
 ### Simular uma resposta salva localmente
 

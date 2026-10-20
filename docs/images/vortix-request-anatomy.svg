@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-labelledby="title desc">
+  <title id="title">Como o Vortix monta uma URL</title>
+  <desc id="desc">URL base, rota e parâmetros de query aparecem separados no editor e formam a URL final ao enviar.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b2028"/>
+      <stop offset="1" stop-color="#15191f"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="320" rx="22" fill="url(#background)"/>
+  <text x="38" y="43" fill="#82d9bd" font-family="Segoe UI,Arial,sans-serif" font-size="13" font-weight="700" letter-spacing="1.8">ANATOMIA DA REQUEST</text>
+  <text x="38" y="72" fill="#f0f4f8" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700">Três campos, um destino</text>
+  <text x="38" y="95" fill="#aeb8c4" font-family="Segoe UI,Arial,sans-serif" font-size="14">Params viram query string; rota permanece separada para facilitar reuso.</text>
+
+  <g font-family="Segoe UI,Arial,sans-serif">
+    <rect x="38" y="116" width="340" height="88" rx="13" fill="#222832" stroke="#3a4654"/>
+    <text x="58" y="142" fill="#82d9bd" font-size="12" font-weight="700" letter-spacing="1">URL BASE</text>
+    <text x="58" y="176" fill="#e8edf2" font-family="Consolas,monospace" font-size="17">https://api.example.com</text>
+
+    <circle cx="405" cy="160" r="17" fill="#173b34"/>
+    <text x="399" y="166" fill="#82d9bd" font-size="20" font-weight="700">+</text>
+
+    <rect x="432" y="116" width="340" height="88" rx="13" fill="#222832" stroke="#3a4654"/>
+    <text x="452" y="142" fill="#b799ff" font-size="12" font-weight="700" letter-spacing="1">ROTA</text>
+    <text x="452" y="176" fill="#e8edf2" font-family="Consolas,monospace" font-size="17">/v1/users</text>
+
+    <circle cx="799" cy="160" r="17" fill="#302b40"/>
+    <text x="793" y="166" fill="#b799ff" font-size="20" font-weight="700">+</text>
+
+    <rect x="826" y="116" width="336" height="88" rx="13" fill="#222832" stroke="#3a4654"/>
+    <text x="846" y="142" fill="#d6bd75" font-size="12" font-weight="700" letter-spacing="1">PARAMS</text>
+    <text x="846" y="171" fill="#e8edf2" font-family="Consolas,monospace" font-size="15">page=1  &amp;  limit=20</text>
+  </g>
+
+  <rect x="38" y="226" width="1124" height="58" rx="12" fill="#173b34" stroke="#2e806c"/>
+  <text x="58" y="250" fill="#a8e8d5" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="700" letter-spacing="1">URL FINAL</text>
+  <text x="58" y="271" fill="#f0f4f8" font-family="Consolas,monospace" font-size="15">https://api.example.com/v1/users?page=1&amp;limit=20</text>
+</svg>
