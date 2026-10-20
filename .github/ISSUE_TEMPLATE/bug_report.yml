@@ -1,0 +1,64 @@
+name: Relatar um bug
+description: Relate um comportamento inesperado do Vortix.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Descreva o menor cenário que reproduz o problema. **Não inclua tokens, senhas, cookies, dados pessoais, URLs privadas ou bodies reais.**
+  - type: input
+    id: version
+    attributes:
+      label: Versão ou commit
+      description: Se não souber, diga onde está usando (site público ou execução local).
+      placeholder: "ex.: master / commit abc1234"
+    validations:
+      required: true
+  - type: dropdown
+    id: hosting
+    attributes:
+      label: Onde ocorre?
+      options:
+        - Site público
+        - Execução local no Windows
+        - Outro sistema operacional
+        - Não sei
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Navegador e versão
+      placeholder: "ex.: Firefox 135"
+    validations:
+      required: false
+  - type: textarea
+    id: steps
+    attributes:
+      label: Passos para reproduzir
+      description: Remova dados privados. Use uma API de exemplo ou mock se precisar descrever uma chamada.
+      placeholder: |
+        1. Abra ...
+        2. Configure ... com dados fictícios
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Resultado esperado
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Resultado observado
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Capturas ou logs sanitizados (opcional)
+      description: Confirme que removeu tokens, cookies, dados pessoais, endereços internos e conteúdo real de requests.
+    validations:
+      required: false

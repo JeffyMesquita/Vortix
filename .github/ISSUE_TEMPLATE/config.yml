@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Guia de contribuição
+    url: https://github.com/JeffyMesquita/Vortix/blob/master/CONTRIBUTING.md
+    about: Consulte setup, testes e orientações antes de abrir um pull request.
+  - name: Relatar vulnerabilidade em privado
+    url: https://github.com/JeffyMesquita/Vortix/security/advisories/new
+    about: Não publique detalhes de segurança em issues abertas.
