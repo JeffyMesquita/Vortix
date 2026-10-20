@@ -760,6 +760,27 @@ textarea.compact { min-height: 165px; }
 .runner-summary { border: 1px solid var(--border); border-radius: 7px; margin: 0 0 10px; padding: 9px 11px; color: var(--text); background: var(--surface-raised); font-size: 12px; }
 .runner-summary[hidden] { display: none; }
 .runner-retention { margin: 0 0 8px; font-size: 12px; }
+.runner-history-section { display: grid; gap: 8px; }
+.runner-history-hint { margin: 0; font-size: 12px; }
+.runner-history-list { display: grid; gap: 6px; max-height: 220px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+.runner-history-item { display: grid; gap: 6px; border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; background: var(--surface-raised); }
+.runner-history-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.runner-history-meta { display: grid; min-width: 0; gap: 2px; }
+.runner-history-meta strong { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.runner-history-meta small { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.runner-history-delete { flex: none; border: 1px solid var(--border); border-radius: 5px; padding: 3px 7px; color: var(--muted); background: var(--surface); font: inherit; font-size: 12px; cursor: pointer; }
+.runner-history-delete:hover, .runner-history-delete:focus-visible { border-color: var(--danger); color: var(--danger); }
+.runner-history-steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.runner-history-step { border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; color: var(--muted); background: var(--bg); font-size: 12px; line-height: 1.4; }
+.runner-history-step[data-outcome="passed"] { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); color: var(--accent); }
+.runner-history-step[data-outcome="failed"] { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); }
+.runner-history-step[data-outcome="skipped"] { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); color: var(--warning); }
+.runner-history-more { border: 0; margin: 2px 0; padding: 3px 6px; color: var(--accent); background: transparent; font: inherit; font-size: 12px; text-align: left; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.runner-history-more:hover, .runner-history-more:focus-visible { color: var(--text); }
+.runner-history-steps--more { margin-top: 4px; }
+.runner-history-warning { margin: 0; color: var(--warning); font-size: 12px; line-height: 1.45; }
+.runner-history-empty { margin: 0; color: var(--muted); font-size: 12px; }
+.runner-history-clear { justify-self: start; }
 .runner-result-item { grid-template-columns: 50px minmax(0, 1fr) auto; align-items: start; }
 .runner-result-item details { grid-column: 2 / -1; min-width: 0; }
 .runner-result-item details summary { color: var(--muted); cursor: pointer; font-size: 12px; }

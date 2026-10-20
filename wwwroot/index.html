@@ -517,10 +517,17 @@ insomnia.environment.set("token", body.access_token);</code></pre>
         <p class="runner-error" id="runner-error" role="alert" hidden></p>
         <section class="runner-run-section" aria-labelledby="runner-run-heading">
           <div class="runner-section-heading"><h3 id="runner-run-heading">Resultado</h3><output id="runner-progress-label"></output></div>
-          <p class="hint runner-retention">O relatório desta rodada é temporário; requests e variáveis capturadas continuam salvas.</p>
+          <p class="hint runner-retention">O relatório detalhado desta rodada é temporário; o resumo seguro fica no histórico local do Runner.</p>
           <progress id="runner-progress" max="1" value="0" hidden></progress>
           <p class="runner-summary" id="runner-summary" role="status" aria-live="polite" hidden></p>
           <div class="runner-results" id="runner-results" aria-live="polite"></div>
+        </section>
+        <section class="runner-history-section" aria-labelledby="runner-history-heading">
+          <div class="runner-section-heading"><h3 id="runner-history-heading">Histórico de execuções</h3><span id="runner-history-count"></span></div>
+          <p class="hint runner-history-hint">O histórico local mantém até 30 rodadas ou 750 KB. URLs, bodies, datasets e mensagens de erro não são salvos.</p>
+          <ol class="runner-history-list" id="runner-history-list" aria-label="Histórico de execuções"></ol>
+          <p id="runner-history-announcement" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
+          <button class="button secondary runner-history-clear" id="clear-runner-history" type="button">Limpar histórico</button>
         </section>
       </div>
       <div class="dialog-actions runner-actions">

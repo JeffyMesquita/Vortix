@@ -194,6 +194,22 @@ Só entram depois das features anteriores e dos testes de uso:
 - [x] Configurar CNAME de `vortixapiclient.jeffymesquita.dev` e validar o TLS pelo subdomínio.
 - [ ] Conferir uma request a uma API pública, persistência do IndexedDB e Cookie jar após um cold start real.
 
+### 13. Histórico local do Runner
+
+**Status: concluída e validada nesta rodada.**
+
+- [x] Salvar ao final rodadas concluídas, com falhas e interrompidas pelo usuário, incluindo etapas não executadas.
+- [x] Persistir somente o snapshot permitido (`id`, `startedAt`, `durationMs`, totais, `stopped` e steps com ordinal, outcome, status, duração e contagem de testes).
+- [x] Manter até 30 rodadas em no máximo 750 KB, com ordenação estável por `startedAt` e sem alterar o array de origem.
+- [x] Aplicar o mesmo allowlist ao exportar e restaurar backups, descartando URLs, bodies, headers, datasets, labels e mensagens de erro.
+- [x] Integrar leitura/gravação por `dbRead`/`dbWrite('settings')` para funcionar no SQLite local e no IndexedDB do modo público.
+- [x] Normalizar e persistir snapshots antigos ao abrir o Runner para manter IDs de exclusão estáveis.
+- [x] Serializar gravação, exclusão e limpeza entre abas com Web Locks e manter controles bloqueados até concluir cada mutação.
+- [x] Exibir lista compacta e acessível no Runner; leitor de tela recebe resumo curto separado da lista e navegadores sem Web Locks mostram aviso. Todas as 500 etapas podem ser consultadas, com rótulos de exclusão distintos, além de remoção individual e limpeza total.
+- [x] Falhar sem bloquear a execução quando o armazenamento estiver indisponível e mostrar aviso acionável sem sobrescrever histórico desconhecido.
+- [x] Documentar privacidade, retenção e controles no README.
+- [x] Rodar `node --test ./RunnerLogic.test.cjs` (159/159), `node --check`, build Release sem avisos, `git diff --check` e smoke desktop: duas abas preservaram as rodadas, as 75 etapas puderam ser expandidas, IDs legados foram migrados e excluídos, registros extras foram removidos, o aviso sem Web Locks apareceu, a limpeza total funcionou e não houve erros no browser.
+
 ## Feature: exportar ambientes individualmente
 
 **Objetivo:** transferir um ambiente sem exportar a coleção inteira. O arquivo Postman Environment JSON também pode ser importado no Insomnia.

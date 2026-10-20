@@ -23,9 +23,11 @@ const DEFAULT_FONT = 'fira-code', DEFAULT_UI_SCALE = 1.2, MIN_UI_SCALE = 0.8, MA
 let legacyDbPromise, toastId = 0, queryId = 0, collections = [], environments = [], environmentDraft = [], activeEnvironmentId = '', activeTheme = 'dracula', activeFont = DEFAULT_FONT, activeScale = DEFAULT_UI_SCALE, actionDialogQueue = Promise.resolve(), tokenModeRecoveryWarned = false;
 let activeSaved = null, selectedContainer = { collectionId:'', folderId:'' }, collapsed = new Set(), baseUrlAuto = true;
 let runnerEntries = [], runnerFailedCases = [], runnerBusy = false, runnerStopRequested = false;
+let runnerHistoryLoadTask = Promise.resolve(), runnerHistoryMutating = false;
 let quickOpenEntries = [], quickOpenActiveIndex = 0;
 let historySettings = RunnerLogic.normalizeHistorySettings(), historyComparisonIds = [];
 const WORKSPACE_TABS_KEY = 'workspaceTabs', MAX_WORKSPACE_TABS = RunnerLogic.maxWorkspaceTabs;
+const RUNNER_HISTORY_LIMIT = RunnerLogic.runnerHistoryLimit || 30;
 let workspaceTabs = [], activeWorkspaceTabId = '', workspaceTabsSaveTimer = 0, workspaceTabsStorageWarning = false, workspaceTabsLoading = false;
 let responseBodyState = RunnerLogic.parseResponseBody(''), responseBodyView = 'pretty', responseTreeSource = null;
 let currentResponseExample = null;
@@ -1080,6 +1082,126 @@ function runnerBodyPreview(value){
   const raw=String(value??'');if(!raw)return'';const sanitized=sanitizeBody(raw);if(!sanitized.value)return sanitized.redacted?'Body omitido por conter dados sensíveis.':'';
   return sanitized.value.length>6000?sanitized.value.slice(0,6000)+'\n… Body truncado na visualização.':sanitized.value;
 }
+function runnerHistoryDate(value){
+  const time=Date.parse(String(value||''));
+  return Number.isFinite(time)?new Date(time).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):'Data indisponível';
+}
+function runnerHistoryOutcomeLabel(outcome){
+  return outcome==='passed'?'concluída':outcome==='failed'?'falhou':'não executada';
+}
+function runnerHistoryNotice(text,warning=false){
+  const item=document.createElement('li');item.className=warning?'runner-history-warning':'runner-history-empty';item.setAttribute('role','note');item.textContent=text;return item;
+}
+function renderRunnerHistory(entries,warning=''){
+  const list=byId('runner-history-list');if(!list)return;
+  const safe=RunnerLogic.sanitizeRunnerHistoryValue(Array.isArray(entries)?entries:[]);
+  const visibleWarning=warning||RunnerLogic.runnerHistoryCompatibilityWarning(Boolean(navigator.locks?.request));
+  list.replaceChildren();
+  byId('runner-history-announcement').textContent=RunnerLogic.runnerHistoryAnnouncement(safe.length,visibleWarning);
+  byId('runner-history-count').textContent=safe.length?`${safe.length} de ${RUNNER_HISTORY_LIMIT}`:'';
+  byId('clear-runner-history').disabled=runnerBusy||runnerHistoryMutating||!safe.length;
+  if(visibleWarning)list.append(runnerHistoryNotice(visibleWarning,true));
+  if(!safe.length){if(!visibleWarning)list.append(runnerHistoryNotice('Nenhuma execução salva ainda.'));return;}
+  for(const[historyIndex,entry]of safe.entries()){
+    const item=document.createElement('li'),header=document.createElement('div'),meta=document.createElement('div');
+    item.className='runner-history-item';header.className='runner-history-header';meta.className='runner-history-meta';
+    const title=document.createElement('strong');title.textContent=runnerHistoryDate(entry.startedAt);
+    const summary=document.createElement('small');summary.textContent=`${entry.passed} concluídas · ${entry.failed} falhas · ${entry.skipped} não executadas · ${entry.durationMs} ms${entry.stopped?' · rodada interrompida':''}`;
+    meta.append(title,summary);
+    const remove=document.createElement('button');remove.type='button';remove.className='runner-history-delete';remove.dataset.runnerHistoryDelete=entry.id;remove.textContent='Excluir';remove.disabled=runnerBusy||runnerHistoryMutating;remove.setAttribute('aria-label',`Excluir execução ${historyIndex+1}, de ${runnerHistoryDate(entry.startedAt)}, com ${entry.passed} concluídas e ${entry.failed} falhas`);
+    header.append(meta,remove);
+    const steps=document.createElement('ol');steps.className='runner-history-steps';steps.setAttribute('aria-label','Etapas da execução');
+    const appendSteps=(target,stepEntries)=>{for(const step of stepEntries){
+      const stepItem=document.createElement('li');stepItem.className='runner-history-step';stepItem.dataset.outcome=step.outcome;
+      const tests=step.testsPassed||step.testsFailed?` · testes ${step.testsPassed}/${step.testsPassed+step.testsFailed}`:'';
+      const status=step.status==null?'':` · HTTP ${step.status}`;
+      stepItem.textContent=`Etapa ${step.ordinal}: ${runnerHistoryOutcomeLabel(step.outcome)}${status} · ${step.durationMs} ms${tests}`;
+      target.append(stepItem);
+    }};
+    appendSteps(steps,entry.steps.slice(0,60));
+    if(entry.steps.length>60){
+      const moreItem=document.createElement('li'),moreButton=document.createElement('button'),moreSteps=document.createElement('ol');
+      moreButton.type='button';moreButton.className='runner-history-more';moreButton.setAttribute('aria-expanded','false');moreButton.textContent=`Mostrar ${entry.steps.length-60} etapas restantes`;
+      moreSteps.className='runner-history-steps runner-history-steps--more';moreSteps.setAttribute('aria-label','Etapas adicionais da execução');moreSteps.hidden=true;appendSteps(moreSteps,entry.steps.slice(60));
+      moreButton.onclick=()=>{const expanded=moreSteps.hidden;moreSteps.hidden=!expanded;moreButton.setAttribute('aria-expanded',String(expanded));moreButton.textContent=expanded?'Ocultar etapas adicionais':`Mostrar ${entry.steps.length-60} etapas restantes`;};
+      moreItem.append(moreButton,moreSteps);steps.append(moreItem);
+    }
+    item.append(header,steps);list.append(item);
+  }
+}
+async function loadRunnerHistory(){
+  try{
+    return await withRunnerHistoryMutation(async()=>{
+      const record=await dbRead('settings','runnerHistory'),value=record?.value;
+      if(value!=null&&!Array.isArray(value))throw Error('Formato de histórico desconhecido.');
+      const normalized=RunnerLogic.sanitizeRunnerHistoryValue(Array.isArray(value)?value:[]);
+      let needsNormalization=record!=null;
+      try{if(record!=null)needsNormalization=JSON.stringify(record??null)!==JSON.stringify({key:'runnerHistory',value:normalized});}catch{}
+      if(needsNormalization)await dbWrite('settings',{key:'runnerHistory',value:normalized});
+      renderRunnerHistory(normalized);
+      return true;
+    });
+  }catch{
+    renderRunnerHistory([],'Histórico local indisponível. Verifique o armazenamento do workspace e tente reabrir o Runner.');
+    showToast('Histórico do Runner indisponível','Não foi possível ler o histórico local. A execução continua disponível; verifique o armazenamento e tente novamente.','warning',10000);
+    return false;
+  }
+}
+async function withRunnerHistoryMutation(action){
+  runnerHistoryMutating=true;updateRunnerOptionsDisabled(true);
+  try{
+    const run=()=>action();
+    const lockTask=navigator.locks?.request('vortix-runner-history',{mode:'exclusive'},run);
+    return await (lockTask??run());
+  }finally{runnerHistoryMutating=false;updateRunnerOptionsDisabled(false);}
+}
+async function saveRunnerRunHistory(run){
+  try{
+    await runnerHistoryLoadTask;
+    await withRunnerHistoryMutation(async()=>{
+      const record=await dbRead('settings','runnerHistory'),existing=record?.value;
+      if(existing!=null&&!Array.isArray(existing))throw Error('Formato de histórico desconhecido.');
+      const snapshot=RunnerLogic.createRunnerHistorySnapshot(run),safeExisting=[];
+      for(const entry of Array.isArray(existing)?existing:[]){try{safeExisting.push(RunnerLogic.createRunnerHistorySnapshot(entry));}catch{}}
+      const retained=RunnerLogic.retainNewestRunnerHistoryEntries([snapshot,...safeExisting],RUNNER_HISTORY_LIMIT);
+      await dbWrite('settings',{key:'runnerHistory',value:retained});
+      renderRunnerHistory(retained);
+    });
+    return true;
+  }catch{
+    showToast('Histórico do Runner não salvo','A execução terminou, mas o histórico local não foi atualizado. Verifique o espaço e o armazenamento do workspace; depois tente novamente.','warning',12000);
+    return false;
+  }
+}
+async function removeRunnerHistoryEntry(id){
+  if(runnerBusy||runnerHistoryMutating||!id)return;
+  try{
+    await withRunnerHistoryMutation(async()=>{
+      const record=await dbRead('settings','runnerHistory'),existing=record?.value;
+      if(existing!=null&&!Array.isArray(existing))throw Error('Formato de histórico desconhecido.');
+      const next=RunnerLogic.sanitizeRunnerHistoryValue(Array.isArray(existing)?existing:[]).filter(entry=>entry.id!==String(id));
+      await dbWrite('settings',{key:'runnerHistory',value:next});
+      renderRunnerHistory(next);
+    });
+    showToast('Execução removida','O resumo foi removido do histórico local do Runner.','info');
+  }catch{
+    showToast('Histórico do Runner indisponível','Não foi possível remover a execução. Verifique o armazenamento do workspace e tente novamente.','warning',10000);
+  }
+}
+async function clearRunnerHistory(){
+  if(runnerBusy||runnerHistoryMutating)return;
+  if(!(await confirmWithDialog({eyebrow:'HISTÓRICO DO RUNNER',title:'Limpar histórico de execuções?',description:'Todos os resumos de rodadas deste dispositivo serão removidos. Requests, coleções e variáveis capturadas não serão alteradas.',confirmLabel:'Limpar histórico',danger:true})))return;
+  if(runnerBusy||runnerHistoryMutating)return;
+  try{
+    await withRunnerHistoryMutation(async()=>{
+      await dbWrite('settings','runnerHistory',true);
+      renderRunnerHistory([]);
+    });
+    showToast('Histórico do Runner limpo','Os resumos de execuções foram removidos deste dispositivo.','success');
+  }catch{
+    showToast('Histórico do Runner indisponível','Não foi possível limpar o histórico. Verifique o armazenamento do workspace e tente novamente.','warning',10000);
+  }
+}
 function showRunnerError(message){const error=byId('runner-error');error.textContent=message;error.hidden=false;}
 function clearRunnerError(){const error=byId('runner-error');error.textContent='';error.hidden=true;}
 function fitRunnerDialog(){
@@ -1099,7 +1221,8 @@ function openRunnerDialog(){
   byId('runner-write-guard').hidden=!writes;byId('runner-write-description').textContent=writes?`${writes===1?'1 chamada':`${writes} chamadas`} POST, PUT, PATCH ou DELETE podem alterar dados.`:'';
   byId('runner-confirm-writes').checked=false;byId('runner-write-phrase').value='';byId('runner-datasets').value='';byId('runner-delay').value='0';byId('runner-stop-on-error').checked=true;
   renderRunnerPlan(runnerEntries);byId('runner-results').replaceChildren();byId('runner-progress').hidden=true;byId('runner-progress').value=0;byId('runner-progress-label').textContent='';byId('runner-summary').hidden=true;byId('rerun-failed').hidden=true;byId('stop-runner').hidden=true;clearRunnerError();byId('start-runner').disabled=false;byId('runner-options').disabled=false;
-  fitRunnerDialog();byId('runner-dialog').showModal();
+  byId('runner-history-count').textContent='Carregando…';byId('clear-runner-history').disabled=true;byId('runner-history-list').replaceChildren();
+  fitRunnerDialog();byId('runner-dialog').showModal();runnerHistoryLoadTask=loadRunnerHistory();
 }
 async function confirmRunnerWrites(cases){
   const writes=runnerWriteCases(cases);if(!writes.length)return true;
@@ -1115,22 +1238,24 @@ async function confirmRunnerWrites(cases){
   return confirmWithDialog({eyebrow:'RUNNER DE TESTE',title:`Executar ${writes.length} gravações?`,description:`A sequência inclui ${writes.length} POST, PUT, PATCH ou DELETE.`,detail:destinations.join('\n'),warning:'A confirmação vale para todas as gravações desta execução. Confira ambiente, URLs e dados descartáveis.',confirmLabel:'Executar gravações',danger:true});
 }
 function requestRunnerStop(){if(!runnerBusy)return;runnerStopRequested=true;byId('stop-runner').disabled=true;byId('stop-runner').textContent='Parando…';byId('runner-progress-label').textContent='A request atual terminará antes de parar.';}
-function updateRunnerOptionsDisabled(disabled){byId('runner-options').disabled=disabled;byId('start-runner').disabled=disabled;byId('cancel-runner').disabled=disabled;byId('close-runner').disabled=disabled;}
+function updateRunnerOptionsDisabled(disabled){const locked=disabled||runnerBusy||runnerHistoryMutating;byId('runner-options').disabled=locked;byId('start-runner').disabled=locked;byId('cancel-runner').disabled=locked;byId('close-runner').disabled=locked;byId('rerun-failed').disabled=locked;byId('runner-history-list').querySelectorAll('[data-runner-history-delete]').forEach(button=>{button.disabled=locked;});byId('clear-runner-history').disabled=locked||!byId('runner-history-list').querySelector('.runner-history-item');}
 async function runRunnerCases(cases,options,allowWrites){
   const runCases=[...cases];runnerBusy=true;runnerStopRequested=false;runnerFailedCases=[];clearRunnerError();renderRunnerCases(runCases);
   const progress=byId('runner-progress');progress.hidden=false;progress.max=Math.max(1,runCases.length);progress.value=0;byId('runner-progress-label').textContent=`0 / ${runCases.length}`;byId('runner-summary').hidden=true;byId('rerun-failed').hidden=true;byId('stop-runner').hidden=false;byId('stop-runner').disabled=false;byId('stop-runner').textContent='Parar após esta request';updateRunnerOptionsDisabled(true);
-  const started=performance.now();let passed=0,failed=0,skipped=0,processed=0,stoppedByFailure=false;
+  const started=performance.now(),startedAt=new Date().toISOString();let passed=0,failed=0,skipped=0,processed=0,stoppedByFailure=false;
+  const historySteps=[],skippedStep=ordinal=>({ordinal,outcome:'skipped',status:null,durationMs:0,tests:{passed:0,failed:0}});
   for(let index=0;index<runCases.length;index++){
     const item=runCases[index];
-    if(runnerStopRequested){for(let rest=index;rest<runCases.length;rest++){setRunnerCase(runCases[rest],'skipped','Parada solicitada');skipped++;}break;}
+    if(runnerStopRequested){for(let rest=index;rest<runCases.length;rest++){setRunnerCase(runCases[rest],'skipped','Parada solicitada');skipped++;historySteps.push(skippedStep(rest+1));}break;}
     byId('runner-progress-label').textContent=`${index+1} / ${runCases.length} · Conjunto ${item.datasetNumber}`;setRunnerCase(item,'running','Executando…');
-    const requestStarted=performance.now();let caseFailed=false,caseStatus='Falha',caseDetail='',responseBody='',responseVaultSecrets={};
+    const requestStarted=performance.now();let caseFailed=false,caseStatus='Falha',caseDetail='',responseBody='',responseVaultSecrets={},stepStatus=null,stepTestsPassed=0,stepTestsFailed=0;
     const origins=inspectSavedRequestOrigins(item.request,item.dataset||{},item.authScopes);
     try{
       const request=RunnerLogic.prepareSavedRequest(item.request,getEnvironment().variables||{},item.dataset,allowWrites,item.authScopes,vaultResolutionInput());request.environmentId=activeEnvironmentId||'default';
       const responseVaultSecrets=RunnerLogic.secretValuesUsedByProvenance(request.resolutionProvenance,secretVaultValues||{});
       if(request.captureResponseVariable&&request.responseCaptureTarget==='vault')assertVaultCaptureAvailable(request);
       const {proxyStatus,result}=await executeApiRequest(request),status=Number(result.status)||0,tests=RunnerLogic.evaluateResponseTests(request.responseTests,result),failedTests=tests.filter(item=>!item.passed),hasTests=tests.length>0;
+      stepStatus=status||null;stepTestsFailed=failedTests.length;stepTestsPassed=tests.length-failedTests.length;
       responseBody=runnerBodyPreview(RunnerLogic.redactSecretValues(result.body,responseVaultSecrets));caseStatus=status?RunnerLogic.redactSecretValues(`${status} ${result.reason||''}`,responseVaultSecrets).trim():`Proxy ${proxyStatus}`;
       const details=[];const httpFailed=!!result.error||proxyStatus>=400||status<200||status>=300&&!hasTests;
       if(origins.length)details.push('Origens sem valores: '+formatInspectorOrigins(origins)+'.');
@@ -1146,20 +1271,24 @@ async function runRunnerCases(cases,options,allowWrites){
       }
       caseFailed=caseFailed||httpFailed||failedTests.length>0;caseDetail=details.join(' ');
     }catch(error){caseFailed=true;caseStatus='Falha';caseDetail=[origins.length?'Origens sem valores: '+formatInspectorOrigins(origins)+'.':'',RunnerLogic.redactSecretValues(error.message,responseVaultSecrets)||'Não foi possível preparar ou enviar esta request.'].filter(Boolean).join(' ');}
-    caseStatus+=` · ${Math.round(performance.now()-requestStarted)} ms`;
+    const caseDurationMs=Math.round(performance.now()-requestStarted);
+    caseStatus+=` · ${caseDurationMs} ms`;
     processed++;progress.value=processed;
     if(caseFailed){failed++;runnerFailedCases.push(item);setRunnerCase(item,'failure',caseStatus,caseDetail,responseBody);}
     else{passed++;setRunnerCase(item,'success',caseStatus,caseDetail,responseBody);}
-    if(caseFailed&&options.stopOnError){stoppedByFailure=true;for(let rest=index+1;rest<runCases.length;rest++){setRunnerCase(runCases[rest],'skipped','Parada após falha');skipped++;}break;}
+    historySteps.push({ordinal:index+1,outcome:caseFailed?'failed':'passed',status:stepStatus,durationMs:caseDurationMs,tests:{passed:stepTestsPassed,failed:stepTestsFailed}});
+    if(caseFailed&&options.stopOnError){stoppedByFailure=true;for(let rest=index+1;rest<runCases.length;rest++){setRunnerCase(runCases[rest],'skipped','Parada após falha');skipped++;historySteps.push(skippedStep(rest+1));}break;}
     if(options.delay>0&&index<runCases.length-1){byId('runner-progress-label').textContent=`${processed} / ${runCases.length} · aguardando ${options.delay} ms`;await new Promise(resolve=>setTimeout(resolve,options.delay));}
   }
-  const elapsed=((performance.now()-started)/1000).toFixed(1),summary=`${passed} concluídas · ${failed} falhas · ${skipped} não executadas · ${elapsed}s`+(stoppedByFailure?' · parada na primeira falha':'')+(runnerStopRequested?' · parada solicitada':'');
-  byId('runner-progress-label').textContent=`${processed} / ${runCases.length}`;byId('runner-summary').textContent=summary;byId('runner-summary').hidden=false;byId('stop-runner').hidden=true;byId('stop-runner').disabled=false;byId('stop-runner').textContent='Parar após esta request';updateRunnerOptionsDisabled(false);runnerBusy=false;
+  const durationMs=Math.round(performance.now()-started),elapsed=(durationMs/1000).toFixed(1),summary=`${passed} concluídas · ${failed} falhas · ${skipped} não executadas · ${elapsed}s`+(stoppedByFailure?' · parada na primeira falha':'')+(runnerStopRequested?' · parada solicitada':'');
+  byId('runner-progress-label').textContent=`${processed} / ${runCases.length}`;byId('runner-summary').textContent=summary;byId('runner-summary').hidden=false;byId('stop-runner').hidden=true;byId('stop-runner').disabled=false;byId('stop-runner').textContent='Parar após esta request';
   byId('rerun-failed').hidden=runnerFailedCases.length===0;
   showToast(failed?'Runner finalizado com falhas':'Runner finalizado',summary,failed?'warning':'success');
+  await saveRunnerRunHistory({id:newId(),startedAt,durationMs,total:runCases.length,passed,failed,skipped,stopped:runnerStopRequested||stoppedByFailure,steps:historySteps});
+  runnerBusy=false;updateRunnerOptionsDisabled(false);
 }
 async function startRunnerFromForm(event){
-  event.preventDefault();if(runnerBusy)return;clearRunnerError();
+  event.preventDefault();if(runnerBusy||runnerHistoryMutating)return;clearRunnerError();
   try{
     const datasets=RunnerLogic.parseDataSets(byId('runner-datasets').value),total=runnerEntries.length*datasets.length;
     if(total>500)throw Error('A execução excede o limite de 500 requests. Reduza os conjuntos de dados ou selecione uma pasta menor.');
@@ -1172,7 +1301,7 @@ async function startRunnerFromForm(event){
   }catch(error){showRunnerError(error.message||'Revise as opções do Runner.');}
 }
 async function rerunRunnerFailures(){
-  if(runnerBusy||!runnerFailedCases.length)return;const cases=[...runnerFailedCases],writes=runnerWriteCases(cases);
+  if(runnerBusy||runnerHistoryMutating||!runnerFailedCases.length)return;const cases=[...runnerFailedCases],writes=runnerWriteCases(cases);
   try{if(writes.length&&!(await confirmRunnerWrites(cases)))return;if(!(await confirmRunnerRemoteHttp(cases)))return;await runRunnerCases(cases,{delay:Number(byId('runner-delay').value)||0,stopOnError:byId('runner-stop-on-error').checked},writes.length>0);}
   catch(error){showRunnerError(error.message||'Revise as opções do Runner.');}
 }
@@ -2801,8 +2930,9 @@ function addEventListeners(){
   byId('response-example-save-form').addEventListener('submit',saveResponseExample);
   byId('cancel-response-example-save').onclick=closeResponseExampleForm;
   byId('run-collection').onclick=openRunnerDialog;byId('runner-form').addEventListener('submit',startRunnerFromForm);byId('close-runner').onclick=()=>runnerBusy?requestRunnerStop():byId('runner-dialog').close();byId('cancel-runner').onclick=()=>runnerBusy?requestRunnerStop():byId('runner-dialog').close();byId('stop-runner').onclick=requestRunnerStop;byId('rerun-failed').onclick=rerunRunnerFailures;byId('runner-dialog').addEventListener('cancel',event=>{if(runnerBusy){event.preventDefault();requestRunnerStop();}});
+  byId('runner-history-list').addEventListener('click',event=>{const button=event.target.closest('[data-runner-history-delete]');if(button)void removeRunnerHistoryEntry(button.dataset.runnerHistoryDelete);});
+  byId('clear-runner-history').onclick=()=>void clearRunnerHistory();
   window.addEventListener('resize',()=>{if(byId('runner-dialog').open)fitRunnerDialog();});
-  byId('run-collection').onclick=openRunnerDialog;byId('runner-form').addEventListener('submit',startRunnerFromForm);byId('close-runner').onclick=()=>runnerBusy?requestRunnerStop():byId('runner-dialog').close();byId('cancel-runner').onclick=()=>runnerBusy?requestRunnerStop():byId('runner-dialog').close();byId('stop-runner').onclick=requestRunnerStop;byId('rerun-failed').onclick=rerunRunnerFailures;byId('runner-dialog').addEventListener('cancel',event=>{if(runnerBusy){event.preventDefault();requestRunnerStop();}});
   byId('add-query-param').onclick=()=>{addQueryParamRow();syncActiveWorkspaceTab(true);};byId('add-response-test').onclick=()=>{addResponseTest();syncActiveWorkspaceTab(true);};
   byId('response-tests-list').addEventListener('input',()=>renderResponseTestResults([]));byId('response-tests-list').addEventListener('change',()=>renderResponseTestResults([]));
   byId('add-collection').onclick=addCollection;byId('add-collection-heading').onclick=addCollection;byId('import-collection').onclick=openImportDialog;byId('browse-import-file').onclick=()=>{byId('import-dialog').close();byId('import-collection-file').click();};byId('close-import-dialog').onclick=()=>byId('import-dialog').close();byId('cancel-import-dialog').onclick=()=>byId('import-dialog').close();byId('command-import-format').addEventListener('change',updateCommandImportUi);byId('create-imported-request').onclick=openImportedCommandDraft;byId('import-collection-file').addEventListener('change',importCollectionFile);byId('export-collection').onclick=openExportDialog;byId('export-form').addEventListener('submit',exportCollection);byId('close-export-dialog').onclick=()=>byId('export-dialog').close();byId('cancel-export-dialog').onclick=()=>byId('export-dialog').close();byId('save-collection-request').onclick=openSaveDialog;byId('save-request-form').addEventListener('submit',saveCollectionRequest);byId('close-save-request').onclick=()=>byId('save-request-dialog').close();byId('cancel-save-request').onclick=()=>byId('save-request-dialog').close();

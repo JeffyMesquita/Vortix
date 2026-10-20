@@ -36,6 +36,7 @@
 - [Ambientes e variáveis](#ambientes-e-variáveis)
   - [Cofre local de segredos](#cofre-local-de-segredos)
 - [Scripts, testes e Runner](#scripts-testes-e-runner)
+  - [Histórico do Runner](#histórico-do-runner)
 - [Importação e exportação](#importação-e-exportação)
 - [Histórico de respostas](#histórico-de-respostas)
 - [Persistência e backups](#persistência-e-backups)
@@ -67,7 +68,7 @@ O modo público permite uso sem senha compartilhada. Cada navegador recebe uma s
 - **Captura de variáveis:** salve um campo JSON da resposta ou o texto completo no ambiente ativo.
 - **OAuth 2.0:** Client Credentials e Authorization Code com PKCE S256; tokens salvos por ambiente com consentimento e proteção local.
 - **Testes de resposta:** valide status HTTP, existência de campo JSON, igualdade ou presença de texto.
-- **Runner:** execute requests de uma coleção ou pasta em sequência, com conjuntos de dados, intervalo, parada por falha e repetição das falhas.
+- **Runner:** execute requests de uma coleção ou pasta em sequência, com conjuntos de dados, intervalo, parada por falha, repetição das falhas e um histórico local seguro das rodadas.
 - **Temas e fontes:** Dracula, Monokai, One Dark, Nord, Solarized Dark e GitHub Dark; Fira Code, JetBrains Mono, Cascadia Code, Cascadia Mono e IBM Plex Mono.
 - **Editor JSON:** destaque de sintaxe e formatação com indentação de dois espaços.
 - **Intercâmbio:** Vortix JSON, ambientes Postman, Insomnia v4, Postman Collection v2.1, cURL, HTTPie, OpenAPI 3 em JSON.
@@ -585,7 +586,15 @@ Exemplo de conjunto de dados JSON para o Runner:
 
 Use <code>/v1/users/{{userId}}</code> na rota e <code>{"name":"{{name}}"}</code> no body. O Runner substitui as variáveis em cada iteração. Segredos do cofre desbloqueado do ambiente ativo também podem ser usados; a precedência é dataset do Runner &gt; cofre &gt; ambiente. Com o cofre bloqueado, um nome conhecido do índice interrompe a resolução em vez de usar um valor antigo do ambiente. O plano e o resultado do Runner mostram as origens sem valores; cofre indisponível também bloqueia a resolução em vez de cair para o ambiente.
 
-Cada rodada aceita até 500 requests. Credenciais solicitadas manualmente pelo helper de token permanecem no fluxo interativo e não são executadas pelo Runner. O relatório é temporário; requests e variáveis capturadas continuam salvas.
+Cada rodada aceita até 500 requests. Credenciais solicitadas manualmente pelo helper de token permanecem no fluxo interativo e não são executadas pelo Runner. O relatório detalhado com bodies e mensagens continua temporário; o resumo seguro da rodada fica no histórico local do Runner.
+
+### Histórico do Runner
+
+Ao final de cada rodada — concluída, parada na primeira falha ou interrompida por você — o Runner salva um resumo local com data, duração, totais e o resultado de cada etapa, incluindo as etapas não executadas. O histórico usa a chave `runnerHistory` em `settings` pelo mesmo `dbRead`/`dbWrite` do workspace: SQLite no modo local e IndexedDB no modo público. Mantém até 30 rodadas e limita o conjunto a 750 KB; rodadas grandes fazem as mais antigas saírem antes de alcançar o limite de gravação do SQLite.
+
+O snapshot guarda apenas `id`, `startedAt`, `durationMs`, `total`, `passed`, `failed`, `skipped`, `stopped` e `steps` com `ordinal`, `outcome`, `status`, `durationMs`, `testsPassed` e `testsFailed`. URLs, rotas, nomes de requests, headers, bodies, datasets, labels de testes e mensagens de erro nunca são persistidos. O mesmo allowlist é aplicado ao exportar e ao restaurar backups.
+
+Abra o Runner para ver a lista compacta. Cada item mostra a data e o resumo; as primeiras 60 etapas aparecem de imediato e **Mostrar etapas restantes** revela as demais, até o limite de 500 por rodada. Leitores de tela recebem um resumo curto do histórico, sem anunciar a lista inteira a cada atualização. Ao abrir, o Runner normaliza snapshots legados e grava IDs estáveis antes de permitir exclusões. Use **Excluir** para remover uma rodada ou **Limpar histórico** para apagar todas. O Vortix serializa gravações, exclusões e limpeza entre abas com o lock do navegador; quando Web Locks não está disponível, a interface avisa para editar o histórico em uma aba por vez. Se a leitura ou a gravação falhar, a execução continua e o Vortix mostra um aviso para conferir o armazenamento do workspace antes de tentar novamente.
 
 ## Importação e exportação
 
@@ -635,7 +644,7 @@ Valores resolvidos do cofre de segredos são substituídos por <code>{{segredo}}
 
 Marque duas respostas no **Histórico** e clique **Comparar respostas**. A janela mostra status, duração, headers filtrados e bodies salvos lado a lado; o resumo destaca quais dados mudaram. Se algum body não foi guardado, a comparação continua com status, duração e headers. Bodies de token nunca são mostrados.
 
-Backups do workspace incluem histórico e bodies que você escolheu salvar. O backup simples não é criptografado; use **Backup com senha** para proteger o arquivo.
+Backups do workspace incluem histórico e bodies que você escolheu salvar. O histórico do Runner entra apenas como resumo permitido, sem URLs, bodies, headers, datasets ou mensagens de erro. O backup simples não é criptografado; use **Backup com senha** para proteger o arquivo.
 
 ## Persistência e backups
 
