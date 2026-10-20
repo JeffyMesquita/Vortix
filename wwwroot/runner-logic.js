@@ -428,15 +428,40 @@
   }
 
   function redactSecretValues(value, secrets) {
-    let text = String(value ?? '');
     const list = Array.isArray(secrets) ? secrets : secrets && typeof secrets === 'object' ? Object.values(secrets) : [];
-    for (const secret of list) {
-      if (!secret) continue;
-      text = text.split(String(secret)).join('{{segredo}}');
-      const encoded = encodeURIComponent(String(secret));
-      if (encoded && encoded !== String(secret)) text = text.split(encoded).join('{{segredo}}');
+    const text = String(value ?? '');
+    if (!list.some(Boolean)) return text;
+    const redactPlainText = source => {
+      let text = String(source ?? '');
+      for (const secret of list) {
+        if (!secret) continue;
+        const secretText = String(secret);
+        text = text.split(secretText).join('{{segredo}}');
+        const encoded = encodeURIComponent(secretText);
+        if (encoded && encoded !== secretText) text = text.split(encoded).join('{{segredo}}');
+      }
+      return text;
+    };
+    const jsonPrimitive = /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)$/;
+    const hasJsonSyntaxSecret = list.some(secret => secret && (/["\\{}\[\],:\s]/.test(String(secret)) || jsonPrimitive.test(String(secret))));
+    let isJsonDocument = false;
+    if (hasJsonSyntaxSecret) {
+      try { JSON.parse(text); isJsonDocument = true; } catch { }
     }
-    return text;
+    const redactOutsideJsonStrings = isJsonDocument
+      ? source => String(source ?? '').replace(/(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/g, token => list.some(secret => secret && String(secret) === token) ? '"{{segredo}}"' : token)
+      : redactPlainText;
+    const jsonStringToken = /"(?:\\.|[^"\\])*"/g;
+    let output = '', offset = 0;
+    for (const match of text.matchAll(jsonStringToken)) {
+      output += redactOutsideJsonStrings(text.slice(offset, match.index));
+      let decoded;
+      try { decoded = JSON.parse(match[0]); } catch { output += redactPlainText(match[0]); offset = match.index + match[0].length; continue; }
+      const redacted = redactPlainText(decoded);
+      output += redacted === decoded ? match[0] : JSON.stringify(redacted);
+      offset = match.index + match[0].length;
+    }
+    return output + redactOutsideJsonStrings(text.slice(offset));
   }
 
   function secretValuesUsedByProvenance(provenance, secrets) {
