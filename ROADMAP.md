@@ -190,8 +190,8 @@ Só entram depois das features anteriores e dos testes de uso:
 - [x] Documentar persistência no navegador, backups protegidos, limites do plano Free e acesso a APIs privadas.
 - [x] Incluir `Dockerfile` e `render.yaml` sem credenciais.
 - [x] Atualizar o target e a imagem para .NET 10 LTS, com suporte oficial até 14/11/2028.
-- [ ] Criar o serviço web público no Render, sem senha compartilhada.
-- [ ] Configurar CNAME de `apicliente.jeffymesquita.dev` e validar o TLS pelo subdomínio.
+- [x] Criar o serviço web público no Render, sem senha compartilhada.
+- [x] Configurar CNAME de `vortixapiclient.jeffymesquita.dev` e validar o TLS pelo subdomínio.
 - [ ] Conferir uma request a uma API pública, persistência do IndexedDB e Cookie jar após um cold start real.
 
 ## Feature: exportar ambientes individualmente

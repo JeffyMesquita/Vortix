@@ -6,8 +6,8 @@ $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopba
 $listener.Start()
 $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
 $listener.Stop()
-$publicOrigin = 'https://vortix.example.test'
-$publicHost = 'vortix.example.test'
+$publicOrigin = 'https://vortixapiclient.jeffymesquita.dev'
+$publicHost = 'vortixapiclient.jeffymesquita.dev'
 $renderOrigin = 'https://vortix-render.example.test'
 $renderHost = 'vortix-render.example.test'
 $dll = Join-Path $projectRoot 'bin\Release\net10.0\VortixApiClient.dll'
@@ -38,6 +38,11 @@ function Send-HostedRequest([string]$method, [string]$path, [string]$origin = $p
 
 try {
     New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
+    $renderYaml = Get-Content (Join-Path $projectRoot 'render.yaml') -Raw
+    if ($renderYaml -notmatch '(?m)^\s+- vortixapiclient\.jeffymesquita\.dev\s*$' -or
+        $renderYaml -notmatch '(?m)^\s+value:\s+https://vortixapiclient\.jeffymesquita\.dev\s*$') {
+        throw 'Render Blueprint must allow and publish vortixapiclient.jeffymesquita.dev.'
+    }
     dotnet build (Join-Path $projectRoot 'VortixApiClient.csproj') -c Release --nologo
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $dll)) { throw 'Could not build the Vortix API client for hosted-mode tests.' }
 
