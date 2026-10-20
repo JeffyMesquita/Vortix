@@ -47,6 +47,7 @@
 - [Estrutura do projeto](#estrutura-do-projeto)
 - [Solução de problemas](#solução-de-problemas)
 - [Plano de ação](ROADMAP.md)
+- [Licença](#licença)
 - [Licenças das fontes](#licenças-das-fontes)
 
 ## Visão geral
@@ -872,6 +873,10 @@ Verifique se o banco e o key ring do ASP.NET Core Data Protection foram preserva
 ### Um importador informa que scripts não foram convertidos
 
 O Vortix não executa JavaScript arbitrário. Apenas comandos simples de captura de ambiente são convertidos; scripts incompatíveis precisam ser recriados usando as abas **Scripts** ou **Testes**.
+
+## Licença
+
+O código e os materiais originais do Vortix são licenciados sob a licença MIT. Consulte [`LICENSE`](LICENSE) para os termos. As fontes incluídas permanecem sob OFL-1.1, com avisos em <code>wwwroot/fonts/licenses/</code>.
 
 ## Licenças das fontes
 
