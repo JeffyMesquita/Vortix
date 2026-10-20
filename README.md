@@ -490,6 +490,8 @@ O importador não resolve referências <code>$ref</code> (locais ou externas), n
 
 Cada ambiente mantém suas próprias variáveis. Grupos ajudam a separar ambientes como Desenvolvimento, Homologação e Produção; os nomes e valores são definidos por você.
 
+No cabeçalho, o seletor de ambiente fica ao lado do botão **Gerenciar ambientes**, que abre diretamente o diálogo de ambientes. A engrenagem continua abrindo as Configurações.
+
 O Cookie jar também é separado por ambiente. Cookies recebidos em <code>Set-Cookie</code> são reutilizados quando domínio, caminho, HTTPS e validade correspondem. A lista mostra nome e metadados, nunca o valor; use **Limpar cookies deste ambiente** para removê-los. Excluir um ambiente também remove seu jar.
 
 ~~~http
@@ -608,6 +610,8 @@ Cada envio manual salva status HTTP, motivo, duração e cabeçalhos de resposta
 O limite padrão mantém as 500 requests mais recentes. Em **Configurações → Histórico de respostas**, escolha 50, 100, 250, 500, 1000 ou 2500. Reduzir o limite pede confirmação e remove os registros mais antigos, incluindo responses já salvos.
 
 O body de resposta não é salvo por padrão. Ative **Salvar body de resposta** para requests futuras. No modo local, o SQLite protege esses bodies com ASP.NET Core Data Protection; no modo público, eles ficam no IndexedDB sem criptografia automática. Bodies acima do limite local não são guardados. Desativar a opção não apaga bodies antigos; use **Limpar histórico** para removê-los. Bodies de respostas de endpoints de token nunca são guardados, mesmo com a opção ativa. Cabeçalhos de autenticação, cookies, tokens e chaves também ficam fora do snapshot.
+
+Valores resolvidos do cofre de segredos são substituídos por <code>{{segredo}}</code> no body, motivo e valores dos cabeçalhos salvos no histórico. O Runner também os oculta do body, status e mensagens de erro exibidos nos resultados.
 
 Marque duas respostas no **Histórico** e clique **Comparar respostas**. A janela mostra status, duração, headers filtrados e bodies salvos lado a lado; o resumo destaca quais dados mudaram. Se algum body não foi guardado, a comparação continua com status, duração e headers. Bodies de token nunca são mostrados.
 

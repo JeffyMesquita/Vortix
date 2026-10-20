@@ -125,6 +125,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .environment-picker span { color: #84909d; font-size: 12px; font-weight: 800; letter-spacing: .1em; }
 .environment-picker select { width: 142px; border: 0; padding: 3px 20px 3px 0; color: #c9d4de; background: transparent; font-size: 12px; }
 .environment-settings { width: 30px; height: 30px; font-size: 14px; }
+.workspace-actions .manage-environments-direct { min-height: 30px; padding-inline: 10px; white-space: nowrap; }
 .button { min-height: var(--control-height); padding: 7px 11px; font-size: 12px; font-weight: 700; }
 .secondary { border-color: #3a434e; color: #c5ced8; background: #242a33; }
 .primary { border-color: #287c66; color: #e7fbf3; background: #236e5b; }
