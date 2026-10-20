@@ -300,6 +300,11 @@ test('Runner history is reachable, accessible, and wired to persistent workspace
   assert.ok(readme.includes('### Histórico do Runner'));
 });
 
+test('Runner dialog cannot close while its history is loading or mutating', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.match(app, /byId\('runner-dialog'\)\.addEventListener\('cancel',event=>\{if\(runnerBusy\|\|runnerHistoryMutating\)\{event\.preventDefault\(\);/);
+});
+
 test('Runner history announces a short summary outside its live list', () => {
   const { runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning } = runnerLogic();
   const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
