@@ -1733,6 +1733,14 @@ test('Redige valores do cofre em origens e URLs antes de exibir destinos', () =>
   assert.equal(redactSecretValues('http://api.example.test', null), 'http://api.example.test');
 });
 
+test('Redige segredo do cofre escapado em string JSON', () => {
+  const { redactSecretValues } = runnerLogic();
+  const secret = 'pa"ss\\word\n';
+  const echoedBody = JSON.stringify({ value: secret });
+
+  assert.equal(redactSecretValues(echoedBody, { token: secret }), '{"value":"{{segredo}}"}');
+});
+
 test('Inspetor puro lista referências de ambiente, dataset, cofre e ausentes sem expor valores', () => {
   const { inspectTemplateReferences } = runnerLogic();
   const environmentMarker = 'ENV_TOKEN_SENTINEL';

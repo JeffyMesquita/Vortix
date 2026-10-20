@@ -432,9 +432,12 @@
     const list = Array.isArray(secrets) ? secrets : secrets && typeof secrets === 'object' ? Object.values(secrets) : [];
     for (const secret of list) {
       if (!secret) continue;
-      text = text.split(String(secret)).join('{{segredo}}');
-      const encoded = encodeURIComponent(String(secret));
-      if (encoded && encoded !== String(secret)) text = text.split(encoded).join('{{segredo}}');
+      const value = String(secret);
+      text = text.split(value).join('{{segredo}}');
+      const jsonEncoded = JSON.stringify(value).slice(1, -1);
+      if (jsonEncoded && jsonEncoded !== value) text = text.split(jsonEncoded).join('{{segredo}}');
+      const encoded = encodeURIComponent(value);
+      if (encoded && encoded !== value) text = text.split(encoded).join('{{segredo}}');
     }
     return text;
   }
