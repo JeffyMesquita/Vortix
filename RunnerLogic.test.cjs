@@ -283,6 +283,94 @@ test('workspace exposes the Runner and its dataset/write safety controls', () =>
   assert.match(html, /id="runner-stop-on-error"/);
 });
 
+test('Runner history is reachable, accessible, and wired to persistent workspace settings', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, 'wwwroot', 'style.css'), 'utf8');
+  assert.match(html, /id="runner-history-heading"/);
+  assert.match(html, /id="runner-history-list"[^>]*aria-label="Histórico de execuções"/);
+  assert.doesNotMatch(html, /id="runner-history-list"[^>]*aria-live=/);
+  assert.match(html, /id="clear-runner-history"/);
+  assert.ok(app.includes("dbRead('settings','runnerHistory')"));
+  assert.ok(app.includes("dbWrite('settings',{key:'runnerHistory',value:retained})"));
+  assert.ok(app.includes('runnerBusy||runnerHistoryMutating||!safe.length'));
+  assert.ok(app.includes('data-runner-history-delete'));
+  assert.ok(css.includes('.runner-history-more'));
+  assert.ok(readme.includes('### Histórico do Runner'));
+});
+
+test('Runner history announces a short summary outside its live list', () => {
+  const { runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning } = runnerLogic();
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.equal(runnerHistoryAnnouncement(0), 'Nenhuma execução salva.');
+  assert.equal(runnerHistoryAnnouncement(3), '3 execuções salvas.');
+  assert.equal(runnerHistoryAnnouncement(0, 'Histórico local indisponível.'), 'Histórico local indisponível.');
+  assert.equal(runnerHistoryCompatibilityWarning(true), '');
+  assert.equal(runnerHistoryCompatibilityWarning(false), 'Este navegador não suporta bloqueio entre abas; edite o histórico em uma aba por vez.');
+  assert.match(html, /id="runner-history-announcement"[^>]*class="visually-hidden"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/);
+  assert.ok(app.includes("byId('runner-history-announcement').textContent=RunnerLogic.runnerHistoryAnnouncement(safe.length,visibleWarning)"));
+  const noticeStart = app.indexOf('function runnerHistoryNotice(');
+  const noticeEnd = app.indexOf('function renderRunnerHistory(', noticeStart);
+  assert.ok(app.slice(noticeStart, noticeEnd).includes("setAttribute('role','note')"), 'visible notices do not duplicate the separate live announcement');
+});
+
+test('legacy Runner history IDs stay stable after normalization and are saved before display', () => {
+  const { sanitizeRunnerHistoryValue } = runnerLogic();
+  const legacy = [{ id: 'legacy-run-id', startedAt: '2026-10-20T12:00:00.000Z', steps: [] }];
+  const migrated = sanitizeRunnerHistoryValue(legacy);
+  const reloaded = sanitizeRunnerHistoryValue(migrated);
+  assert.match(migrated[0].id, /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i);
+  assert.equal(reloaded[0].id, migrated[0].id);
+
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const loadStart = app.indexOf('async function loadRunnerHistory(');
+  const loadEnd = app.indexOf('async function withRunnerHistoryMutation(', loadStart);
+  const load = app.slice(loadStart, loadEnd);
+  assert.ok(load.includes('RunnerLogic.sanitizeRunnerHistoryValue'));
+  assert.ok(load.indexOf("await dbWrite('settings',{key:'runnerHistory',value:normalized})") < load.indexOf('renderRunnerHistory(normalized)'), 'normalized IDs are persisted before they become delete-button IDs');
+  assert.ok(load.includes("JSON.stringify(record??null)!==JSON.stringify({key:'runnerHistory',value:normalized})"), 'legacy sibling fields are removed from the persisted record');
+});
+
+test('Runner serializes history writes before enabling another execution', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const start = app.indexOf('async function runRunnerCases(');
+  const end = app.indexOf('async function startRunnerFromForm(', start);
+  const run = app.slice(start, end);
+  const saveIndex = run.indexOf('await saveRunnerRunHistory(');
+  const unlockIndex = run.indexOf('runnerBusy=false', saveIndex);
+  assert.ok(saveIndex >= 0 && unlockIndex > saveIndex, 'Runner controls stay locked until the persistent summary write settles');
+});
+
+test('Runner serializes delete and clear mutations against execution and each other', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.match(app, /runnerHistoryMutating\s*=\s*false/);
+  const removeStart = app.indexOf('async function removeRunnerHistoryEntry(');
+  const clearStart = app.indexOf('async function clearRunnerHistory(', removeStart);
+  const fitStart = app.indexOf('function showRunnerError(', clearStart);
+  const remove = app.slice(removeStart, clearStart);
+  const clear = app.slice(clearStart, fitStart);
+  for (const mutation of [remove, clear]) {
+    assert.ok(mutation.includes('withRunnerHistoryMutation('));
+  }
+  const lockStart = app.indexOf('async function withRunnerHistoryMutation(');
+  const saveStart = app.indexOf('async function saveRunnerRunHistory(', lockStart);
+  const lock = app.slice(lockStart, saveStart);
+  assert.ok(lock.includes('runnerHistoryMutating=true'));
+  assert.ok(lock.includes('finally{runnerHistoryMutating=false'));
+  assert.ok(app.includes('if(runnerBusy||runnerHistoryMutating)return;'));
+  assert.ok(app.includes("navigator.locks?.request('vortix-runner-history'"));
+  assert.ok(app.includes('return await (lockTask??run());'));
+});
+
+test('Runner history makes every step reachable and delete buttons distinguish same-minute runs', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.ok(app.includes('slice(60)'));
+  assert.ok(app.includes('runner-history-more'));
+  assert.ok(app.includes('historyIndex+1'));
+});
+
 test('evaluates response status and nested JSON assertions without exposing response values', () => {
   const { evaluateResponseTests } = runnerLogic();
   const results = evaluateResponseTests([
@@ -484,6 +572,272 @@ test('history retention keeps the newest entries within the configured limit', (
   ];
   assert.deepEqual(retainNewestHistoryEntries(entries, 2).map(entry => entry.id), ['newest', 'middle']);
   assert.equal(entries.length, 3, 'retention must not mutate the source array');
+});
+
+// Runner history contract:
+// createRunnerHistorySnapshot(run) returns only { id, startedAt, durationMs, total, passed, failed,
+// skipped, stopped, steps }, and each step only { ordinal, outcome, status, durationMs, testsPassed,
+// testsFailed }. Arbitrary run/step fields and marker secrets are never copied.
+// retainNewestRunnerHistoryEntries(entries, limit) returns at most `limit` entries ordered by
+// startedAt descending, stable on ties/invalid dates, without mutating the source array.
+// Workspace backups sanitize the `runnerHistory` settings record with the same allowlist.
+test('Runner history snapshot keeps only allowlisted run and step metadata', () => {
+  const { createRunnerHistorySnapshot } = runnerLogic();
+  assert.equal(typeof createRunnerHistorySnapshot, 'function', 'createRunnerHistorySnapshot should be a pure exported helper');
+  const marker = 'RUNNER_HISTORY_SECRET_SENTINEL_7d3f';
+  const run = {
+    id: '  11111111-1111-4111-8111-111111111111  ',
+    startedAt: '2026-10-20T12:00:00.000Z',
+    durationMs: 123.6,
+    total: 3,
+    passed: 1,
+    failed: 1,
+    skipped: 1,
+    stopped: true,
+    url: 'https://api.example.test/private?token=' + marker,
+    requestLabel: 'POST /private ' + marker,
+    error: 'failed because ' + marker,
+    body: '{"token":"' + marker + '"}',
+    headers: { Authorization: 'Bearer ' + marker },
+    dataset: { id: marker },
+    token: marker,
+    steps: [
+      {
+        ordinal: 1, outcome: 'passed', status: 201, durationMs: 12.4,
+        tests: { passed: 2, failed: 0 },
+        url: 'https://api.example.test/step/1?token=' + marker,
+        requestLabel: 'step one ' + marker, error: marker, body: marker,
+        headers: { 'X-Secret': marker }, dataset: { secret: marker }
+      },
+      {
+        ordinal: '2', outcome: 'failed', status: '500', durationMs: '9.6',
+        tests: { passed: '1', failed: '2' },
+        error: marker
+      },
+      {
+        ordinal: 3, outcome: 'skipped', status: 0, durationMs: -5,
+        tests: { passed: 0, failed: 0 }, dataset: marker
+      }
+    ]
+  };
+
+  const snapshot = createRunnerHistorySnapshot(run);
+
+  assert.deepEqual(snapshot, {
+    id: '11111111-1111-4111-8111-111111111111',
+    startedAt: '2026-10-20T12:00:00.000Z',
+    durationMs: 124,
+    total: 3,
+    passed: 1,
+    failed: 1,
+    skipped: 1,
+    stopped: true,
+    steps: [
+      { ordinal: 1, outcome: 'passed', status: 201, durationMs: 12, testsPassed: 2, testsFailed: 0 },
+      { ordinal: 2, outcome: 'failed', status: 500, durationMs: 10, testsPassed: 1, testsFailed: 2 },
+      { ordinal: 3, outcome: 'skipped', status: null, durationMs: 0, testsPassed: 0, testsFailed: 0 }
+    ]
+  }, 'the snapshot is a strict allowlist, not a copy of the run');
+  assert.doesNotMatch(JSON.stringify(snapshot), new RegExp(marker), 'snapshot must never retain arbitrary fields or marker secrets');
+});
+
+test('Runner history replaces IDs that could carry credential text', () => {
+  const { createRunnerHistorySnapshot } = runnerLogic();
+  const marker = 'BearerToken1234567890AB';
+  const snapshot = createRunnerHistorySnapshot({ id: marker, steps: [] });
+  assert.notEqual(snapshot.id, marker);
+  assert.doesNotMatch(JSON.stringify(snapshot), new RegExp(marker));
+});
+
+test('Runner history snapshot fails closed on missing runs and sanitizes malformed steps', () => {
+  const { createRunnerHistorySnapshot } = runnerLogic();
+  const marker = 'MALFORMED_RUNNER_SECRET_SENTINEL_2c8a';
+  assert.throws(() => createRunnerHistorySnapshot(null), error => {
+    assert.match(error.message, /execu|hist[óo]rico|run/i);
+    assert.doesNotMatch(error.message, new RegExp(marker));
+    return true;
+  });
+
+  const snapshot = createRunnerHistorySnapshot({
+    id: '22222222-2222-4222-8222-222222222222',
+    durationMs: 'NaN',
+    total: -4,
+    passed: '2',
+    failed: null,
+    skipped: undefined,
+    stopped: 'true',
+    error: marker,
+    steps: [
+      null,
+      { ordinal: 'bad', outcome: 'unknown', status: 'not-a-status', durationMs: -1, tests: { passed: -3, failed: '5' }, error: marker },
+      { ordinal: 3, outcome: 'passed', status: 204, durationMs: 2.2, tests: null, body: marker }
+    ]
+  });
+
+  assert.deepEqual(snapshot, {
+    id: '22222222-2222-4222-8222-222222222222',
+    startedAt: '',
+    durationMs: 0,
+    total: 0,
+    passed: 2,
+    failed: 0,
+    skipped: 0,
+    stopped: false,
+    steps: [
+      { ordinal: 1, outcome: 'skipped', status: null, durationMs: 0, testsPassed: 0, testsFailed: 0 },
+      { ordinal: 2, outcome: 'skipped', status: null, durationMs: 0, testsPassed: 0, testsFailed: 5 },
+      { ordinal: 3, outcome: 'passed', status: 204, durationMs: 2, testsPassed: 0, testsFailed: 0 }
+    ]
+  });
+  assert.doesNotMatch(JSON.stringify(snapshot), new RegExp(marker));
+
+  assert.deepEqual(createRunnerHistorySnapshot({ id: '33333333-3333-4333-8333-333333333333', steps: 'not-an-array' }), {
+    id: '33333333-3333-4333-8333-333333333333', startedAt: '', durationMs: 0, total: 0, passed: 0, failed: 0, skipped: 0, stopped: false, steps: []
+  });
+});
+
+test('Runner history numeric fields stay within executable request and test limits', () => {
+  const { createRunnerHistorySnapshot } = runnerLogic();
+  const snapshot = createRunnerHistorySnapshot({
+    id: '44444444-4444-4444-8444-444444444444',
+    durationMs: Number.MAX_VALUE,
+    total: 9000,
+    passed: 9000,
+    failed: -1,
+    skipped: '9000',
+    steps: [{
+      ordinal: 90000,
+      outcome: 'passed',
+      status: 200,
+      durationMs: Number.MAX_VALUE,
+      tests: { passed: 9000, failed: 9000 }
+    }]
+  });
+  assert.deepEqual([snapshot.durationMs, snapshot.total, snapshot.passed, snapshot.failed, snapshot.skipped], [86_400_000, 500, 500, 0, 500]);
+  assert.deepEqual(snapshot.steps[0], { ordinal: 1, outcome: 'passed', status: 200, durationMs: 86_400_000, testsPassed: 20, testsFailed: 20 });
+});
+
+test('Runner history retention keeps the newest bounded entries without mutating the source', () => {
+  const { retainNewestRunnerHistoryEntries } = runnerLogic();
+  assert.equal(typeof retainNewestRunnerHistoryEntries, 'function', 'retainNewestRunnerHistoryEntries should be a pure exported helper');
+  const entries = [
+    { id: 'old', startedAt: '2026-01-01T00:00:00.000Z' },
+    { id: 'newest', startedAt: '2026-03-01T00:00:00.000Z' },
+    { id: 'middle', startedAt: '2026-02-01T00:00:00.000Z' },
+    { id: 'invalid', startedAt: 'not-a-date' },
+    { id: 'missing' }
+  ];
+  const originalOrder = entries.map(entry => entry.id);
+
+  const retained = retainNewestRunnerHistoryEntries(entries, 2);
+  assert.deepEqual(retained.map(entry => entry.id), ['newest', 'middle']);
+  assert.equal(entries.length, 5, 'retention must not mutate the source array');
+  assert.deepEqual(entries.map(entry => entry.id), originalOrder, 'retention must preserve the source order');
+  assert.deepEqual(retainNewestRunnerHistoryEntries(entries, 4).map(entry => entry.id), ['newest', 'middle', 'old', 'invalid'], 'invalid dates sort after valid ones and keep source order');
+  assert.deepEqual(retainNewestRunnerHistoryEntries(null, 3), []);
+  assert.deepEqual(retainNewestRunnerHistoryEntries([{ id: 'first', startedAt: '2026-01-01T00:00:00.000Z' }, { id: 'second', startedAt: '2026-01-01T00:00:00.000Z' }], 1).map(entry => entry.id), ['first'], 'ties keep the original order');
+});
+
+test('Runner history stays below the local SQLite request-size limit for maximum-sized runs', () => {
+  const { createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, runnerHistoryStorageLimitBytes } = runnerLogic();
+  const template = createRunnerHistorySnapshot({
+    id: '99999999-9999-4999-8999-999999999999', startedAt: '2026-01-01T00:00:00.000Z', durationMs: 86_400_000,
+    total: 500, passed: 0, failed: 0, skipped: 500, stopped: true,
+    steps: Array.from({ length: 500 }, (_, index) => ({ ordinal: index + 1, outcome: 'skipped', status: 599, durationMs: 86_400_000, tests: { passed: 20, failed: 20 } }))
+  });
+  const entries = Array.from({ length: 30 }, (_, index) => ({
+    ...template,
+    id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+    startedAt: new Date(Date.UTC(2026, 0, 30 - index)).toISOString()
+  }));
+  const retained = retainNewestRunnerHistoryEntries(entries, 30);
+  assert.ok(retained.length < 30, 'large runs should evict older snapshots before the local request limit');
+  assert.ok(Buffer.byteLength(JSON.stringify({ key: 'runnerHistory', value: retained }), 'utf8') <= runnerHistoryStorageLimitBytes);
+  assert.equal(retained[0].id, entries[0].id);
+});
+
+test('workspace backup sanitizes runner history settings records to the snapshot allowlist', () => {
+  const { createWorkspaceBackup, parseWorkspaceBackup } = runnerLogic();
+  const marker = 'RUNNER_BACKUP_SECRET_SENTINEL_51c9';
+  const run = {
+    id: '55555555-5555-4555-8555-555555555555',
+    startedAt: '2026-10-20T12:00:00.000Z',
+    durationMs: 40,
+    total: 1,
+    passed: 1,
+    failed: 0,
+    skipped: 0,
+    stopped: false,
+    url: 'https://api.example.test/private?token=' + marker,
+    requestLabel: 'POST ' + marker,
+    error: marker,
+    body: '{"token":"' + marker + '"}',
+    headers: { Authorization: 'Bearer ' + marker },
+    dataset: { token: marker },
+    steps: [{
+      ordinal: 1, outcome: 'passed', status: 200, durationMs: 40,
+      tests: { passed: 1, failed: 0 },
+      url: marker, requestLabel: marker, error: marker, body: marker,
+      headers: { Authorization: marker }, dataset: { token: marker }
+    }]
+  };
+  const expected = {
+    id: '55555555-5555-4555-8555-555555555555',
+    startedAt: '2026-10-20T12:00:00.000Z',
+    durationMs: 40,
+    total: 1,
+    passed: 1,
+    failed: 0,
+    skipped: 0,
+    stopped: false,
+    steps: [{ ordinal: 1, outcome: 'passed', status: 200, durationMs: 40, testsPassed: 1, testsFailed: 0 }]
+  };
+  const source = {
+    collections: [{ id: 'collection-1', name: 'API', requests: [], folders: [] }],
+    environments: [{ id: 'environment-1', name: 'Local', variables: {} }],
+    history: [],
+    settings: [
+      { key: 'activeEnvironmentId', value: 'environment-1' },
+      { key: 'runnerHistory', value: [run], importedMetadata: marker }
+    ]
+  };
+
+  const backup = createWorkspaceBackup(source, '2026-10-20T12:00:00.000Z');
+  const runnerHistory = backup.data.settings.find(record => record.key === 'runnerHistory');
+  assert.ok(runnerHistory, 'backup should keep the runner history settings record');
+  assert.deepEqual(runnerHistory, { key: 'runnerHistory', value: [expected] }, 'backup must discard unknown settings-record fields');
+  assert.deepEqual(runnerHistory.value, [expected], 'backup runner history must contain only sanitized snapshot fields');
+  assert.doesNotMatch(JSON.stringify(backup), new RegExp(marker), 'backup must not leak runner URLs, labels, errors, bodies, headers, datasets, or secrets');
+  for (const forbidden of ['url', 'requestLabel', 'error', 'body', 'headers', 'dataset']) {
+    assert.equal(JSON.stringify(runnerHistory).includes('"' + forbidden + '"'), false, 'backup runner history must not retain ' + forbidden);
+  }
+  const restored = parseWorkspaceBackup(JSON.stringify(backup));
+  assert.deepEqual(restored.data.settings.find(record => record.key === 'runnerHistory').value, [expected]);
+});
+
+test('workspace backup retains only the newest bounded Runner history entries', () => {
+  const { createWorkspaceBackup } = runnerLogic();
+  const runs = Array.from({ length: 35 }, (_, index) => ({
+    id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+    startedAt: new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
+    durationMs: index,
+    total: 1,
+    passed: 1,
+    failed: 0,
+    skipped: 0,
+    stopped: false,
+    steps: []
+  }));
+  const backup = createWorkspaceBackup({
+    collections: [{ id: 'collection-1', name: 'API', requests: [], folders: [] }],
+    environments: [{ id: 'environment-1', name: 'Local', variables: {} }],
+    history: [],
+    settings: [{ key: 'runnerHistory', value: runs }]
+  });
+  const retained = backup.data.settings[0].value;
+  assert.equal(retained.length, 30);
+  assert.equal(retained[0].id, '00000000-0000-4000-8000-000000000034');
+  assert.equal(retained.at(-1).id, '00000000-0000-4000-8000-000000000005');
 });
 
 test('dialogs account for global zoom when fitting within the viewport', () => {

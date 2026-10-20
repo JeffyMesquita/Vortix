@@ -1120,6 +1120,132 @@
       .map(item => item.entry);
   }
 
+  const runnerHistoryLimit = 30;
+  const runnerHistoryStorageLimitBytes = 750_000;
+  const runnerHistoryMaxRequests = 500;
+  const runnerHistoryMaxTestsPerRequest = 20;
+  const runnerHistoryMaxDurationMs = 86_400_000;
+  const runnerHistoryOutcomes = new Set(['passed', 'failed', 'skipped']);
+
+  function runnerHistoryCount(value, maximum = runnerHistoryMaxRequests) {
+    if (typeof value === 'boolean') return 0;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? Math.min(maximum, Math.floor(number)) : 0;
+  }
+
+  function runnerHistoryDuration(value) {
+    if (typeof value === 'boolean') return 0;
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.min(runnerHistoryMaxDurationMs, Math.max(0, Math.round(number))) : 0;
+  }
+
+  function runnerHistoryId(value) {
+    const id = String(value ?? '').trim();
+    if (/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id) || /^run-[a-z0-9]{4,16}-[a-z0-9]{8,16}$/i.test(id)) return id.toLowerCase();
+    return globalThis.crypto?.randomUUID?.() || `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  function runnerHistoryDate(value) {
+    const timestamp = Date.parse(String(value ?? ''));
+    return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : '';
+  }
+
+  function runnerHistoryStatus(value) {
+    const number = Number(value);
+    return Number.isInteger(number) && number >= 100 && number <= 599 ? number : null;
+  }
+
+  function createRunnerHistorySnapshot(run) {
+    if (!run || typeof run !== 'object' || Array.isArray(run))
+      throw Error('Execução do Runner inválida para o histórico.');
+    const id = runnerHistoryId(run.id);
+    const startedAt = runnerHistoryDate(run.startedAt);
+    const sourceSteps = Array.isArray(run.steps) ? run.steps.slice(0, runnerHistoryMaxRequests) : [];
+    const steps = sourceSteps.map((source, index) => {
+      const step = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
+      const outcome = runnerHistoryOutcomes.has(step.outcome) ? step.outcome : 'skipped';
+      const tests = step.tests && typeof step.tests === 'object' && !Array.isArray(step.tests) ? step.tests : {};
+      return {
+        ordinal: index + 1,
+        outcome,
+        status: runnerHistoryStatus(step.status),
+        durationMs: runnerHistoryDuration(step.durationMs),
+        testsPassed: runnerHistoryCount(tests.passed ?? step.testsPassed, runnerHistoryMaxTestsPerRequest),
+        testsFailed: runnerHistoryCount(tests.failed ?? step.testsFailed, runnerHistoryMaxTestsPerRequest)
+      };
+    });
+    return {
+      id,
+      startedAt,
+      durationMs: runnerHistoryDuration(run.durationMs),
+      total: runnerHistoryCount(run.total),
+      passed: runnerHistoryCount(run.passed),
+      failed: runnerHistoryCount(run.failed),
+      skipped: runnerHistoryCount(run.skipped),
+      stopped: run.stopped === true,
+      steps
+    };
+  }
+
+  function retainNewestRunnerHistoryEntries(entries, limit) {
+    const requested = Number(limit);
+    const maximum = Number.isFinite(requested) && requested >= 0 ? Math.min(runnerHistoryLimit, Math.floor(requested)) : runnerHistoryLimit;
+    if (!maximum) return [];
+    const ordered = (Array.isArray(entries) ? entries : [])
+      .map((entry, index) => ({ entry, index, timestamp: Date.parse(entry?.startedAt || '') }))
+      .sort((left, right) => {
+        const leftValid = Number.isFinite(left.timestamp), rightValid = Number.isFinite(right.timestamp);
+        if (leftValid && rightValid && left.timestamp !== right.timestamp) return right.timestamp - left.timestamp;
+        if (leftValid !== rightValid) return leftValid ? -1 : 1;
+        return left.index - right.index;
+      });
+    const retained = [];
+    let serializedBytes = 2;
+    for (const item of ordered) {
+      let serialized;
+      try { serialized = JSON.stringify(item.entry); }
+      catch { continue; }
+      if (typeof serialized !== 'string') continue;
+      const nextBytes = serializedBytes + (retained.length ? 1 : 0) + serialized.length;
+      if (nextBytes > runnerHistoryStorageLimitBytes) break;
+      retained.push(item.entry);
+      serializedBytes = nextBytes;
+      if (retained.length >= maximum) break;
+    }
+    return retained;
+  }
+
+  function runnerHistoryAnnouncement(count, warning = '') {
+    const message = typeof warning === 'string' ? warning.trim() : '';
+    if (message) return message;
+    const safeCount = Number.isSafeInteger(count) ? Math.min(runnerHistoryLimit, Math.max(0, count)) : 0;
+    if (safeCount === 0) return 'Nenhuma execução salva.';
+    return safeCount === 1 ? '1 execução salva.' : `${safeCount} execuções salvas.`;
+  }
+
+  function runnerHistoryCompatibilityWarning(supportsWebLocks) {
+    return supportsWebLocks ? '' : 'Este navegador não suporta bloqueio entre abas; edite o histórico em uma aba por vez.';
+  }
+
+  function sanitizeRunnerHistoryValue(value) {
+    if (!Array.isArray(value)) return [];
+    const result = [];
+    for (const entry of value) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+      try { result.push(createRunnerHistorySnapshot(entry)); }
+      catch { }
+    }
+    return retainNewestRunnerHistoryEntries(result, runnerHistoryLimit);
+  }
+
+  function sanitizeWorkspaceBackupSettings(settings) {
+    const records = Array.isArray(settings) ? settings : [];
+    return records.map(record => {
+      if (!record || typeof record !== 'object' || Array.isArray(record) || record.key !== 'runnerHistory') return record;
+      return { key: 'runnerHistory', value: sanitizeRunnerHistoryValue(record.value) };
+    });
+  }
+
   function normalizeResponseExamples(responseExamples) {
     if (responseExamples == null) return [];
     if (!Array.isArray(responseExamples) || responseExamples.length > 20)
@@ -1491,7 +1617,12 @@
 
   function createWorkspaceBackup(data, exportedAt = new Date().toISOString()) {
     validateWorkspaceBackupData(data);
-    return { format: 'api-studio-workspace', version: 1, exportedAt: String(exportedAt), data: Object.fromEntries(workspaceBackupStores.map(store => [store, data[store]])) };
+    return {
+      format: 'api-studio-workspace',
+      version: 1,
+      exportedAt: String(exportedAt),
+      data: Object.fromEntries(workspaceBackupStores.map(store => [store, store === 'settings' ? sanitizeWorkspaceBackupSettings(data[store]) : data[store]]))
+    };
   }
 
   function parseWorkspaceBackup(text) {
@@ -1502,7 +1633,8 @@
     if (!backup || typeof backup !== 'object' || Array.isArray(backup) || backup.format !== 'api-studio-workspace') throw Error('Este arquivo não é um backup do Vortix.');
     if (backup.version !== 1) throw Error('Versão de backup não suportada.');
     const counts = validateWorkspaceBackupData(backup.data);
-    return { data: backup.data, counts, exportedAt: String(backup.exportedAt || '') };
+    const data = { ...backup.data, settings: sanitizeWorkspaceBackupSettings(backup.data.settings) };
+    return { data, counts, exportedAt: String(backup.exportedAt || '') };
   }
 
   async function readHostedCookieJars(fetcher = globalThis.fetch) {
@@ -1812,5 +1944,5 @@
     return makeLocalSecretVault({ salt: saltBytes, key, cryptoProvider, secrets, envelope: { ...envelope, names: [...secrets.keys()] } });
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });
