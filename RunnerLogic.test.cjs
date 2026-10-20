@@ -1739,6 +1739,14 @@ test('Redige segredo do cofre escapado em string JSON', () => {
   const echoedBody = JSON.stringify({ value: secret });
 
   assert.equal(redactSecretValues(echoedBody, { token: secret }), '{"value":"{{segredo}}"}');
+  assert.equal(redactSecretValues('{"value":"pa\\u0022ss"}', { token: 'pa"ss' }), '{"value":"{{segredo}}"}');
+  assert.equal(redactSecretValues('{"value":"line\\u000Afeed"}', { token: 'line\nfeed' }), '{"value":"{{segredo}}"}');
+  assert.equal(redactSecretValues('{"value":"a\\/b"}', { token: 'a/b' }), '{"value":"{{segredo}}"}');
+  assert.equal(redactSecretValues('{"value":"{"}', { token: '{' }), '{"value":"{{segredo}}"}');
+  assert.equal(redactSecretValues('{"delimiter":"{","flag":true,"id":123}', { delimiter: '{', flag: 'true', id: '123' }), '{"delimiter":"{{segredo}}","flag":"{{segredo}}","id":"{{segredo}}"}');
+  assert.equal(redactSecretValues('Error near { token', { token: '{' }), 'Error near {{segredo}} token');
+  const untouchedJson = '{\n  "value": "ordinary"\n}';
+  assert.equal(redactSecretValues(untouchedJson, { token: secret }), untouchedJson);
 });
 
 test('Inspetor puro lista referências de ambiente, dataset, cofre e ausentes sem expor valores', () => {
