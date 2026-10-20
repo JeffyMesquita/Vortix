@@ -192,7 +192,7 @@ Só entram depois das features anteriores e dos testes de uso:
 - [x] Atualizar o target e a imagem para .NET 10 LTS, com suporte oficial até 14/11/2028.
 - [x] Criar o serviço web público no Render, sem senha compartilhada.
 - [x] Configurar CNAME de `vortixapiclient.jeffymesquita.dev` e validar o TLS pelo subdomínio.
-- [ ] Confirmar que o Cookie jar sobrevive a um deploy ou restart controlado; o worker de keepalive impede simular cold start por inatividade.
+- [x] Confirmar em teste local que a mesma sessão e seu Cookie jar sobrevivem a um restart controlado do processo com SQLite e key ring estáveis. O teste não simula perda do filesystem no Render Free, que continua podendo apagar o SQLite temporário ao reiniciar ou publicar.
 
 ### 13. Histórico local do Runner
 
