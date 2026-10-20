@@ -2929,7 +2929,7 @@ function addEventListeners(){
   byId('save-response-example').onclick=openResponseExampleForm;
   byId('response-example-save-form').addEventListener('submit',saveResponseExample);
   byId('cancel-response-example-save').onclick=closeResponseExampleForm;
-  byId('run-collection').onclick=openRunnerDialog;byId('runner-form').addEventListener('submit',startRunnerFromForm);byId('close-runner').onclick=()=>runnerBusy?requestRunnerStop():byId('runner-dialog').close();byId('cancel-runner').onclick=()=>runnerBusy?requestRunnerStop():byId('runner-dialog').close();byId('stop-runner').onclick=requestRunnerStop;byId('rerun-failed').onclick=rerunRunnerFailures;byId('runner-dialog').addEventListener('cancel',event=>{if(runnerBusy){event.preventDefault();requestRunnerStop();}});
+  byId('run-collection').onclick=openRunnerDialog;byId('runner-form').addEventListener('submit',startRunnerFromForm);byId('close-runner').onclick=()=>runnerBusy?requestRunnerStop():byId('runner-dialog').close();byId('cancel-runner').onclick=()=>runnerBusy?requestRunnerStop():byId('runner-dialog').close();byId('stop-runner').onclick=requestRunnerStop;byId('rerun-failed').onclick=rerunRunnerFailures;byId('runner-dialog').addEventListener('cancel',event=>{if(runnerBusy||runnerHistoryMutating){event.preventDefault();if(runnerBusy)requestRunnerStop();}});
   byId('runner-history-list').addEventListener('click',event=>{const button=event.target.closest('[data-runner-history-delete]');if(button)void removeRunnerHistoryEntry(button.dataset.runnerHistoryDelete);});
   byId('clear-runner-history').onclick=()=>void clearRunnerHistory();
   window.addEventListener('resize',()=>{if(byId('runner-dialog').open)fitRunnerDialog();});
