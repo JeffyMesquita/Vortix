@@ -192,7 +192,7 @@ Só entram depois das features anteriores e dos testes de uso:
 - [x] Atualizar o target e a imagem para .NET 10 LTS, com suporte oficial até 14/11/2028.
 - [x] Criar o serviço web público no Render, sem senha compartilhada.
 - [x] Configurar CNAME de `vortixapiclient.jeffymesquita.dev` e validar o TLS pelo subdomínio.
-- [ ] Conferir uma request a uma API pública, persistência do IndexedDB e Cookie jar após um cold start real.
+- [ ] Confirmar que o Cookie jar sobrevive a um deploy ou restart controlado; o worker de keepalive impede simular cold start por inatividade.
 
 ### 13. Histórico local do Runner
 
@@ -224,6 +224,22 @@ Só entram depois das features anteriores e dos testes de uso:
 - [x] Validar visualmente a ação por ambiente, exportar com teclado e importar sem criar coleção vazia.
 
 Referências: [exportar um ambiente no Postman](https://learning.postman.com/docs/use/send-requests/variables/team-environments/) e [importar ambientes Postman no Insomnia](https://developer.konghq.com/how-to/migrate-collections-and-environments-from-postman-to-insomnia/).
+
+### 14. Runner CLI para CI/CD
+
+**Objetivo:** executar coleções Vortix v2 em pipelines, com os guardrails e testes de resposta existentes.
+
+**Status: concluída e validada nesta rodada.**
+
+- [x] Adicionar CLI Node sem dependências, reutilizando `runner-logic.js`.
+- [x] Executar somente pelo proxy Vortix em loopback; limpar o Cookie jar temporário após a rodada.
+- [x] Mapear variáveis secretas a partir do ambiente do processo sem aceitar valores nos argumentos ou registrá-los.
+- [x] Preservar datasets, captura de variáveis em memória, testes de resposta e limite total de 500 requests.
+- [x] Bloquear métodos de escrita por padrão; exigir `--allow-writes` e confirmação `TESTE`.
+- [x] Gerar JUnit genérico sem URLs, headers, bodies, dados de teste ou valores de variáveis; definir códigos de saída.
+- [x] Cobrir sucesso, falha HTTP/assertion, captura, precedência CI, segredo, escrita bloqueada, redirects, colisões JUnit e cancelamento.
+- [x] Documentar pré-requisitos Node/.NET, configuração de CI, limites e exemplo no README.
+- [x] Validar 178 testes Node (177 passaram; 1 teste de symlink pulado por bloqueio do Windows), sintaxe, build Release sem avisos e smoke ponta a ponta pelo proxy local isolado.
 
 ## Regra de sequência
 

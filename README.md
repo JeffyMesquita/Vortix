@@ -36,6 +36,7 @@
 - [Ambientes e variáveis](#ambientes-e-variáveis)
   - [Cofre local de segredos](#cofre-local-de-segredos)
 - [Scripts, testes e Runner](#scripts-testes-e-runner)
+  - [Runner CLI para CI/CD](#runner-cli-para-cicd)
   - [Histórico do Runner](#histórico-do-runner)
 - [Importação e exportação](#importação-e-exportação)
 - [Histórico de respostas](#histórico-de-respostas)
@@ -80,7 +81,7 @@ Requests novas começam vazias. A URL base e os demais valores vêm do ambiente 
 
 - **.NET 10 SDK** para executar, compilar ou publicar o projeto.
 - Navegador moderno com suporte a IndexedDB e Web Crypto.
-- **Node.js 18 ou superior** para os testes de lógica JavaScript.
+- **Node.js 18 ou superior** para os testes de lógica JavaScript; **Node.js 20 ou superior** para o Runner CLI.
 - **PowerShell e Python 3** para o teste integrado de proteção do SQLite.
 
 A interface não exige npm nem framework JavaScript.
@@ -588,6 +589,27 @@ Use <code>/v1/users/{{userId}}</code> na rota e <code>{"name":"{{name}}"}</code>
 
 Cada rodada aceita até 500 requests. Credenciais solicitadas manualmente pelo helper de token permanecem no fluxo interativo e não são executadas pelo Runner. O relatório detalhado com bodies e mensagens continua temporário; o resumo seguro da rodada fica no histórico local do Runner.
 
+### Runner CLI para CI/CD
+
+O CLI executa uma exportação **Vortix JSON v2** em sequência, usa as mesmas funções de resolução e testes do Runner da interface e envia cada request pelo proxy Vortix local. Requer Node.js 20 ou superior e uma instância local do Vortix acessível por `127.0.0.1`; não envia credenciais a um proxy remoto.
+
+~~~sh
+node tools/vortix-runner.cjs \
+  --collection ./smoke.vortix.json \
+  --proxy http://127.0.0.1:51873 \
+  --data ./datasets.json \
+  --junit ./artifacts/vortix-results.xml \
+  --map-var token=VORTIX_TOKEN
+~~~
+
+Defina `VORTIX_TOKEN` como secret no ambiente do job. `--map-var` recebe somente nomes; valores nunca vão em argumentos. Precedência: dataset &gt; mapeamento do processo &gt; variável capturada por resposta &gt; ambiente exportado. Capturas são compartilhadas só em memória e não substituem um valor mapeado no job.
+
+O dataset é um array JSON de até 100 KB com até 100 objetos; cada execução aceita até 500 combinações de request e dataset. O arquivo JUnit precisa terminar em `.xml`, não pode apontar para arquivos de entrada ou do Runner e usa nomes genéricos de etapa, sem URLs, headers, bodies, dados de teste ou valores de variáveis. Código de saída `0` indica sucesso; `1`, falha HTTP ou de teste; `2`, erro de entrada/configuração; `130`, interrupção por Ctrl+C ou SIGTERM.
+
+POST, PUT, PATCH e DELETE ficam bloqueados por padrão. Autorize gravações descartáveis somente com `--allow-writes --confirm-test-data TESTE`. HTTP fora de loopback exige `--allow-insecure-http` e que a própria request também tenha a permissão salva. Cookie jar usa um ambiente temporário por rodada e é removido ao terminar, inclusive quando Ctrl+C ou SIGTERM interrompem uma request. Redirecionamentos emitidos pelo proxy local não são seguidos.
+
+O MVP aceita apenas Vortix JSON v2; não executa scripts JavaScript de coleção nem requests multipart com arquivos salvos. Use `node tools/vortix-runner.cjs --help` para ver opções.
+
 ### Histórico do Runner
 
 Ao final de cada rodada — concluída, parada na primeira falha ou interrompida por você — o Runner salva um resumo local com data, duração, totais e o resultado de cada etapa, incluindo as etapas não executadas. O histórico usa a chave `runnerHistory` em `settings` pelo mesmo `dbRead`/`dbWrite` do workspace: SQLite no modo local e IndexedDB no modo público. Mantém até 30 rodadas e limita o conjunto a 750 KB; rodadas grandes fazem as mais antigas saírem antes de alcançar o limite de gravação do SQLite.
@@ -725,7 +747,7 @@ As variáveis valem para o processo iniciado nesse terminal.
 ~~~powershell
 dotnet restore ./VortixApiClient.csproj
 dotnet build ./VortixApiClient.csproj -c Release
-node --test ./RunnerLogic.test.cjs
+node --test ./RunnerLogic.test.cjs ./VortixRunner.test.cjs
 powershell -NoProfile -ExecutionPolicy Bypass -File ./HostingMode.test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File ./WorkspaceProtection.test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File ./AuthorizationCodePkce.test.ps1
