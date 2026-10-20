@@ -370,7 +370,7 @@
   }
 
   function isSensitiveVariableName(name) {
-    const normalized = String(name).toLowerCase().replaceAll('_', '').replaceAll('-', '').replaceAll(' ', '');
+    const normalized = String(name).toLowerCase().replace(/[^a-z0-9]/g, '');
     return ['authorization', 'auth', 'bearer', 'token', 'secret', 'password', 'passwd', 'senha', 'credential', 'cookie', 'apikey', 'privatekey'].some(part => normalized.includes(part));
   }
 
@@ -378,7 +378,7 @@
     const result = {};
     if (!variables || typeof variables !== 'object' || Array.isArray(variables)) return result;
     for (const [key, value] of Object.entries(variables)) {
-      const normalizedKey = key.toLowerCase().replaceAll('_', '').replaceAll('-', '').replaceAll(' ', '');
+      const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
       if (normalizedKey.includes('cookie') || normalizedKey.includes('privatekey') || isSensitiveVariableName(key) && includeSensitive !== true) continue;
       Object.defineProperty(result, key, { value: String(value ?? ''), enumerable: true, writable: true, configurable: true });
     }

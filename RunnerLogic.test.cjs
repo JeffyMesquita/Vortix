@@ -1874,6 +1874,8 @@ test('Exporta ambiente isolado como Postman JSON com credenciais omitidas por pa
       clientSecret: 'SECRET_SENTINEL',
       cookie: 'COOKIE_SENTINEL',
       private_key: 'PRIVATE_KEY_SENTINEL',
+      'private.key': 'PRIVATE_DOT_KEY_SENTINEL',
+      'private.key.pem': 'PRIVATE_DOT_PEM_SENTINEL',
       optional: ''
     }
   };
@@ -1893,7 +1895,7 @@ test('Exporta ambiente isolado como Postman JSON com credenciais omitidas por pa
     _postman_exported_at: '2026-10-20T12:00:00.000Z',
     _postman_exported_using: 'Vortix'
   });
-  assert.doesNotMatch(JSON.stringify(exported), /SECRET_SENTINEL|COOKIE_SENTINEL|PRIVATE_KEY_SENTINEL/);
+  assert.doesNotMatch(JSON.stringify(exported), /SECRET_SENTINEL|COOKIE_SENTINEL|PRIVATE_KEY_SENTINEL|PRIVATE_DOT_KEY_SENTINEL|PRIVATE_DOT_PEM_SENTINEL/);
   assert.deepEqual(importPostmanEnvironment(exported), {
     name: 'Desenvolvimento',
     group: 'Importado',
@@ -1905,13 +1907,13 @@ test('Exporta variáveis sensíveis como Postman secret somente quando usuário 
   const { buildPostmanEnvironmentExport, importPostmanEnvironment } = runnerLogic();
   const exported = buildPostmanEnvironmentExport({
     name: 'Homologação',
-    variables: { token: 'TOKEN_SENTINEL', region: 'south', cookie: 'COOKIE_SENTINEL', private_key: 'PRIVATE_KEY_SENTINEL', 'private key': 'PRIVATE_KEY_SPACE_SENTINEL' }
+    variables: { token: 'TOKEN_SENTINEL', region: 'south', cookie: 'COOKIE_SENTINEL', private_key: 'PRIVATE_KEY_SENTINEL', 'private key': 'PRIVATE_KEY_SPACE_SENTINEL', 'private.key.pem': 'PRIVATE_DOT_PEM_SENTINEL' }
   }, { includeSensitive: true, id: 'environment-id', exportedAt: '2026-10-20T12:00:00.000Z' });
 
   assert.deepEqual(exported.values, [
     { key: 'token', value: 'TOKEN_SENTINEL', type: 'secret', enabled: true },
     { key: 'region', value: 'south', type: 'default', enabled: true }
   ]);
-  assert.doesNotMatch(JSON.stringify(exported), /COOKIE_SENTINEL|PRIVATE_KEY_SENTINEL|PRIVATE_KEY_SPACE_SENTINEL/);
+  assert.doesNotMatch(JSON.stringify(exported), /COOKIE_SENTINEL|PRIVATE_KEY_SENTINEL|PRIVATE_KEY_SPACE_SENTINEL|PRIVATE_DOT_PEM_SENTINEL/);
   assert.equal(importPostmanEnvironment(exported).variables.token, 'TOKEN_SENTINEL');
 });

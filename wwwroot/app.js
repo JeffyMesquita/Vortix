@@ -1444,7 +1444,7 @@ function collectionHasResponseAutomation(node,depth=0){return depth<=20&&((node.
 function collectionHasResponseExamples(node,depth=0){return depth<=20&&((node.requests||[]).some(request=>Array.isArray(request.responseExamples)&&request.responseExamples.length>0)||(node.folders||[]).some(folder=>collectionHasResponseExamples(folder,depth+1)));}
 function collectionHasResponseCaptureConfig(node,depth=0){return depth<=20&&((node.requests||[]).some(request=>!!request.captureResponseVariable||Object.hasOwn(request,'responseJsonPath')||Object.hasOwn(request,'responseValueSource')||!!request.responseTests?.length)||(node.folders||[]).some(folder=>collectionHasResponseCaptureConfig(folder,depth+1)));}
 function environmentHasAuthCredentials(variables){return Object.entries(variables||{}).some(([key,value])=>isSensitiveName(key)&&value!=='');}
-function environmentHasExportableSensitiveCredentials(variables){return Object.entries(variables||{}).some(([key,value])=>{const normalized=key.toLowerCase().replaceAll('_','').replaceAll('-','').replaceAll(' ','');return value!==''&&isSensitiveName(key)&&!normalized.includes('cookie')&&!normalized.includes('privatekey');});}
+function environmentHasExportableSensitiveCredentials(variables){return Object.entries(variables||{}).some(([key,value])=>{const normalized=key.toLowerCase().replace(/[^a-z0-9]/g,'');return value!==''&&isSensitiveName(key)&&!normalized.includes('cookie')&&!normalized.includes('privatekey');});}
 function exportEnvironmentVariables(variables,includeBearer){
   return RunnerLogic.exportEnvironmentVariables(variables,includeBearer);
 }
