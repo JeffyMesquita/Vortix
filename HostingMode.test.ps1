@@ -199,7 +199,29 @@ try {
     $otherForwardedIp = Send-HostedRequest 'POST' '/api/request' $publicOrigin '{"baseUrl":"invalid","route":"/","method":"GET"}' $firstSessionId '198.51.100.11'
     if ([int]$forwardedIpRateLimit.Response.StatusCode -ne 429 -or [int]$otherForwardedIp.Response.StatusCode -ne 400) { throw 'Proxy rate limit did not partition by forwarded client IP.' }
 
-    'Hosted-mode test passed: Render hostname/custom origins, isolated sessions and OAuth, cookie validation/quota/eviction, atomic bulk restore, no shared workspace API, same-origin enforcement, SSRF block, and forwarded-IP rate limits.'
+    $restartClientIp = '203.0.113.17'
+    $restartSession = Send-HostedRequest 'GET' '/api/session' '' '' '' $restartClientIp
+    $restartSessionId = ($restartSession.Response.Headers.GetValues('Set-Cookie') | Select-Object -First 1).Split(';')[0]
+    $restartJarWrite = Send-HostedRequest 'PUT' '/api/cookie-jar/restart-check' $publicOrigin '{"cookies":[{"cookieName":"session","cookieHeader":"session=restart-proof","cookieOrigin":"https://api.example.test"}]}' $restartSessionId $restartClientIp
+    if ([int]$restartJarWrite.Response.StatusCode -ne 204) { throw 'Cookie jar for restart validation could not be saved.' }
+
+    if (-not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue; Wait-Process -Id $server.Id -Timeout 10 -ErrorAction SilentlyContinue }
+    $server = Start-Process -FilePath 'dotnet' -ArgumentList @($dll) -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $temporaryRoot 'server-restart.out') -RedirectStandardError (Join-Path $temporaryRoot 'server-restart.err')
+    $restartReady = $false
+    for ($attempt = 0; $attempt -lt 60; $attempt++) {
+        if ($server.HasExited) { throw 'Hosted test server exited during the controlled restart.' }
+        try { $health = Send-HostedRequest 'GET' '/health' ''; if ($health.Response.IsSuccessStatusCode) { $restartReady = $true; break } } catch { Start-Sleep -Milliseconds 200 }
+        Start-Sleep -Milliseconds 200
+    }
+    if (-not $restartReady) { throw 'Hosted test server did not become ready after the controlled restart.' }
+    $restoredSession = Send-HostedRequest 'GET' '/api/session' '' '' $restartSessionId $restartClientIp
+    $restoredJar = Send-HostedRequest 'GET' '/api/cookie-jar/restart-check' '' '' $restartSessionId $restartClientIp
+    if ([int]$restoredSession.Response.StatusCode -ne 204 -or $restoredSession.Response.Headers.Contains('Set-Cookie') -or
+        [int]$restoredJar.Response.StatusCode -ne 200 -or $restoredJar.Content -notmatch 'session=restart-proof') {
+        throw 'The existing browser session and Cookie jar did not survive a controlled app-process restart.'
+    }
+
+    'Hosted-mode test passed: Render hostname/custom origins, isolated sessions and OAuth, Cookie jar persistence after process restart, validation/quota/eviction, atomic bulk restore, no shared workspace API, same-origin enforcement, SSRF block, and forwarded-IP rate limits.'
 }
 finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
