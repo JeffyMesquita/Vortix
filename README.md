@@ -44,6 +44,7 @@
 - [Segurança](#segurança)
 - [Configuração](#configuração)
 - [Desenvolvimento e validação](#desenvolvimento-e-validação)
+- [Contribuir](#contribuir)
 - [Estrutura do projeto](#estrutura-do-projeto)
 - [Solução de problemas](#solução-de-problemas)
 - [Plano de ação](ROADMAP.md)
@@ -826,6 +827,12 @@ Com o Vortix já em execução, valide a página e os endpoints locais:
 ~~~powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File ./Test-VortixApiClient.ps1
 ~~~
+
+## Contribuir
+
+Contribuições são bem-vindas. Consulte o [guia de contribuição](CONTRIBUTING.md) e o [código de conduta](CODE_OF_CONDUCT.md). Use os formulários de [bug](https://github.com/JeffyMesquita/Vortix/issues/new?template=bug_report.yml) e [ideia](https://github.com/JeffyMesquita/Vortix/issues/new?template=feature_request.yml); o [template de pull request](.github/PULL_REQUEST_TEMPLATE.md) descreve as evidências e validações esperadas. Para vulnerabilidades, leia o [guia de segurança](SECURITY.md).
+
+Pull requests passam pela validação automática de build e testes em Windows. Não inclua tokens, senhas, URLs privadas, dados reais de requests, bancos SQLite ou chaves locais em issues, commits e capturas de tela.
 
 ## Estrutura do projeto
 

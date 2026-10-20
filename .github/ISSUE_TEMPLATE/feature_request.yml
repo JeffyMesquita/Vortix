@@ -1,0 +1,44 @@
+name: Sugerir uma melhoria
+description: Proponha uma melhoria agnóstica de API para o Vortix.
+title: "[Ideia]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Explique a necessidade e o ganho para diferentes APIs. Não inclua credenciais nem dados reais.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Qual problema ou necessidade?
+      placeholder: Ao tentar ..., preciso de ...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Como você imagina a solução?
+      description: Descreva fluxo, controles ou resultado esperado. Rascunhos e exemplos fictícios ajudam.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas (opcional)
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área principal
+      options:
+        - Editor de requests
+        - Coleções e organização
+        - Ambientes e variáveis
+        - Auth e segurança
+        - Importação/exportação
+        - Scripts, testes ou Runner
+        - Interface e acessibilidade
+        - Documentação e comunidade
+        - Outra
+    validations:
+      required: true

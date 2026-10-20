@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+
+      - name: Restore and build
+        run: |
+          dotnet restore ./VortixApiClient.csproj
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build ./VortixApiClient.csproj -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: JavaScript tests
+        run: node --test ./RunnerLogic.test.cjs ./VortixRunner.test.cjs
+
+      - name: PowerShell integration tests
+        shell: pwsh
+        run: |
+          $tests = @(
+            './HostingMode.test.ps1',
+            './WorkspaceProtection.test.ps1',
+            './AuthorizationCodePkce.test.ps1',
+            './HistoryRetention.test.ps1',
+            './GraphqlIntrospection.test.ps1'
+          )
+          foreach ($test in $tests) {
+            Write-Host "Running $test"
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $test
+            if ($LASTEXITCODE -ne 0) { throw "$test failed with exit code $LASTEXITCODE" }
+          }
