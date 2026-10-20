@@ -7,9 +7,9 @@ services:
     dockerContext: .
     healthCheckPath: /health
     domains:
-      - apicliente.jeffymesquita.dev
+      - vortixapiclient.jeffymesquita.dev
     envVars:
       - key: ApiStudio__HostingMode
         value: render
       - key: ApiStudio__PublicOrigin
-        value: https://apicliente.jeffymesquita.dev
+        value: https://vortixapiclient.jeffymesquita.dev

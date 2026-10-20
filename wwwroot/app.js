@@ -2198,8 +2198,8 @@ function releaseSecretVaultMemory(){
   secretVault=null;secretVaultValues=null;secretVaultEnvelope=null;secretVaultNames=[];secretVaultUnavailable=null;secretVaultLoading=true;secretVaultEnvironmentId='';
 }
 function renderEnvironmentSelect(){
-  const select=byId('environment-select');select.replaceChildren();const groups=new Map();
-  for(const env of RunnerLogic.normalizeEnvironmentPickerEntries(environments)){
+  const select=byId('environment-select'),entries=RunnerLogic.normalizeEnvironmentPickerEntries(environments);select.replaceChildren();select.disabled=entries.every(entry=>entry.disabled);const groups=new Map();
+  for(const env of entries){
     if(env.disabled){const option=document.createElement('option');option.value='';option.textContent=env.name;option.disabled=true;option.selected=true;select.append(option);continue;}
     const group=env.group||'Geral';if(!groups.has(group)){const optionGroup=document.createElement('optgroup');optionGroup.label=group;groups.set(group,optionGroup);select.append(optionGroup);}
     const option=document.createElement('option');option.value=env.id;option.textContent=env.name;option.selected=env.id===activeEnvironmentId;groups.get(group).append(option);}
@@ -2842,6 +2842,6 @@ async function startApp(){
     byId('protect-existing-secrets').hidden=hostedMode;
     if(hostedMode){byId('sidebar-storage-note').textContent='Coleções e histórico neste navegador';document.querySelector('.sidebar-bottom strong').textContent='Workspace do navegador';byId('history-panel').querySelector('.history-hint').textContent='Histórico e dados ficam neste navegador; exporte backups para transferi-los.';byId('app-storage-note').textContent='Coleções, ambientes, requests e histórico ficam no IndexedDB deste navegador, sem criptografia automática. Use Backup com senha para transportar uma cópia protegida.';}
     else byId('sidebar-storage-note').textContent='SQLite local · proteção de dados';}
-  catch(error){showToast(hostedMode?'Armazenamento do navegador indisponível':'Banco local indisponível',error.message||'Confira o acesso ao armazenamento e tente recarregar.','error',0);updateGuard();updateCopyButtons();updateTokenButton();}
+  catch(error){const environmentSelect=byId('environment-select');if(environmentSelect.options.length===1&&environmentSelect.options[0].textContent==='Carregando ambientes…')environmentSelect.options[0].textContent='Ambientes indisponíveis';showToast(hostedMode?'Armazenamento do navegador indisponível':'Banco local indisponível',error.message||'Confira o acesso ao armazenamento e tente recarregar.','error',0);updateGuard();updateCopyButtons();updateTokenButton();}
 }
 startApp();

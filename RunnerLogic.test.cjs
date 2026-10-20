@@ -1799,6 +1799,17 @@ test('Ambientes sem nome ou ainda não criados têm rótulos visíveis no seleto
   ]);
 });
 
+test('Seletor de ambiente começa bloqueado e segue bloqueado quando ambiente não carregou', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const start = app.indexOf('function renderEnvironmentSelect(){');
+  const end = app.indexOf('async function chooseEnvironment', start);
+  const render = app.slice(start, end);
+
+  assert.ok(/<select id="environment-select"[^>]*disabled[^>]*>[\s\S]*?Carregando ambientes/.test(html), 'picker should stay disabled before storage loads');
+  assert.ok(/select\.disabled=entries\.every\(entry=>entry\.disabled\)/.test(render), 'picker should disable when all normalized entries are placeholders');
+});
+
 test('Cabeçalho dá acesso direto à criação e gestão de ambientes', () => {
   const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
