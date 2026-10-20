@@ -368,6 +368,50 @@
       disabled: false
     }));
   }
+
+  function isSensitiveVariableName(name) {
+    const normalized = String(name).toLowerCase().replaceAll('_', '').replaceAll('-', '').replaceAll(' ', '');
+    return ['authorization', 'auth', 'bearer', 'token', 'secret', 'password', 'passwd', 'senha', 'credential', 'cookie', 'apikey', 'privatekey'].some(part => normalized.includes(part));
+  }
+
+  function exportEnvironmentVariables(variables, includeSensitive = false) {
+    const result = {};
+    if (!variables || typeof variables !== 'object' || Array.isArray(variables)) return result;
+    for (const [key, value] of Object.entries(variables)) {
+      const normalizedKey = key.toLowerCase().replaceAll('_', '').replaceAll('-', '').replaceAll(' ', '');
+      if (normalizedKey.includes('cookie') || normalizedKey.includes('privatekey') || isSensitiveVariableName(key) && includeSensitive !== true) continue;
+      Object.defineProperty(result, key, { value: String(value ?? ''), enumerable: true, writable: true, configurable: true });
+    }
+    return result;
+  }
+
+  function buildPostmanEnvironmentExport(environment, options = {}) {
+    if (!environment || typeof environment !== 'object' || Array.isArray(environment)) throw Error('Ambiente inválido para exportação.');
+    const id = String(options.id || '').trim(), name = String(environment.name || '').trim(), exportedAt = String(options.exportedAt || '').trim();
+    if (!id) throw Error('ID do ambiente Postman obrigatório.');
+    if (!name || name.length > 80) throw Error('Nome do ambiente inválido.');
+    if (!exportedAt) throw Error('Data de exportação obrigatória.');
+    const variables = exportEnvironmentVariables(environment.variables, options.includeSensitive === true);
+    return {
+      id,
+      name,
+      values: Object.entries(variables).map(([key, value]) => ({ key, value, type: isSensitiveVariableName(key) ? 'secret' : 'default', enabled: true })),
+      _postman_variable_scope: 'environment',
+      _postman_exported_at: exportedAt,
+      _postman_exported_using: 'Vortix'
+    };
+  }
+
+  function importPostmanEnvironment(document) {
+    if (!document || typeof document !== 'object' || Array.isArray(document) || !Array.isArray(document.values) || (!document._postman_variable_scope && !document.name)) return null;
+    const variables = {};
+    for (const item of document.values) {
+      if (!item?.key || item.enabled === false) continue;
+      Object.defineProperty(variables, String(item.key), { value: String(item.value ?? ''), enumerable: true, writable: true, configurable: true });
+    }
+    return { name: String(document.name || 'Ambiente Postman'), group: 'Importado', variables };
+  }
+
   function datasetValue(value) {
     if (typeof value === 'string') return value;
     if (value === null || typeof value === 'number' || typeof value === 'boolean') return String(value);
@@ -1768,5 +1812,5 @@
     return makeLocalSecretVault({ salt: saltBytes, key, cryptoProvider, secrets, envelope: { ...envelope, names: [...secrets.keys()] } });
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

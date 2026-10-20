@@ -1862,3 +1862,56 @@ test('Abas restauram destino de captura salvo em cada rascunho', () => {
   assert.ok(start >= 0 && end > start, 'applyWorkspaceDraft deve existir');
   assert.match(app.slice(start, end), /response-capture-target'\)\.value=draft\.responseCaptureTarget==='vault'\?'vault':'environment'/);
 });
+
+test('Exporta ambiente isolado como Postman JSON com credenciais omitidas por padrão', () => {
+  const { buildPostmanEnvironmentExport, importPostmanEnvironment } = runnerLogic();
+  const environment = {
+    id: 'environment-local',
+    name: 'Desenvolvimento',
+    group: 'Local',
+    variables: {
+      baseUrl: 'https://api.example.test',
+      clientSecret: 'SECRET_SENTINEL',
+      cookie: 'COOKIE_SENTINEL',
+      private_key: 'PRIVATE_KEY_SENTINEL',
+      optional: ''
+    }
+  };
+  const exported = buildPostmanEnvironmentExport(environment, {
+    id: 'postman-environment-id',
+    exportedAt: '2026-10-20T12:00:00.000Z'
+  });
+
+  assert.deepEqual(exported, {
+    id: 'postman-environment-id',
+    name: 'Desenvolvimento',
+    values: [
+      { key: 'baseUrl', value: 'https://api.example.test', type: 'default', enabled: true },
+      { key: 'optional', value: '', type: 'default', enabled: true }
+    ],
+    _postman_variable_scope: 'environment',
+    _postman_exported_at: '2026-10-20T12:00:00.000Z',
+    _postman_exported_using: 'Vortix'
+  });
+  assert.doesNotMatch(JSON.stringify(exported), /SECRET_SENTINEL|COOKIE_SENTINEL|PRIVATE_KEY_SENTINEL/);
+  assert.deepEqual(importPostmanEnvironment(exported), {
+    name: 'Desenvolvimento',
+    group: 'Importado',
+    variables: { baseUrl: 'https://api.example.test', optional: '' }
+  });
+});
+
+test('Exporta variáveis sensíveis como Postman secret somente quando usuário permite', () => {
+  const { buildPostmanEnvironmentExport, importPostmanEnvironment } = runnerLogic();
+  const exported = buildPostmanEnvironmentExport({
+    name: 'Homologação',
+    variables: { token: 'TOKEN_SENTINEL', region: 'south', cookie: 'COOKIE_SENTINEL', private_key: 'PRIVATE_KEY_SENTINEL', 'private key': 'PRIVATE_KEY_SPACE_SENTINEL' }
+  }, { includeSensitive: true, id: 'environment-id', exportedAt: '2026-10-20T12:00:00.000Z' });
+
+  assert.deepEqual(exported.values, [
+    { key: 'token', value: 'TOKEN_SENTINEL', type: 'secret', enabled: true },
+    { key: 'region', value: 'south', type: 'default', enabled: true }
+  ]);
+  assert.doesNotMatch(JSON.stringify(exported), /COOKIE_SENTINEL|PRIVATE_KEY_SENTINEL|PRIVATE_KEY_SPACE_SENTINEL/);
+  assert.equal(importPostmanEnvironment(exported).variables.token, 'TOKEN_SENTINEL');
+});

@@ -308,8 +308,7 @@ async function promptWithDialog(options) {
   return result.confirmed?result.value:null;
 }
 function isSensitiveName(name) {
-  const n=String(name).toLowerCase().replaceAll('_','').replaceAll('-','').replaceAll(' ','');
-  return ['authorization','auth','bearer','token','secret','password','passwd','senha','credential','cookie','apikey','privatekey'].some(x=>n.includes(x));
+  return RunnerLogic.isSensitiveVariableName(name);
 }
 function scrubCredentialText(value) {const i=value.toLowerCase().indexOf('bearer ');return i<0?value:`${value.slice(0,i)}Bearer [removido]`;}
 function sanitizeBearer(value) {const t=String(value||'').trim().replace(/^Bearer\s+/i,'');return t.length<=8192&&!/[\r\n]/.test(t)?t:'';}
@@ -1445,8 +1444,9 @@ function collectionHasResponseAutomation(node,depth=0){return depth<=20&&((node.
 function collectionHasResponseExamples(node,depth=0){return depth<=20&&((node.requests||[]).some(request=>Array.isArray(request.responseExamples)&&request.responseExamples.length>0)||(node.folders||[]).some(folder=>collectionHasResponseExamples(folder,depth+1)));}
 function collectionHasResponseCaptureConfig(node,depth=0){return depth<=20&&((node.requests||[]).some(request=>!!request.captureResponseVariable||Object.hasOwn(request,'responseJsonPath')||Object.hasOwn(request,'responseValueSource')||!!request.responseTests?.length)||(node.folders||[]).some(folder=>collectionHasResponseCaptureConfig(folder,depth+1)));}
 function environmentHasAuthCredentials(variables){return Object.entries(variables||{}).some(([key,value])=>isSensitiveName(key)&&value!=='');}
+function environmentHasExportableSensitiveCredentials(variables){return Object.entries(variables||{}).some(([key,value])=>{const normalized=key.toLowerCase().replaceAll('_','').replaceAll('-','').replaceAll(' ','');return value!==''&&isSensitiveName(key)&&!normalized.includes('cookie')&&!normalized.includes('privatekey');});}
 function exportEnvironmentVariables(variables,includeBearer){
-  const result={};for(const[key,value]of Object.entries(variables||{})){if(/cookie|private[_-]?key/i.test(key))continue;if(isSensitiveName(key)&&!includeBearer)continue;Object.defineProperty(result,key,{value:String(value??''),enumerable:true,writable:true,configurable:true});}return result;
+  return RunnerLogic.exportEnvironmentVariables(variables,includeBearer);
 }
 function exportCollectionNode(node,includeBearer,depth=0){
   if(depth>20)throw Error('A coleção tem mais de 20 níveis de pastas.');
@@ -1766,9 +1766,7 @@ function importInsomniaCollection(document){
   return{collection:root,environments,stats};
 }
 function importPostmanEnvironment(document){
-  if(!Array.isArray(document.values)||(!document._postman_variable_scope&&!document.name))return null;
-  const variables={};for(const item of document.values)if(item?.key&&item.enabled!==false)Object.defineProperty(variables,String(item.key),{value:String(item.value??''),enumerable:true,writable:true,configurable:true});
-  return{name:String(document.name||'Ambiente Postman'),group:'Importado',variables};
+  return RunnerLogic.importPostmanEnvironment(document);
 }
 function normalizeImportedNode(source,keepAuth,depth=0,isRoot=false,enableCapture=true,allowInsecureHttp=false){
   if(depth>12)throw Error('A coleção importada ultrapassa 12 níveis de pastas.');
@@ -2261,7 +2259,9 @@ function renderEnvironmentDraft(){
     const card=document.createElement('section');card.className='environment-card';card.dataset.environmentId=env.id;
     const heading=document.createElement('div');heading.className='environment-card-heading';
     const name=document.createElement('input');name.className='environment-name';name.value=env.name;name.maxLength=80;name.placeholder='Nome do ambiente';name.setAttribute('aria-label','Nome do ambiente');
-    const remove=document.createElement('button');remove.type='button';remove.dataset.removeEnvironment='';remove.textContent='Excluir';remove.setAttribute('aria-label','Excluir ambiente '+env.name);heading.append(name,remove);
+    const exportButton=document.createElement('button');exportButton.type='button';exportButton.dataset.exportEnvironment='';exportButton.textContent='Exportar';exportButton.title='Baixar este ambiente como Postman Environment JSON';exportButton.setAttribute('aria-label','Exportar ambiente '+env.name);
+    const remove=document.createElement('button');remove.type='button';remove.dataset.removeEnvironment='';remove.textContent='Excluir';remove.setAttribute('aria-label','Excluir ambiente '+env.name);heading.append(name,exportButton,remove);
+    name.oninput=()=>exportButton.setAttribute('aria-label','Exportar ambiente '+(name.value.trim()||'sem nome'));
     const groupRow=document.createElement('div');groupRow.className='environment-group-row';const groupLabel=document.createElement('label');groupLabel.textContent='Grupo';
     const group=document.createElement('input');group.className='environment-group';group.value=env.group||'Local';group.maxLength=60;group.placeholder='Ex.: Desenvolvimento';group.setAttribute('aria-label','Grupo do ambiente');groupRow.append(groupLabel,group);
     const varsHeading=document.createElement('div');varsHeading.className='environment-vars-heading';varsHeading.innerHTML='<span>CHAVE</span><span>VALOR</span><span></span>';
@@ -2269,6 +2269,38 @@ function renderEnvironmentDraft(){
     const add=document.createElement('button');add.className='environment-add-var';add.type='button';add.dataset.addVariable='';add.innerHTML='<span aria-hidden="true">＋</span> Adicionar variável';
     card.append(heading,groupRow,varsHeading,vars,add);list.append(card);
   }
+}
+function readEnvironmentCard(card){
+  const name=card.querySelector('.environment-name').value.trim(),group=card.querySelector('.environment-group').value.trim()||'Geral';
+  if(!name){showToast('Nome obrigatório','Informe o nome do ambiente.','error');return null;}
+  const variables={};
+  for(const row of card.querySelectorAll('.environment-var-row')){
+    const key=row.querySelector('.environment-var-name').value.trim(),value=row.querySelector('.environment-var-value').value;
+    if(!key&&!value)continue;
+    if(!key){showToast('Chave obrigatória','Informe a chave de cada variável preenchida.','error');return null;}
+    if(Object.hasOwn(variables,key)){showToast('Chave repetida','A chave '+key+' aparece mais de uma vez.','error');return null;}
+    Object.defineProperty(variables,key,{value,enumerable:true,writable:true,configurable:true});
+  }
+  return{id:card.dataset.environmentId,name,group,variables};
+}
+async function exportEnvironmentFromCard(card){
+  const environment=readEnvironmentCard(card);if(!environment)return;
+  let includeSensitive=false;
+  if(environmentHasExportableSensitiveCredentials(environment.variables)){
+    const choice=await promptWithDialog({eyebrow:'EXPORTAR AMBIENTE',title:'Exportar variáveis sensíveis?',description:'Escolha quais variáveis entram no arquivo Postman Environment JSON.',warning:'O arquivo JSON não é criptografado. O cofre, cookies e chaves privadas nunca são exportados.',selectLabel:'Variáveis sensíveis',selectValue:'omit',selectOptions:[{value:'omit',label:'Omitir variáveis sensíveis (recomendado)'},{value:'include',label:'Incluir variáveis sensíveis'}],confirmLabel:'Continuar'});
+    if(choice===null)return;
+    if(choice==='include'){
+      if(!(await confirmWithDialog({eyebrow:'DADOS SENSÍVEIS',title:'Incluir credenciais no JSON?',description:'O arquivo conterá valores reconhecidos como tokens, senhas ou chaves. Qualquer pessoa com acesso ao arquivo poderá reutilizá-los.',warning:'A exportação não é criptografada. Revise o destino antes de compartilhar.',confirmLabel:'Incluir e exportar',danger:true})))return;
+      includeSensitive=true;
+    }
+  }else if(!(await confirmWithDialog({eyebrow:'EXPORTAR AMBIENTE',title:'Baixar ambiente?',description:'“'+environment.name+'” será exportado como Postman Environment JSON.',warning:'O arquivo JSON não é criptografado. Revise os valores antes de compartilhar; cofre, cookies e chaves privadas não entram no arquivo.',confirmLabel:'Exportar ambiente'})))return;
+  try{
+    const payload=RunnerLogic.buildPostmanEnvironmentExport(environment,{includeSensitive,id:newId(),exportedAt:new Date().toISOString()}),serialized=JSON.stringify(payload,null,2),blob=new Blob([serialized],{type:'application/json'});
+    if(blob.size>10*1024*1024)throw Error('O ambiente ultrapassa o limite de 10 MB.');
+    const url=URL.createObjectURL(blob),link=document.createElement('a'),filename=environment.name.normalize('NFKD').replace(/[^a-zA-Z0-9_-]+/g,'-').replace(/^-|-$/g,'')||'environment';
+    link.href=url;link.download=filename+'.postman_environment.json';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    showToast('Ambiente exportado',includeSensitive?'JSON baixado com variáveis sensíveis. Guarde o arquivo em local seguro.':'JSON baixado; variáveis sensíveis omitidas. Revise antes de compartilhar.','success',6000);
+  }catch(error){showToast('Falha ao exportar ambiente',error.message||'Não foi possível gerar o arquivo JSON.','error');}
 }
 function renderSecretVaultUi(){
   const status=byId('secret-vault-status');if(!status)return;
@@ -2418,15 +2450,7 @@ function addEnvironmentDraft(){environmentDraft.push({id:newId(),name:'Novo ambi
 async function saveEnvironmentDraft(event){
   event.preventDefault();const next=[];
   for(const card of byId('environment-list').children){
-    const name=card.querySelector('.environment-name').value.trim(),group=card.querySelector('.environment-group').value.trim()||'Geral';
-    if(!name){showToast('Nome obrigatório','Informe o nome de cada ambiente.','error');return;}
-    const variables={};
-    for(const row of card.querySelectorAll('.environment-var-row')){
-      const key=row.querySelector('.environment-var-name').value.trim(),value=row.querySelector('.environment-var-value').value;
-      if(!key&&!value)continue;if(!key){showToast('Chave obrigatória','Informe a chave de cada variável preenchida.','error');return;}
-      if(Object.hasOwn(variables,key)){showToast('Chave repetida','A chave '+key+' aparece mais de uma vez.','error');return;}variables[key]=value;
-    }
-    next.push({id:card.dataset.environmentId,name,group,variables});
+    const environment=readEnvironmentCard(card);if(!environment)return;next.push(environment);
   }
   if(!next.length){showToast('Mantenha um ambiente','Crie pelo menos um ambiente.','error');return;}
   try{
@@ -2789,6 +2813,7 @@ function addEventListeners(){
   byId('environment-select').onchange=event=>chooseEnvironment(event.target.value);byId('theme-select').onchange=event=>saveTheme(event.target.value);
   byId('font-select').onchange=event=>saveFont(event.target.value);byId('history-retention-limit').addEventListener('change',()=>void saveHistorySettings());byId('history-save-response-body').addEventListener('change',()=>void saveHistorySettings());byId('decrease-font').onclick=()=>setUiScale(activeScale-0.05);byId('increase-font').onclick=()=>setUiScale(activeScale+0.05);document.addEventListener('keydown',handleScaleShortcut);
   byId('environment-list').addEventListener('click',async event=>{
+    const exportButton=event.target.closest('[data-export-environment]');if(exportButton){await exportEnvironmentFromCard(exportButton.closest('.environment-card'));return;}
     const remove=event.target.closest('[data-remove-environment]');if(remove){const card=remove.closest('.environment-card');if(environmentDraft.length<=1){showToast('Mantenha um ambiente','O último ambiente não pode ser removido.','warning');return;}const environmentName=card.querySelector('.environment-name').value;if(await confirmWithDialog({eyebrow:'AMBIENTES',title:'Remover ambiente?',description:'O ambiente “'+environmentName+'” será removido do rascunho.',confirmLabel:'Remover ambiente',danger:true}))card.remove();return;}
     if(event.target.closest('[data-add-variable]')){const vars=event.target.closest('.environment-card').querySelector('.environment-vars');vars.append(makeVarRow());vars.lastElementChild.querySelector('.environment-var-name').focus();}
   });

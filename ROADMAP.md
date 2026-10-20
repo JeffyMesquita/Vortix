@@ -194,6 +194,21 @@ Só entram depois das features anteriores e dos testes de uso:
 - [ ] Configurar CNAME de `apicliente.jeffymesquita.dev` e validar o TLS pelo subdomínio.
 - [ ] Conferir uma request a uma API pública, persistência do IndexedDB e Cookie jar após um cold start real.
 
+## Feature: exportar ambientes individualmente
+
+**Objetivo:** transferir um ambiente sem exportar a coleção inteira. O arquivo Postman Environment JSON também pode ser importado no Insomnia.
+
+- [x] Adicionar ação **Exportar** na gestão de ambientes.
+- [x] Exportar somente o ambiente escolhido como Postman Environment JSON.
+- [x] Omitir variáveis sensíveis por padrão; incluir somente após confirmação explícita sobre o arquivo sem criptografia.
+- [x] Nunca incluir valores ou envelope do cofre de segredos.
+- [x] Reimportar o arquivo pelo importador existente sem criar coleção vazia; manter sufixo para nomes repetidos.
+- [x] Testar formato, omissão/inclusão sensível, valores vazios e round-trip pelo importador.
+- [x] Validar testes Node, sintaxe JavaScript, build Release e diff.
+- [x] Validar visualmente a ação por ambiente, exportar com teclado e importar sem criar coleção vazia.
+
+Referências: [exportar um ambiente no Postman](https://learning.postman.com/docs/use/send-requests/variables/team-environments/) e [importar ambientes Postman no Insomnia](https://developer.konghq.com/how-to/migrate-collections-and-environments-from-postman-to-insomnia/).
+
 ## Regra de sequência
 
 Fechamos cada feature com teste, documentação e revisão. Busca, histórico, comparação, HTTPie, schema GraphQL e fluxo PKCE visual foram validados em ambiente local/mock.
