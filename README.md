@@ -70,7 +70,7 @@ O modo público permite uso sem senha compartilhada. Cada navegador recebe uma s
 - **Runner:** execute requests de uma coleção ou pasta em sequência, com conjuntos de dados, intervalo, parada por falha e repetição das falhas.
 - **Temas e fontes:** Dracula, Monokai, One Dark, Nord, Solarized Dark e GitHub Dark; Fira Code, JetBrains Mono, Cascadia Code, Cascadia Mono e IBM Plex Mono.
 - **Editor JSON:** destaque de sintaxe e formatação com indentação de dois espaços.
-- **Intercâmbio:** Vortix JSON, Insomnia v4, Postman Collection v2.1, cURL, HTTPie, OpenAPI 3 em JSON.
+- **Intercâmbio:** Vortix JSON, ambientes Postman, Insomnia v4, Postman Collection v2.1, cURL, HTTPie, OpenAPI 3 em JSON.
 - **Backups:** exportação simples em JSON ou arquivo protegido por senha.
 
 Requests novas começam vazias. A URL base e os demais valores vêm do ambiente e da configuração que você criar.
@@ -597,9 +597,29 @@ Cada rodada aceita até 500 requests. Credenciais solicitadas manualmente pelo h
 | Postman Collection v2.1 | Sim | Sim |
 | Comando cURL | Sim | - |
 | OpenAPI 3.0/3.1/3.2 JSON | Sim | - |
-| Ambiente Postman | Sim | Acompanha a coleção exportada |
+| Ambiente Postman JSON | Sim | Sim, por ambiente |
 
 Na importação, o Vortix pede confirmação antes de guardar credenciais Bearer, Basic, API Key e variáveis sensíveis com proteção local. A exportação omite credenciais por padrão; se marcar a opção, o JSON poderá conter esses valores sem criptografia. Cookies e chaves privadas continuam fora do export.
+
+Em **Configurações → Ambientes**, clique em **Exportar** no ambiente desejado para baixar um `*.postman_environment.json` independente. Postman e Insomnia aceitam esse formato para importar ambientes. O Vortix detecta possíveis segredos pelo nome da variável e os omite por padrão; revise os valores antes de compartilhar. Para incluí-los, confirme a inclusão e o aviso sobre o arquivo sem criptografia. As entradas incluídas usam `type: "secret"` para serem mascaradas no Postman, mas seus valores continuam legíveis no JSON. Cookies, chaves privadas e o cofre de segredos nunca entram no arquivo. O formato Postman não guarda os grupos do Vortix; ao importar, o ambiente entra no grupo **Importado**. A exportação usa somente os valores visíveis no formulário e não salva o rascunho.
+
+Exemplo sem valores sensíveis:
+
+~~~json
+{
+  "id": "a3e8c074-b0d7-4e25-b9f2-118b8c2eb334",
+  "name": "Desenvolvimento",
+  "values": [
+    { "key": "baseUrl", "value": "https://api.example.com", "type": "default", "enabled": true },
+    { "key": "tenantId", "value": "", "type": "default", "enabled": true }
+  ],
+  "_postman_variable_scope": "environment",
+  "_postman_exported_at": "2026-10-20T12:00:00.000Z",
+  "_postman_exported_using": "Vortix"
+}
+~~~
+
+Veja os guias oficiais para [exportar ambientes no Postman](https://learning.postman.com/docs/use/send-requests/variables/team-environments/) e [importar coleções e ambientes Postman no Insomnia](https://developer.konghq.com/how-to/migrate-collections-and-environments-from-postman-to-insomnia/). Revise o conteúdo antes de compartilhar qualquer arquivo JSON.
 
 Insomnia v4 e Postman Collection v2.1 preservam os exemplos de resposta vinculados a cada request. No Postman, eles usam `response[]`; no Insomnia v4, recursos `_type: response` referenciam a request por `parentId`. Ao exportar coleções com exemplos, o Vortix pede confirmação porque os bodies seguem sem criptografia no arquivo. Headers de autenticação, cookies e outros headers sensíveis são filtrados. Exports Insomnia e Postman também podem conter scripts After-response/Post-response para captura e testes; o Vortix pede confirmação antes de exportá-los. Revise o arquivo e os scripts antes de importá-lo em outro cliente.
 

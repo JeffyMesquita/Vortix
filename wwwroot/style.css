@@ -655,6 +655,8 @@ textarea.compact { min-height: 165px; }
 .environment-card-heading .environment-name { min-height: 40px; padding: 9px 11px; font-size: 13px; font-weight: 600; }
 .environment-card-heading button { border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; color: var(--muted); background: transparent; font-size: 12px; }
 .environment-card-heading button:hover { border-color: #7f3d48; color: #ff9aa2; background: #3a252d; }
+.environment-card-heading [data-export-environment] { color: var(--accent); }
+.environment-card-heading [data-export-environment]:hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
 .environment-group-row { grid-template-columns: 62px minmax(0, 1fr); gap: 10px; margin: 0; }
 .environment-group-row label { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .environment-group { min-height: 36px; padding: 7px 10px; font-size: 12px; }
