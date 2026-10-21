@@ -134,6 +134,31 @@ test('Runner CLI executes requests and datasets through a loopback proxy and kee
   assert.doesNotMatch(junit + result.stdout + result.stderr, /VERY_SECRET_CI_CANARY|CI_SECRET_CANARY|BODY_CANARY|api\.example\.test|\/users\/11/);
 });
 
+test('Runner CLI runs ordered pre-request actions with dataset precedence and omits action metadata from the proxy', async t => {
+  const directory = await createTempDirectory(t);
+  const proxy = await startProxy(t);
+  const collection = await writeCollection(directory, {
+    requests: [{
+      id: 'dynamic', name: 'Dynamic request', method: 'GET', baseUrl: '{{baseUrl}}', route: '/items/{{request_id}}',
+      headers: 'X-Label: {{label}}',
+      preRequestActions: [
+        { type: 'uuid', name: 'request_id' },
+        { type: 'template', name: 'label', value: '{{tenant}}-{{request_id}}' }
+      ]
+    }]
+  }, { baseUrl: proxy.origin });
+  const datasets = await writeJson(directory, 'dynamic-data.json', [{ tenant: 'tenant-dataset' }]);
+  const report = path.join(directory, 'dynamic.xml');
+
+  const result = await runCli(cliArgs(proxy.origin, collection, report, ['--data', datasets]));
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(proxy.calls.length, 1);
+  assert.match(proxy.calls[0].route, /^\/items\/[0-9a-f-]{36}$/i);
+  const label = `tenant-dataset-${proxy.calls[0].route.split('/').at(-1)}`;
+  assert.equal(proxy.calls[0].headers, `X-Label: ${label}`);
+  for (const key of ['preRequestActions', 'preRequestActionsEnabled', 'preRequestSecretValues', 'preRequestProvenance']) assert.equal(Object.hasOwn(proxy.calls[0], key), false);
+});
+
 test('Runner CLI keeps dataset variables above CI mappings and CI mappings above captured values', async t => {
   const directory = await createTempDirectory(t);
   const proxy = await startProxy(t, call => call.route === '/auth'

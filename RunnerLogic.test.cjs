@@ -274,6 +274,19 @@ test('remote HTTP detection exempts loopback and Runner requires request opt-in'
   ], { baseUrl: 'http://api.example.test/v1' }), ['http://api.example.test']);
 });
 
+test('Runner detects base URLs produced by enabled pre-request actions for transport confirmation', () => {
+  const { preRequestActionsAffectBaseUrl } = runnerLogic();
+  assert.equal(preRequestActionsAffectBaseUrl({
+    baseUrl: '{{apiOrigin}}', preRequestActions: [{ type: 'template', name: 'apiOrigin', value: 'http://api.example.test' }]
+  }), true);
+  assert.equal(preRequestActionsAffectBaseUrl({
+    baseUrl: '{{apiOrigin}}', preRequestActionsEnabled: false, preRequestActions: [{ type: 'template', name: 'apiOrigin', value: 'http://api.example.test' }]
+  }), false);
+  assert.equal(preRequestActionsAffectBaseUrl({
+    baseUrl: '{{baseUrl}}', preRequestActions: [{ type: 'uuid', name: 'request_id' }]
+  }), false);
+});
+
 test('workspace exposes the Runner and its dataset/write safety controls', () => {
   const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
   assert.match(html, /id="run-collection"/);
@@ -419,6 +432,179 @@ test('validates response test paths, operators, and HTTP status values', () => {
   assert.throws(() => normalizeResponseTests([{ target: 'json', path: 'data.id', operator: 'script' }]), /operador/i);
   assert.throws(() => normalizeResponseTests([{ target: 'json', path: 'x'.repeat(1001), operator: 'exists' }]), /1000/);
   assert.throws(() => normalizeResponseTests([{ target: 'json', path: 'data.id', operator: 'equals', expected: 'x'.repeat(1001) }]), /1000/);
+});
+
+test('normalizes ordered pre-request actions and rejects unsupported code', () => {
+  const { normalizePreRequestActions } = runnerLogic();
+  assert.deepEqual(normalizePreRequestActions([
+    { type: 'uuid', name: 'request_id' },
+    { type: 'timestamp', name: 'sent_at' },
+    { type: 'template', name: 'derived', value: '{{request_id}}' }
+  ]), [
+    { type: 'uuid', name: 'request_id' },
+    { type: 'timestamp', name: 'sent_at' },
+    { type: 'template', name: 'derived', value: '{{request_id}}' }
+  ]);
+  assert.throws(() => normalizePreRequestActions([{ type: 'javascript', name: 'x', value: 'fetch("https://evil.example")' }]), /ação|tipo/i);
+  assert.throws(() => normalizePreRequestActions([{ type: 'uuid', name: '__proto__' }]), /nome/i);
+  assert.throws(() => normalizePreRequestActions(Array.from({ length: 11 }, (_, index) => ({ type: 'uuid', name: `id${index}` }))), /10/);
+});
+
+test('requires explicit consent for literal pre-request template text but allows variable composition', () => {
+  const { preRequestActionHasLiteralText } = runnerLogic();
+  assert.equal(preRequestActionHasLiteralText({ type: 'uuid', name: 'request_id' }), false);
+  assert.equal(preRequestActionHasLiteralText({ type: 'template', name: 'request_label', value: '{{tenant}}-{{request_id}}' }), false);
+  assert.equal(preRequestActionHasLiteralText({ type: 'template', name: 'request_label', value: 'orders-{{request_id}}' }), true);
+  assert.equal(preRequestActionHasLiteralText({ type: 'template', name: 'auth_header', value: 'Bearer {{token}}' }), true);
+  assert.equal(preRequestActionHasLiteralText({ type: 'template', name: 'punctuation', value: '!!!' }), true);
+  assert.equal(preRequestActionHasLiteralText({ type: 'template', name: 'separator', value: '---' }), true);
+});
+
+test('persists literal pre-request template text only after explicit consent', () => {
+  const { persistablePreRequestActions } = runnerLogic();
+  const actions = [
+    { type: 'uuid', name: 'request_id' },
+    { type: 'template', name: 'request_label', value: '{{tenant}}-{{request_id}}' },
+    { type: 'template', name: 'static_value', value: 'fixed-secret-123' }
+  ];
+  const safe = persistablePreRequestActions(actions);
+  assert.deepEqual(safe.actions, actions.slice(0, 2));
+  assert.equal(safe.redacted, true);
+  const authorized = persistablePreRequestActions(actions, true);
+  assert.deepEqual(authorized.actions, actions);
+  assert.equal(authorized.redacted, false);
+});
+
+test('proxy payload excludes pre-request persistence consent and warns that generated URL previews can change', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const start = app.indexOf('async function executeApiRequest(request){');
+  const end = app.indexOf('\nasync function performApiRequest', start);
+  assert.ok(start >= 0 && end > start);
+  assert.match(app.slice(start, end), /delete proxyRequest\.preRequestActionsLiteralConsent/);
+  assert.match(app, /UUIDs e timestamps são gerados novamente a cada execução/);
+  assert.match(app, /A origem exibida é uma prévia e pode diferir do envio/);
+  assert.match(app, /enabled:request\?\.preRequestActionsEnabled!==false&&safe\.actions\.length>0/);
+});
+
+test('executes pre-request actions in a temporary overlay with dataset, action, vault, and environment precedence', () => {
+  const { runPreRequestActions } = runnerLogic();
+  const environment = { actionName: 'environment-value', baseUrl: 'https://api.example.test' };
+  const dataset = { shared: 'dataset-value', datasetOnly: 'dataset-only' };
+  const vault = { vaultOnly: 'vault-value', shared: 'vault-value' };
+  const result = runPreRequestActions([
+    { type: 'template', name: 'actionName', value: 'action-value' },
+    { type: 'template', name: 'derived', value: '{{actionName}}|{{shared}}|{{vaultOnly}}|{{baseUrl}}|{{datasetOnly}}' },
+    { type: 'uuid', name: 'request_id' },
+    { type: 'timestamp', name: 'sent_at' }
+  ], environment, dataset, vault, { uuidFactory: () => 'uuid-fixed', now: '2026-10-20T12:00:00.000Z' });
+
+  assert.deepEqual({ ...result.variables }, {
+    actionName: 'action-value',
+    derived: 'action-value|dataset-value|vault-value|https://api.example.test|dataset-only',
+    request_id: 'uuid-fixed',
+    sent_at: '2026-10-20T12:00:00.000Z'
+  });
+  assert.deepEqual({ ...result.provenance }, { actionName: 'pre-request', derived: 'vault', request_id: 'pre-request', sent_at: 'pre-request' });
+  assert.deepEqual({ ...result.vaultSecrets }, { vaultOnly: 'vault-value' });
+  assert.equal(environment.actionName, 'environment-value');
+  assert.equal(Object.hasOwn(environment, 'request_id'), false);
+  assert.equal(Object.hasOwn(dataset, 'request_id'), false);
+  assert.throws(() => runPreRequestActions([
+    { type: 'template', name: 'token', value: '{{secret}}' }
+  ], {}, {}, { locked: true, names: ['secret'] }), /cofre.*bloqueado/i);
+});
+
+test('pre-request values resolve in saved requests without overriding datasets or persisting', () => {
+  const { prepareSavedRequest, runPreRequestActions } = runnerLogic();
+  const environment = { baseUrl: 'https://api.example.test', actionValue: 'old-environment-value', token: 'old-token' };
+  const dataset = { tenant: 'dataset-tenant', shared: 'dataset-shared' };
+  const vault = { actionValue: 'vault-value', token: 'vault-token' };
+  const temporary = runPreRequestActions([
+    { type: 'template', name: 'actionValue', value: 'fresh-action-value' },
+    { type: 'template', name: 'tenant', value: 'action-tenant' },
+    { type: 'template', name: 'requestId', value: 'id-{{tenant}}' }
+  ], environment, dataset, vault);
+  const request = prepareSavedRequest({
+    method: 'GET', baseUrl: '{{baseUrl}}', route: '/tenants/{{tenant}}/requests/{{requestId}}',
+    headers: 'X-Action: {{actionValue}}\nX-Token: {{token}}\nX-Shared: {{shared}}'
+  }, environment, dataset, false, [], vault, temporary.variables);
+
+  assert.equal(request.route, '/tenants/dataset-tenant/requests/id-dataset-tenant');
+  assert.equal(request.headers, 'X-Action: fresh-action-value\nX-Token: vault-token\nX-Shared: dataset-shared');
+  assert.equal(request.resolutionProvenance.actionValue, 'pre-request');
+  assert.equal(request.resolutionProvenance.tenant, 'dataset');
+  assert.equal(environment.actionValue, 'old-environment-value');
+  assert.equal(environment.tenant, undefined);
+  assert.equal(dataset.tenant, 'dataset-tenant');
+});
+
+test('pre-request actions retain vault-secret redaction across derived values', () => {
+  const { runPreRequestActions } = runnerLogic();
+  const result = runPreRequestActions([
+    { type: 'template', name: 'derived', value: 'Bearer {{secret}}' },
+    { type: 'template', name: 'nested', value: '{{derived}} / retry' }
+  ], {}, {}, { secret: 'VAULT_CANARY' });
+  assert.equal(result.provenance.derived, 'vault');
+  assert.equal(result.provenance.nested, 'vault');
+  assert.deepEqual({ ...result.vaultSecrets }, { secret: 'VAULT_CANARY' });
+});
+
+test('pre-request scripts export supported actions and only import unchanged Vortix scripts', () => {
+  const { buildPreRequestScript, parsePreRequestScript } = runnerLogic();
+  const actions = [
+    { type: 'uuid', name: 'request_id' },
+    { type: 'timestamp', name: 'requested_at' },
+    { type: 'template', name: 'request_label', value: 'id={{request_id}} {{tenant}}' }
+  ];
+  for (const runtime of ['insomnia', 'postman']) {
+    const script = buildPreRequestScript(actions, runtime);
+    assert.deepEqual(parsePreRequestScript(script, runtime), actions);
+    assert.equal(parsePreRequestScript(script + '\nconsole.log("edited")', runtime), null);
+    assert.equal(parsePreRequestScript('console.log("untrusted")', runtime), null);
+  }
+});
+
+test('request lifecycle actions are editable and persist across tabs, history, and collection exports', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.match(html, /id="pre-request-actions"/);
+  assert.match(html, /id="add-pre-request-action"/);
+  assert.match(html, /id="pre-request-literal-consent"/);
+  assert.match(html, /Dica: usar um ID no caminho e em um header/);
+  assert.match(app, /function getPreRequestActionsFromForm\(/);
+  assert.match(app, /preRequestActions:getPreRequestActionsFromForm\(\)/);
+  assert.match(app, /renderPreRequestActions\(draft\.preRequestActions\|\|\[\]\)/);
+  assert.match(app, /renderPreRequestActions\(request\.preRequestActions\|\|\[\]\)/);
+  assert.match(app, /function exportPreRequestActions\(request,allowLiteralTemplates\)/);
+  assert.match(app, /exportPreRequestActions\(request,request\.preRequestActionsLiteralConsent===true\)/);
+  assert.match(app, /preRequestActionsLiteralConsent:byId\('pre-request-literal-consent'\)\.checked/);
+  assert.match(app, /RunnerLogic\.preRequestActionHasLiteralText/);
+  assert.match(app, /preRequestActions:preRequest\.actions/);
+  assert.match(app, /preRequestActions:preRequest\.actions,preRequestActionsEnabled:preRequest\.enabled/);
+  const exportStart = app.indexOf('function exportCollectionNode('), exportEnd = app.indexOf('\nfunction responseCaptureInsomniaScript(', exportStart);
+  assert.match(app.slice(exportStart, exportEnd), /preRequestActions:preRequest\.actions,preRequestActionsEnabled:preRequest\.enabled/);
+  const historyStart = app.indexOf('async function saveHistory('), historyEnd = app.indexOf('\nfunction applyHistoryEntry(', historyStart);
+  assert.match(app.slice(historyStart, historyEnd), /preRequestActions:preRequest\.actions,preRequestActionsEnabled:preRequest\.enabled/);
+  assert.match(app, /RunnerLogic\.buildPreRequestScript\(preActions\.actions,'insomnia'\)/);
+  assert.match(app, /RunnerLogic\.buildPreRequestScript\(preActions\.actions,'postman'\)/);
+  assert.match(app, /RunnerLogic\.parsePreRequestScript\(preScript,'insomnia'\)/);
+  assert.match(app, /RunnerLogic\.parsePreRequestScript\(preScript,'postman'\)/);
+  assert.match(app, /RunnerLogic\.preRequestActionsAffectBaseUrl\(item\.request\)/);
+  assert.match(app, /__VORTIX_PRE_REQUEST_/);
+});
+
+test('manual and Runner requests execute pre-request actions before resolving request templates', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const manualStart = app.indexOf('async function sendCurrentRequest(');
+  const manualEnd = app.indexOf('\nasync function requestOAuthClientCredentialsToken(', manualStart);
+  const manual = app.slice(manualStart, manualEnd);
+  assert.ok(manual.indexOf('RunnerLogic.runPreRequestActions(') >= 0);
+  assert.ok(manual.indexOf('RunnerLogic.runPreRequestActions(') < manual.indexOf('requestFromForm('));
+  assert.match(app, /async function runRunnerCases\([\s\S]*?RunnerLogic\.runPreRequestActions\([\s\S]*?RunnerLogic\.prepareSavedRequest\(/);
+  assert.match(app, /function applyEnvironment\(value,preRequestOverrides=\{\}\)/);
+  assert.match(app, /function previewRunnerDynamicBaseUrl\(/);
+  assert.match(app, /RunnerLogic\.remoteHttpOrigin\(request\.baseUrl\)&&request\.allowInsecureHttp!==true/);
+  assert.match(app, /delete proxyRequest\.preRequestActions/);
 });
 
 test('exports response checks as executable Insomnia and Postman after-response tests', () => {
@@ -820,6 +1006,38 @@ test('workspace backup sanitizes runner history settings records to the snapshot
   assert.deepEqual(restored.data.settings.find(record => record.key === 'runnerHistory').value, [expected]);
 });
 
+test('workspace backups omit legacy literal pre-request templates without consent but preserve explicitly authorized ones', () => {
+  const { createWorkspaceBackup, parseWorkspaceBackup } = runnerLogic();
+  const legacyLiteral = 'LEGACY_TEMPLATE_SECRET_SENTINEL_7d3a';
+  const literalAction = { type: 'template', name: 'request_label', value: legacyLiteral };
+  const authorizedAction = { type: 'template', name: 'request_label', value: 'AUTHORIZED_TEMPLATE_SENTINEL_9b22' };
+  const safeAction = { type: 'uuid', name: 'request_id' };
+  const oldRequest = { id: 'request-old', preRequestActions: [safeAction, literalAction], preRequestActionsEnabled: true };
+  const authorizedRequest = { id: 'request-authorized', preRequestActions: [authorizedAction], preRequestActionsEnabled: true, preRequestActionsLiteralConsent: true };
+  const source = {
+    collections: [{ id: 'collection-1', name: 'API', requests: [oldRequest, authorizedRequest], folders: [{ id: 'folder-1', name: 'Nested', requests: [oldRequest], folders: [] }] }],
+    environments: [{ id: 'environment-1', name: 'Local', variables: {} }],
+    history: [{ id: 'history-1', preRequestActions: [literalAction], preRequestActionsEnabled: true }],
+    settings: [{ key: 'workspaceTabs', value: { activeId: 'tab-1', tabs: [{ id: 'tab-1', request: oldRequest }] } }]
+  };
+
+  const backup = createWorkspaceBackup(source);
+  assert.doesNotMatch(JSON.stringify(backup), new RegExp(legacyLiteral));
+  assert.deepEqual(backup.data.collections[0].requests[0].preRequestActions, [safeAction]);
+  assert.equal(backup.data.collections[0].requests[0].preRequestActionsEnabled, true);
+  assert.deepEqual(backup.data.collections[0].requests[1].preRequestActions, [authorizedAction]);
+  assert.deepEqual(backup.data.collections[0].folders[0].requests[0].preRequestActions, [safeAction]);
+  assert.deepEqual(backup.data.history[0].preRequestActions, []);
+  assert.deepEqual(backup.data.settings[0].value.tabs[0].request.preRequestActions, [safeAction]);
+
+  const importedLegacy = JSON.parse(JSON.stringify(backup));
+  importedLegacy.data.history[0].preRequestActions = [literalAction];
+  delete importedLegacy.data.history[0].preRequestActionsLiteralConsent;
+  const restored = parseWorkspaceBackup(JSON.stringify(importedLegacy));
+  assert.deepEqual(restored.data.history[0].preRequestActions, []);
+  assert.doesNotMatch(JSON.stringify(restored.data), new RegExp(legacyLiteral));
+});
+
 test('workspace backup retains only the newest bounded Runner history entries', () => {
   const { createWorkspaceBackup } = runnerLogic();
   const runs = Array.from({ length: 35 }, (_, index) => ({
@@ -929,6 +1147,16 @@ test('workspace tabs discard invalid and duplicate records and select the newest
 
   assert.deepEqual(state.tabs.map(tab => tab.id), ['one', 'two']);
   assert.equal(state.activeId, 'two');
+});
+
+test('workspace tabs preserve pre-request actions and their disabled state', () => {
+  const { normalizeWorkspaceTabs } = runnerLogic();
+  const state = normalizeWorkspaceTabs({ activeId: 'tab', tabs: [{ id: 'tab', request: {
+    method: 'GET', preRequestActions: [{ type: 'uuid', name: 'request_id' }], preRequestActionsEnabled: false, preRequestActionsLiteralConsent: true
+  } }] });
+  assert.deepEqual(state.tabs[0].request.preRequestActions, [{ type: 'uuid', name: 'request_id' }]);
+  assert.equal(state.tabs[0].request.preRequestActionsEnabled, false);
+  assert.equal(state.tabs[0].request.preRequestActionsLiteralConsent, true);
 });
 
 test('workspace tabs keep at most twelve and preserve selected tab when it survives', () => {

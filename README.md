@@ -468,7 +468,7 @@ Para cadastro e requisitos de segurança, consulte [RFC 7636](https://www.rfc-ed
 
 ### Salvamento e intercâmbio
 
-A opção **Salvar credenciais de Auth nas requests locais** controla histórico, abas e padrões de coleção/pasta. Desmarcada, o Vortix mantém os valores só na sessão e não os grava nessas áreas. SQLite protege campos sensíveis com ASP.NET Core Data Protection.
+A opção **Salvar credenciais de Auth nas requests locais** controla histórico, abas e padrões de coleção/pasta. Desmarcada, o Vortix mantém esses valores só na sessão e não os grava nessas áreas. Templates pré-request têm uma autorização separada para salvar texto literal; referências como <code>{{tenant}}-{{request_id}}</code> podem ser guardadas sem valor literal. Sem essa autorização, ações com texto literal são omitidas de coleções, abas persistidas, histórico e backups; outras ações seguras continuam ativas. No modo público, texto autorizado fica no IndexedDB sem criptografia automática; use referências ao cofre para valores secretos. SQLite protege campos sensíveis com ASP.NET Core Data Protection.
 
 Na importação, você escolhe se guarda credenciais. Na exportação, elas ficam fora por padrão. Marcar **Incluir credenciais de Auth e variáveis sensíveis** grava valores diretamente no JSON sem criptografia.
 
@@ -586,9 +586,27 @@ Para capturar uma resposta diretamente no cofre, na aba **Scripts** escolha **De
 }
 ~~~
 
-Na aba **Scripts**, configure a captura de um valor, como <code>data.access_token</code>, para uma variável como <code>token</code>. Escolha o destino **Ambiente ativo** (padrão) ou **Cofre cifrado**. O cofre precisa estar desbloqueado e a falha de storage nunca copia o valor para o ambiente. O painel também mostra o código equivalente para o fluxo After-response do Insomnia, que pode ser copiado.
+Na aba **Scripts → Antes da request**, adicione ações ordenadas para gerar um **UUID**, um **timestamp UTC** ou um **template**. Os resultados existem só durante aquela chamada e podem ser usados em URL, Params, Headers, Auth, Body e campos GraphQL como <code>{{request_id}}</code>. Templates também podem usar valores de ações anteriores e variáveis do ambiente/cofre. Para guardar texto literal no template, marque **Autorizar salvar textos literais dos templates desta request**; sem isso, o Vortix remove o texto literal ao persistir.
 
-Scripts importados não são executados. O importador converte apenas formas simples de <code>insomnia.environment.set()</code> e <code>pm.environment.set()</code> em captura nativa. JavaScript arbitrário é ignorado e sinalizado.
+Exemplo: gerar um ID e montar um header antes de enviar a request:
+
+~~~json
+{
+  "route": "/orders/{{request_id}}",
+  "headers": "X-Request-Label: {{request_label}}",
+  "preRequestActionsEnabled": true,
+  "preRequestActions": [
+    { "type": "uuid", "name": "request_id" },
+    { "type": "template", "name": "request_label", "value": "{{tenant}}-{{request_id}}" }
+  ]
+}
+~~~
+
+A prioridade é **dataset do Runner → ações pré-request → cofre → ambiente**. O Runner executa a lista para cada caso; o Runner CLI também aceita essas ações em coleções Vortix JSON v2. O histórico guarda a configuração autorizada das ações para reutilizar a request, mas nunca guarda os valores gerados. Use referências a variáveis do ambiente/cofre para credenciais; evite segredos literais nos templates.
+
+Na seção **Depois da resposta → variável**, configure a captura de um valor, como <code>data.access_token</code>, para uma variável como <code>token</code>. Escolha o destino **Ambiente ativo** (padrão) ou **Cofre cifrado**. O cofre precisa estar desbloqueado e a falha de storage nunca copia o valor para o ambiente. O painel também mostra o código equivalente para o fluxo After-response do Insomnia, que pode ser copiado.
+
+JavaScript importado nunca é executado pelo Vortix. Para ações pré-request, o importador reconhece somente scripts gerados pelo Vortix e sem alterações; as ações entram desativadas para revisão. Para captura de resposta, converte somente formas simples conhecidas de <code>insomnia.environment.set()</code> e <code>pm.environment.set()</code>. Scripts desconhecidos ou editados são ignorados e sinalizados. Ao exportar para Insomnia/Postman, o Vortix pede confirmação antes de incluir ações pré-request, captura e testes como scripts executáveis.
 
 ### Testes de resposta
 
@@ -667,13 +685,13 @@ node tools/vortix-runner.cjs \
   --map-var token=VORTIX_TOKEN
 ~~~
 
-Defina `VORTIX_TOKEN` como secret no ambiente do job. `--map-var` recebe somente nomes; valores nunca vão em argumentos. Precedência: dataset &gt; mapeamento do processo &gt; variável capturada por resposta &gt; ambiente exportado. Capturas são compartilhadas só em memória e não substituem um valor mapeado no job.
+Defina `VORTIX_TOKEN` como secret no ambiente do job. `--map-var` recebe somente nomes; valores nunca vão em argumentos. Precedência: dataset &gt; ação pré-request &gt; mapeamento do processo &gt; variável capturada por resposta &gt; ambiente exportado. Capturas são compartilhadas só em memória e não substituem um valor mapeado no job.
 
 O dataset é um array JSON de até 100 KB com até 100 objetos; cada execução aceita até 500 combinações de request e dataset. O arquivo JUnit precisa terminar em `.xml`, não pode apontar para arquivos de entrada ou do Runner e usa nomes genéricos de etapa, sem URLs, headers, bodies, dados de teste ou valores de variáveis. Código de saída `0` indica sucesso; `1`, falha HTTP ou de teste; `2`, erro de entrada/configuração; `130`, interrupção por Ctrl+C ou SIGTERM.
 
 POST, PUT, PATCH e DELETE ficam bloqueados por padrão. Autorize gravações descartáveis somente com `--allow-writes --confirm-test-data TESTE`. HTTP fora de loopback exige `--allow-insecure-http` e que a própria request também tenha a permissão salva. Cookie jar usa um ambiente temporário por rodada e é removido ao terminar, inclusive quando Ctrl+C ou SIGTERM interrompem uma request. Redirecionamentos emitidos pelo proxy local não são seguidos.
 
-O MVP aceita apenas Vortix JSON v2; não executa scripts JavaScript de coleção nem requests multipart com arquivos salvos. Use `node tools/vortix-runner.cjs --help` para ver opções.
+O MVP aceita apenas Vortix JSON v2; executa as ações pré-request nativas, mas não JavaScript arbitrário nem requests multipart com arquivos salvos. Use `node tools/vortix-runner.cjs --help` para ver opções.
 
 ### Histórico do Runner
 
@@ -717,7 +735,7 @@ Exemplo sem valores sensíveis:
 
 Veja os guias oficiais para [exportar ambientes no Postman](https://learning.postman.com/docs/use/send-requests/variables/team-environments/) e [importar coleções e ambientes Postman no Insomnia](https://developer.konghq.com/how-to/migrate-collections-and-environments-from-postman-to-insomnia/). Revise o conteúdo antes de compartilhar qualquer arquivo JSON.
 
-Insomnia v4 e Postman Collection v2.1 preservam os exemplos de resposta vinculados a cada request. No Postman, eles usam `response[]`; no Insomnia v4, recursos `_type: response` referenciam a request por `parentId`. Ao exportar coleções com exemplos, o Vortix pede confirmação porque os bodies seguem sem criptografia no arquivo. Headers de autenticação, cookies e outros headers sensíveis são filtrados. Exports Insomnia e Postman também podem conter scripts After-response/Post-response para captura e testes; o Vortix pede confirmação antes de exportá-los. Revise o arquivo e os scripts antes de importá-lo em outro cliente.
+Insomnia v4 e Postman Collection v2.1 preservam os exemplos de resposta vinculados a cada request. No Postman, eles usam `response[]`; no Insomnia v4, recursos `_type: response` referenciam a request por `parentId`. Ao exportar coleções com exemplos, o Vortix pede confirmação porque os bodies seguem sem criptografia no arquivo. Headers de autenticação, cookies e outros headers sensíveis são filtrados. Exports Insomnia e Postman também podem conter scripts Pre-request e After-response/Post-response para ações, captura e testes; o Vortix pede confirmação antes de exportá-los. Sem inclusão de credenciais, templates com texto literal são omitidos e as demais ações seguras permanecem ativas. Revise o arquivo e os scripts antes de importá-lo em outro cliente.
 
 ## Histórico de respostas
 
@@ -879,7 +897,7 @@ Verifique se o banco e o key ring do ASP.NET Core Data Protection foram preserva
 
 ### Um importador informa que scripts não foram convertidos
 
-O Vortix não executa JavaScript arbitrário. Apenas comandos simples de captura de ambiente são convertidos; scripts incompatíveis precisam ser recriados usando as abas **Scripts** ou **Testes**.
+O Vortix não executa JavaScript arbitrário. Apenas scripts pré-request do próprio Vortix e formas simples suportadas de captura de resposta são convertidos em configurações nativas; scripts incompatíveis precisam ser recriados usando as abas **Scripts** ou **Testes**.
 
 ## Licença
 

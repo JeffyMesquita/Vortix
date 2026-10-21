@@ -264,8 +264,29 @@
             </details>
           </div>
           <div class="tab-panel scripts-panel" data-editor-panel="scripts" hidden>
+            <section class="pre-request-section" aria-labelledby="pre-request-title">
+              <div class="panel-heading">
+                <div><h2 id="pre-request-title">Antes da request</h2><p>Crie valores temporários para usar como <code>{{request_id}}</code>. Eles só existem nesta chamada.</p></div>
+                <button class="button secondary compact-button" id="add-pre-request-action" type="button">＋ Adicionar ação</button>
+              </div>
+              <label class="check-row script-enable" for="pre-request-actions-enabled"><input id="pre-request-actions-enabled" type="checkbox" checked><span>Executar estas ações antes do envio</span></label>
+              <label class="check-row script-enable" for="pre-request-literal-consent"><input id="pre-request-literal-consent" type="checkbox"><span>Autorizar salvar textos literais dos templates desta request</span></label>
+              <p class="hint pre-request-literal-warning">No modo público, textos autorizados ficam no IndexedDB sem criptografia automática. Para segredos, use referências ao cofre.</p>
+              <div id="pre-request-actions" class="pre-request-actions"></div>
+              <p class="hint pre-request-empty" id="pre-request-actions-empty">Nenhuma ação pré-request. Adicione UUID, timestamp UTC ou um valor com templates.</p>
+              <p class="hint pre-request-priority">Ações rodam em ordem. UUID e timestamp UTC são gerados por envio; templates podem usar variáveis anteriores. Prioridade: dados do Runner &gt; ação pré-request &gt; cofre &gt; ambiente. Sem consentimento, textos literais são omitidos ao salvar; guarde segredos no ambiente/cofre.</p>
+              <details class="script-help pre-request-help">
+                <summary>Dica: usar um ID no caminho e em um header</summary>
+                <p>Adicione um UUID chamado <code>request_id</code>. Depois, use <code>{{request_id}}</code> nos campos da request. Para compor outro valor, escolha Template e use as variáveis da ação anterior ou do ambiente.</p>
+                <pre><code>Rota: /orders/{{request_id}}
+Header: X-Request-Label: {{request_label}}
+
+UUID → request_id
+Template → request_label = {{tenant}}-{{request_id}}</code></pre>
+              </details>
+            </section>
             <div class="panel-heading">
-              <div><h2>Resposta → variável</h2><p>Guarda um valor da resposta no ambiente ativo.</p></div>
+              <div><h2>Depois da resposta → variável</h2><p>Guarda um valor da resposta no ambiente ativo ou cofre.</p></div>
               <button class="button secondary compact-button" id="insert-token-script" type="button">Exemplo: guardar token</button>
             </div>
             <label class="check-row script-enable" for="capture-response-variable">
@@ -586,7 +607,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
       <label for="export-collection-select">Coleção</label><select id="export-collection-select" required></select>
       <label for="export-format">Formato</label><select id="export-format"><option value="api-studio">Vortix JSON</option><option value="insomnia-v4">Insomnia JSON (v4)</option><option value="postman-v21">Postman Collection v2.1</option></select>
       <label class="check-row export-token-option" for="export-include-bearer"><input id="export-include-bearer" type="checkbox"><span>Incluir credenciais de Auth e variáveis sensíveis</span></label>
-      <p class="hint">O export inclui requests, pastas, scripts e o ambiente ativo. Credenciais são omitidas por padrão; ao incluí-las, o arquivo JSON fica sem criptografia. No Insomnia, scripts exportados podem executar ao enviar.</p>
+      <p class="hint">O export inclui requests, pastas, ações e o ambiente ativo. Credenciais são omitidas por padrão; ações que parecem conter segredos literais também são removidas e desativadas. Ao incluir credenciais, o JSON fica sem criptografia. Scripts exportados para Insomnia/Postman podem executar ao enviar.</p>
       <div class="dialog-actions"><button class="button secondary" id="cancel-export-dialog" type="button">Cancelar</button><button class="button primary" id="confirm-export-collection" type="submit">Baixar JSON</button></div>
     </form>
   </dialog>

@@ -241,6 +241,21 @@ Referências: [exportar um ambiente no Postman](https://learning.postman.com/doc
 - [x] Documentar pré-requisitos Node/.NET, configuração de CI, limites e exemplo no README.
 - [x] Validar 178 testes Node (177 passaram; 1 teste de symlink pulado por bloqueio do Windows), sintaxe, build Release sem avisos e smoke ponta a ponta pelo proxy local isolado.
 
+### 15. Ações pré-request e variáveis de ciclo de vida
+
+**Status: concluída e validada nesta rodada.**
+
+- [x] Adicionar ações nativas e ordenadas para UUID, timestamp UTC e templates; não executar JavaScript arbitrário no Vortix.
+- [x] Resolver valores temporários em URL, Params, Headers, Auth, Body, GraphQL e multipart com prioridade dataset → pré-request → cofre → ambiente.
+- [x] Permitir ativar/desativar e reordenar ações; guardar configuração em coleções, abas e histórico sem salvar valores gerados.
+- [x] Executar no envio manual, Runner visual e Runner CLI; remover metadados locais do payload do proxy e preservar redação de valores derivados do cofre.
+- [x] Exportar código equivalente para Insomnia e Postman com confirmação; importar somente scripts pré-request gerados e intactos pelo Vortix, desativados para revisão.
+- [x] Pedir consentimento separado para persistir texto literal em templates; sem consentimento, omitir essas ações e manter as demais seguras.
+- [x] Cobrir regras/precedência/round-trip de scripts com testes Node e executar um caso do Runner CLI via proxy local.
+- [x] Atualizar o README com passos, exemplo e limites.
+- [x] Rodar 193 testes Node (192 passaram; 1 teste de symlink foi ignorado por `EPERM` no Windows), sintaxe JavaScript, build Release sem avisos e `git diff --check`.
+- [x] Conferir a interface Scripts, consentimento e persistência após recarga; uma chamada GET com UUID chegou ao mock loopback e retornou HTTP 200.
+
 ## Regra de sequência
 
 Fechamos cada feature com teste, documentação e revisão. Busca, histórico, comparação, HTTPie, schema GraphQL e fluxo PKCE visual foram validados em ambiente local/mock.

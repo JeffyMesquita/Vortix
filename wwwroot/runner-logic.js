@@ -335,6 +335,9 @@
         graphqlQuery: String(source.request.graphqlQuery || ''),
         graphqlVariables: String(source.request.graphqlVariables || ''),
         graphqlOperationName: String(source.request.graphqlOperationName || ''),
+        preRequestActions: normalizePreRequestActions(source.request.preRequestActions),
+        preRequestActionsEnabled: source.request.preRequestActionsEnabled !== false,
+        preRequestActionsLiteralConsent: source.request.preRequestActionsLiteralConsent === true,
         responseCaptureTarget: source.request.responseCaptureTarget === 'vault' ? 'vault' : 'environment',
         allowInsecureHttp: source.request.allowInsecureHttp === true
       };
@@ -445,6 +448,117 @@
     });
   }
 
+  function normalizePreRequestActions(actions) {
+    if (actions == null) return [];
+    if (!Array.isArray(actions) || actions.length > 10) throw Error('Informe até 10 ações pré-request.');
+    return actions.map((source, index) => {
+      if (!source || typeof source !== 'object' || Array.isArray(source)) throw Error(`A ação ${index + 1} está inválida.`);
+      const type = String(source.type || ''), name = String(source.name || '').trim();
+      if (!['uuid', 'timestamp', 'template'].includes(type)) throw Error(`O tipo da ação ${index + 1} não é suportado.`);
+      if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,79}$/.test(name) || reservedNames.has(name)) throw Error(`Informe um nome de variável válido para a ação ${index + 1}.`);
+      if (type !== 'template') return { type, name };
+      const value = String(source.value ?? '');
+      if (value.length > 1000) throw Error(`O template da ação ${index + 1} ultrapassa 1000 caracteres.`);
+      return { type, name, value };
+    });
+  }
+
+  function preRequestActionHasLiteralText(action) {
+    if (action?.type !== 'template') return false;
+    const value = String(action.value ?? ''), hasReferences = /\{\{\s*[^{}]+\s*\}\}/.test(value);
+    const literal = value.replace(/\{\{\s*[^{}]+\s*\}\}/g, '');
+    return !hasReferences && !!literal.trim() || /[^\s\-_.:/?&=+,;@]/u.test(literal);
+  }
+
+  function persistablePreRequestActions(actions, allowLiteralText = false) {
+    const normalized = normalizePreRequestActions(actions);
+    const safe = allowLiteralText ? normalized : normalized.filter(action => !preRequestActionHasLiteralText(action));
+    return { actions: safe, redacted: safe.length !== normalized.length };
+  }
+
+  function preRequestActionsAffectBaseUrl(request = {}) {
+    if (request?.preRequestActionsEnabled === false) return false;
+    const references = new Set([...String(request?.baseUrl || '').matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map(match => match[1].trim()));
+    return normalizePreRequestActions(request?.preRequestActions).some(action => references.has(action.name));
+  }
+
+  function runPreRequestActions(actions, environment = {}, dataset = {}, vaultSecrets = {}, options = {}) {
+    const normalized = normalizePreRequestActions(actions), variables = Object.create(null), provenance = Object.create(null), vaultValues = Object.create(null);
+    const uuidFactory = typeof options.uuidFactory === 'function' ? options.uuidFactory : () => {
+      const value = globalThis.crypto?.randomUUID?.();
+      if (!value) throw Error('Este navegador não oferece um gerador UUID seguro.');
+      return value;
+    };
+    for (const action of normalized) {
+      let value, source = 'pre-request';
+      if (action.type === 'uuid') value = uuidFactory();
+      else if (action.type === 'timestamp') {
+        const date = options.now === undefined ? new Date() : new Date(options.now);
+        if (!Number.isFinite(date.getTime())) throw Error('A data da ação timestamp é inválida.');
+        value = date.toISOString();
+      } else {
+        const resolved = resolveTemplateWithProvenance(action.value, environment, dataset, vaultSecrets, variables);
+        value = resolved.text;
+        for (const [name, dependencySource] of Object.entries(resolved.provenance)) {
+          if (dependencySource === 'vault') {
+            source = 'vault';
+            const used = secretValuesUsedByProvenance({ [name]: dependencySource }, vaultSecrets);
+            Object.assign(vaultValues, used);
+          } else if (dependencySource === 'pre-request' && provenance[name] === 'vault') {
+            source = 'vault';
+          }
+        }
+      }
+      Object.defineProperty(variables, action.name, { value: String(value ?? ''), enumerable: true, writable: true, configurable: true });
+      provenance[action.name] = source;
+    }
+    return { variables, provenance, vaultSecrets: vaultValues };
+  }
+
+  function preRequestTemplateExpression(value, runtime) {
+    const api = runtime === 'insomnia' ? 'insomnia' : 'pm', parts = [];
+    let offset = 0;
+    for (const match of String(value).matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) {
+      if (match.index > offset) parts.push(JSON.stringify(String(value).slice(offset, match.index)));
+      const name = match[1].trim();
+      parts.push(`String(${api}.variables.get(${JSON.stringify(name)}) ?? ${JSON.stringify(match[0])})`);
+      offset = match.index + match[0].length;
+    }
+    if (offset < String(value).length) parts.push(JSON.stringify(String(value).slice(offset)));
+    return parts.length ? parts.join(' + ') : "''";
+  }
+
+  function buildPreRequestScript(actions, runtime = 'insomnia') {
+    const normalized = normalizePreRequestActions(actions);
+    if (!['insomnia', 'postman'].includes(runtime)) throw Error('Cliente de exportação de script não suportado.');
+    if (!normalized.length) return '';
+    const api = runtime === 'insomnia' ? 'insomnia' : 'pm';
+    const lines = [`// VORTIX_PRE_REQUEST_ACTIONS_V1 ${JSON.stringify(normalized)}`];
+    if (runtime === 'insomnia' && normalized.some(action => action.type === 'uuid')) lines.push('const uuid = require("uuid");');
+    for (const action of normalized) {
+      const value = action.type === 'uuid' ? (runtime === 'insomnia' ? 'uuid.v4()' : 'pm.variables.replaceIn("{{$guid}}")')
+        : action.type === 'timestamp' ? 'new Date().toISOString()'
+          : preRequestTemplateExpression(action.value, runtime);
+      const target = runtime === 'insomnia' ? 'insomnia.variables.localVars' : 'pm.variables';
+      lines.push(`${target}.set(${JSON.stringify(action.name)}, ${value});`);
+    }
+    return lines.join('\n');
+  }
+
+  function parsePreRequestScript(script, runtime = 'insomnia') {
+    if (typeof script !== 'string' || script.length > 32768) return null;
+    try {
+      const normalizedScript = script.replace(/\r\n/g, '\n').trimEnd();
+      const firstLine = normalizedScript.split('\n', 1)[0];
+      const prefix = '// VORTIX_PRE_REQUEST_ACTIONS_V1 ';
+      if (!firstLine.startsWith(prefix)) return null;
+      const actions = normalizePreRequestActions(JSON.parse(firstLine.slice(prefix.length)));
+      return buildPreRequestScript(actions, runtime) === normalizedScript ? actions : null;
+    } catch {
+      return null;
+    }
+  }
+
   function resolveTemplate(value, environment = {}, overrides = {}) {
     const variables = Object.assign(Object.create(null), environment || {}, overrides || {});
     const missing = new Set();
@@ -532,8 +646,9 @@
     return '';
   }
 
-  function templateReferenceSource(key, environment, dataset, vault) {
+  function templateReferenceSource(key, environment, dataset, vault, preRequest) {
     if (Object.hasOwn(dataset, key)) return 'dataset';
+    if (Object.hasOwn(preRequest, key)) return 'pre-request';
     if (vault.unavailable) return 'unavailable';
     if (vault.locked && vault.names.has(key)) return 'locked';
     if (!vault.locked && Object.hasOwn(vault.values, key)) return 'vault';
@@ -541,9 +656,10 @@
     return 'missing';
   }
 
-  function resolveTemplateWithProvenance(value, environment = {}, overrides = {}, vaultSecrets = {}) {
+  function resolveTemplateWithProvenance(value, environment = {}, overrides = {}, vaultSecrets = {}, preRequestOverrides = {}) {
     const env = environment && typeof environment === 'object' ? environment : {};
     const dataset = overrides && typeof overrides === 'object' ? overrides : {};
+    const preRequest = preRequestOverrides && typeof preRequestOverrides === 'object' && !Array.isArray(preRequestOverrides) ? preRequestOverrides : {};
     const vault = normalizeVaultSecrets(vaultSecrets);
     const provenance = {};
     const missing = new Set();
@@ -551,6 +667,10 @@
       if (Object.hasOwn(dataset, key)) {
         provenance[key] = 'dataset';
         return String(dataset[key]);
+      }
+      if (Object.hasOwn(preRequest, key)) {
+        provenance[key] = 'pre-request';
+        return String(preRequest[key]);
       }
       if (vault.unavailable) {
         throw Error('O cofre de segredos está indisponível; não é possível resolver "{{' + key + '}}" com segurança.');
@@ -573,15 +693,16 @@
     return { text, provenance };
   }
 
-  function inspectTemplateReferences(fields, environment = {}, overrides = {}, vaultSecrets = {}) {
+  function inspectTemplateReferences(fields, environment = {}, overrides = {}, vaultSecrets = {}, preRequestOverrides = {}) {
     const env = environment && typeof environment === 'object' && !Array.isArray(environment) ? environment : {};
     const dataset = overrides && typeof overrides === 'object' && !Array.isArray(overrides) ? overrides : {};
+    const preRequest = preRequestOverrides && typeof preRequestOverrides === 'object' && !Array.isArray(preRequestOverrides) ? preRequestOverrides : {};
     const vault = normalizeVaultSecrets(vaultSecrets);
     const sourceFields = fields && typeof fields === 'object' && !Array.isArray(fields) ? fields : {};
     const references = [];
     for (const [field, raw] of Object.entries(sourceFields)) {
       String(raw ?? '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, name) => {
-        references.push({ field, name, source: templateReferenceSource(name, env, dataset, vault) });
+        references.push({ field, name, source: templateReferenceSource(name, env, dataset, vault, preRequest) });
         return whole;
       });
     }
@@ -1246,6 +1367,49 @@
     });
   }
 
+  function sanitizePreRequestActionRecord(record) {
+    if (!record || typeof record !== 'object' || Array.isArray(record) || !Object.hasOwn(record, 'preRequestActions')) return record;
+    let persisted;
+    try { persisted = persistablePreRequestActions(record.preRequestActions, record.preRequestActionsLiteralConsent === true); }
+    catch { persisted = { actions: [], redacted: true }; }
+    return {
+      ...record,
+      preRequestActions: persisted.actions,
+      preRequestActionsEnabled: record.preRequestActionsEnabled !== false && persisted.actions.length > 0,
+      preRequestActionsLiteralConsent: record.preRequestActionsLiteralConsent === true,
+      ...(persisted.redacted ? { redacted: true } : {})
+    };
+  }
+
+  function sanitizePreRequestCollection(collection, depth = 0) {
+    if (depth > 20) throw Error('A coleção ultrapassa 20 níveis de pastas.');
+    if (!collection || typeof collection !== 'object' || Array.isArray(collection)) return collection;
+    return {
+      ...collection,
+      ...(Array.isArray(collection.requests) ? { requests: collection.requests.map(sanitizePreRequestActionRecord) } : {}),
+      ...(Array.isArray(collection.folders) ? { folders: collection.folders.map(folder => sanitizePreRequestCollection(folder, depth + 1)) } : {})
+    };
+  }
+
+  function sanitizeWorkspaceBackupPreRequestActions(data) {
+    const settings = sanitizeWorkspaceBackupSettings(data.settings).map(record => {
+      if (!record || record.key !== 'workspaceTabs' || !record.value || typeof record.value !== 'object' || Array.isArray(record.value)) return record;
+      return {
+        ...record,
+        value: {
+          ...record.value,
+          ...(Array.isArray(record.value.tabs) ? { tabs: record.value.tabs.map(tab => tab && typeof tab === 'object' && !Array.isArray(tab) ? { ...tab, request: sanitizePreRequestActionRecord(tab.request) } : tab) } : {})
+        }
+      };
+    });
+    return {
+      ...data,
+      collections: data.collections.map(sanitizePreRequestCollection),
+      history: data.history.map(sanitizePreRequestActionRecord),
+      settings
+    };
+  }
+
   function normalizeResponseExamples(responseExamples) {
     if (responseExamples == null) return [];
     if (!Array.isArray(responseExamples) || responseExamples.length > 20)
@@ -1518,7 +1682,7 @@
     return lines.join('\n');
   }
 
-  function prepareSavedRequest(saved, environment, dataset, allowWrites = false, authScopes = [], vaultSecrets = {}) {
+  function prepareSavedRequest(saved, environment, dataset, allowWrites = false, authScopes = [], vaultSecrets = {}, preRequestOverrides = {}) {
     const method = String(saved?.method || 'GET').toUpperCase();
     if (saved?.tokenRequest) {
       throw Error('Requests de credenciais manuais precisam ser enviadas pelo fluxo de token.');
@@ -1527,7 +1691,7 @@
     if (writeMethods.has(method) && !allowWrites) throw Error('Confirme as chamadas de escrita antes de executar.');
     const provenance = {};
     const resolve = value => {
-      const result = resolveTemplateWithProvenance(value, environment, dataset, vaultSecrets);
+      const result = resolveTemplateWithProvenance(value, environment, dataset, vaultSecrets, preRequestOverrides);
       Object.assign(provenance, result.provenance);
       return result.text;
     };
@@ -1617,11 +1781,12 @@
 
   function createWorkspaceBackup(data, exportedAt = new Date().toISOString()) {
     validateWorkspaceBackupData(data);
+    const safeData = sanitizeWorkspaceBackupPreRequestActions(data);
     return {
       format: 'api-studio-workspace',
       version: 1,
       exportedAt: String(exportedAt),
-      data: Object.fromEntries(workspaceBackupStores.map(store => [store, store === 'settings' ? sanitizeWorkspaceBackupSettings(data[store]) : data[store]]))
+      data: Object.fromEntries(workspaceBackupStores.map(store => [store, safeData[store]]))
     };
   }
 
@@ -1633,7 +1798,7 @@
     if (!backup || typeof backup !== 'object' || Array.isArray(backup) || backup.format !== 'api-studio-workspace') throw Error('Este arquivo não é um backup do Vortix.');
     if (backup.version !== 1) throw Error('Versão de backup não suportada.');
     const counts = validateWorkspaceBackupData(backup.data);
-    const data = { ...backup.data, settings: sanitizeWorkspaceBackupSettings(backup.data.settings) };
+    const data = sanitizeWorkspaceBackupPreRequestActions(backup.data);
     return { data, counts, exportedAt: String(backup.exportedAt || '') };
   }
 
@@ -1944,5 +2109,5 @@
     return makeLocalSecretVault({ salt: saltBytes, key, cryptoProvider, secrets, envelope: { ...envelope, names: [...secrets.keys()] } });
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });
