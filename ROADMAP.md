@@ -256,6 +256,22 @@ Referências: [exportar um ambiente no Postman](https://learning.postman.com/doc
 - [x] Rodar 193 testes Node (192 passaram; 1 teste de symlink foi ignorado por `EPERM` no Windows), sintaxe JavaScript, build Release sem avisos e `git diff --check`.
 - [x] Conferir a interface Scripts, consentimento e persistência após recarga; uma chamada GET com UUID chegou ao mock loopback e retornou HTTP 200.
 
+### 16. Gerar request como cURL
+
+**Status: concluída e validada nesta rodada.**
+
+**Objetivo:** copiar a request atual para PowerShell ou Bash sem enviá-la nem salvá-la.
+
+- [x] Gerar método, URL, Params, headers e body compatíveis com cURL; avisar quando multipart não puder ser copiado.
+- [x] Omitir Auth, body e valores sensíveis por padrão; incluir somente após confirmação explícita.
+- [x] Preservar templates sem resolver valores do ambiente ou do cofre; avisar sobre ações pré-request, arquivos e Cookie jar não exportados.
+- [x] Usar quoting seguro para PowerShell e Bash/zsh.
+- [x] Adicionar prévia acessível e botão de copiar, usando os temas e componentes existentes.
+- [x] Cobrir geração, omissão de segredos, duplicidade de Auth/API Key, templates, quoting e validação de URL com testes.
+- [x] Documentar exemplos e limitações no README.
+- [x] Rodar 213 testes Node (212 passaram; 1 teste de symlink foi ignorado por `EPERM` no Windows), sintaxe JavaScript, build Release sem avisos e `git diff --check`.
+- [x] Conferir o fluxo desktop com Playwright em servidor e banco temporários: Body e Auth omitidos por padrão, aparecem após confirmação e a prévia volta ao modo seguro ao fechar; nenhuma API externa foi chamada.
+
 ## Regra de sequência
 
 Fechamos cada feature com teste, documentação e revisão. Busca, histórico, comparação, HTTPie, schema GraphQL e fluxo PKCE visual foram validados em ambiente local/mock.

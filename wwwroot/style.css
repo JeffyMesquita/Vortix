@@ -162,6 +162,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .request-line { display: flex; align-items: stretch; gap: 0; min-height: 52px; border: 1px solid #3a444f; border-radius: 8px; padding: 6px; background: #20262f; }
 .method-select { width: 88px; flex: 0 0 88px; border: 0; border-right: 1px solid #38414d; border-radius: 6px 0 0 6px; padding: 0 10px; background: #252c35; font-size: 12px; font-weight: 800; }
 .route-input { min-width: 0; flex: 1; border: 0; border-radius: 0; padding: 0 12px; color: #dce4ec; background: transparent; font: 12px var(--app-font-family); }
+.request-curl-button { min-width: 54px; margin-left: 6px; padding-inline: 9px; }
 .send-button { min-width: 94px; margin: 0 0 0 6px; padding: 0 12px; }
 .send-button span { margin-right: 4px; font-size: 12px; }
 input, select, textarea { border: 1px solid #3a434e; border-radius: 6px; color: var(--text); background: #20262f; outline: none; }
@@ -932,6 +933,12 @@ textarea.compact { min-height: 165px; }
 .command-import-dialog textarea { width: 100%; min-height: 150px; resize: vertical; font: 12px/1.55 var(--app-font-family); }
 .command-import-dialog .command-import-error { margin: 0; color: var(--danger); }
 .command-import-dialog .command-import-error[hidden] { display: none; }
+.curl-export-dialog { width: min(760px, calc(100vw - 28px)); }
+.curl-export-dialog .dialog-scroll { gap: 12px; }
+.curl-command-preview { max-height: min(48vh, 460px); min-height: 112px; overflow: auto; border: 1px solid var(--border); border-radius: 7px; margin: 0; padding: 13px 14px; color: var(--text); background: var(--raised, var(--surface)); font: 12px/1.6 var(--app-font-family); white-space: pre-wrap; overflow-wrap: anywhere; }
+.curl-command-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.curl-export-safety { border-left: 2px solid var(--warning); padding-left: 10px; }
+.curl-export-hint:empty { display: none; }
 .auth-inheritance-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; margin: 14px 0 0; }
 .auth-inheritance-row > div { display: grid; gap: 5px; min-width: 0; }
 .auth-inheritance-row select { width: 100%; min-width: 0; }

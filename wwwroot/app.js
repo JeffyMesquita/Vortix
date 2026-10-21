@@ -1959,6 +1959,39 @@ function updateCommandImportUi(){
   byId('command-import-label').textContent=httpie?'Comando HTTPie':'Comando cURL';
   byId('command-import-source').placeholder=httpie?'http GET https://api.example.com/v1/users Accept:application/json page==1':'curl --request GET "https://api.example.com/v1/users" --header "Accept: application/json"';
 }
+function curlRequestFromForm(){
+  const baseUrl=byId('base-url').value.trim(),requestRoute=buildRequestRoute(false,true),bodyMode=normalizeBodyMode(byId('body-mode').value);
+  const url=baseUrl.replace(/\/+$/,'')+(requestRoute?'/'+requestRoute.replace(/^\/+/, ''):'');
+  const graphql=getGraphqlFieldsFromForm(),requestBody=bodyMode==='graphql'?RunnerLogic.buildGraphqlBody(graphql.graphqlQuery,graphql.graphqlVariables,graphql.graphqlOperationName):bodyMode==='multipart'?'':body.value;
+  let headers=bodyModeHeaders(byId('headers').value,bodyMode);
+  if(bodyMode!=='multipart'&&!/^content-type\s*:/im.test(headers))headers=[headers.trim(),(requestBody||bodyMode==='graphql')?'Content-Type: '+bodyModeContentType(bodyMode):''].filter(Boolean).join('\n');
+  return{method:method.value,url,headers,body:requestBody,...resolveFormAuth(),bodyMode,hasPreRequestActions:byId('pre-request-actions-enabled').checked&&getPreRequestActionsFromForm().length>0};
+}
+function updateCurlExportPreview(){
+  const preview=byId('curl-command-preview'),error=byId('curl-export-error'),copy=byId('copy-curl-command'),hint=byId('curl-export-hint');error.hidden=true;error.textContent='';preview.textContent='';copy.disabled=true;hint.textContent='';
+  try{
+    const request=curlRequestFromForm(),generated=RunnerLogic.buildCurlCommand(request,{includeSensitive:byId('curl-include-sensitive').checked,shell:byId('curl-shell').value}),warnings=[...generated.warnings];
+    if(request.bodyMode==='multipart')warnings.push('Body multipart não foi incluído; selecione arquivos e monte o formulário no terminal.');
+    if(request.hasPreRequestActions)warnings.push('Ações pré-request não são executadas no terminal; substitua os templates manualmente.');
+    preview.textContent=generated.command;hint.textContent=warnings.join(' ');copy.disabled=!generated.command;
+  }catch(exception){error.textContent=exception.message||'Não foi possível gerar o comando cURL.';error.hidden=false;}
+}
+function openCurlExportDialog(){
+  byId('curl-include-sensitive').checked=false;updateCurlExportPreview();byId('curl-export-dialog').showModal();byId('curl-shell').focus();
+}
+async function confirmCurlSensitiveMode(){
+  const checkbox=byId('curl-include-sensitive');
+  if(checkbox.checked){
+    const confirmed=await confirmWithDialog({eyebrow:'DADOS SENSÍVEIS',title:'Mostrar dados no cURL?',description:'A prévia incluirá Body, Auth, headers e parâmetros sensíveis desta request.',warning:'Credenciais aparecerão na tela e poderão ser copiadas para o clipboard. Confira quem tem acesso ao computador e ao terminal.',confirmLabel:'Mostrar dados',danger:true});
+    checkbox.checked=confirmed;
+  }
+  updateCurlExportPreview();
+}
+async function copyCurlCommand(){
+  const command=byId('curl-command-preview').textContent.trim();if(!command)return;
+  try{await navigator.clipboard.writeText(command);showToast('Comando cURL copiado','A request não foi enviada nem salva.','success');}
+  catch{showToast('Falha ao copiar cURL','O navegador bloqueou a área de transferência. Selecione o comando na prévia e copie manualmente.','error');}
+}
 function openImportDialog(){byId('command-import-error').hidden=true;byId('command-import-error').textContent='';byId('command-import-source').value='';byId('command-import-format').value='curl';updateCommandImportUi();byId('import-dialog').showModal();byId('command-import-source').focus();}
 function openImportedCommandDraft(){
   const error=byId('command-import-error'),httpie=byId('command-import-format').value==='httpie';error.hidden=true;error.textContent='';
@@ -2976,7 +3009,7 @@ function addEventListeners(){
   byId('add-query-param').onclick=()=>{addQueryParamRow();syncActiveWorkspaceTab(true);};byId('add-response-test').onclick=()=>{addResponseTest();syncActiveWorkspaceTab(true);};
   byId('add-pre-request-action').onclick=addPreRequestAction;byId('pre-request-actions-enabled').addEventListener('change',()=>{updatePreRequestActionsUi();refreshRequestInspector();syncActiveWorkspaceTab(true);});
   byId('response-tests-list').addEventListener('input',()=>renderResponseTestResults([]));byId('response-tests-list').addEventListener('change',()=>renderResponseTestResults([]));
-  byId('add-collection').onclick=addCollection;byId('add-collection-heading').onclick=addCollection;byId('import-collection').onclick=openImportDialog;byId('browse-import-file').onclick=()=>{byId('import-dialog').close();byId('import-collection-file').click();};byId('close-import-dialog').onclick=()=>byId('import-dialog').close();byId('cancel-import-dialog').onclick=()=>byId('import-dialog').close();byId('command-import-format').addEventListener('change',updateCommandImportUi);byId('create-imported-request').onclick=openImportedCommandDraft;byId('import-collection-file').addEventListener('change',importCollectionFile);byId('export-collection').onclick=openExportDialog;byId('export-form').addEventListener('submit',exportCollection);byId('close-export-dialog').onclick=()=>byId('export-dialog').close();byId('cancel-export-dialog').onclick=()=>byId('export-dialog').close();byId('save-collection-request').onclick=openSaveDialog;byId('save-request-form').addEventListener('submit',saveCollectionRequest);byId('close-save-request').onclick=()=>byId('save-request-dialog').close();byId('cancel-save-request').onclick=()=>byId('save-request-dialog').close();
+  byId('add-collection').onclick=addCollection;byId('add-collection-heading').onclick=addCollection;byId('import-collection').onclick=openImportDialog;byId('browse-import-file').onclick=()=>{byId('import-dialog').close();byId('import-collection-file').click();};byId('close-import-dialog').onclick=()=>byId('import-dialog').close();byId('cancel-import-dialog').onclick=()=>byId('import-dialog').close();byId('command-import-format').addEventListener('change',updateCommandImportUi);byId('create-imported-request').onclick=openImportedCommandDraft;byId('import-collection-file').addEventListener('change',importCollectionFile);byId('generate-curl').onclick=openCurlExportDialog;byId('curl-shell').addEventListener('change',updateCurlExportPreview);byId('curl-include-sensitive').addEventListener('change',()=>void confirmCurlSensitiveMode());byId('copy-curl-command').onclick=copyCurlCommand;byId('close-curl-export').onclick=()=>byId('curl-export-dialog').close();byId('cancel-curl-export').onclick=()=>byId('curl-export-dialog').close();byId('curl-export-dialog').addEventListener('close',()=>{byId('curl-include-sensitive').checked=false;updateCurlExportPreview();});byId('export-collection').onclick=openExportDialog;byId('export-form').addEventListener('submit',exportCollection);byId('close-export-dialog').onclick=()=>byId('export-dialog').close();byId('cancel-export-dialog').onclick=()=>byId('export-dialog').close();byId('save-collection-request').onclick=openSaveDialog;byId('save-request-form').addEventListener('submit',saveCollectionRequest);byId('close-save-request').onclick=()=>byId('save-request-dialog').close();byId('cancel-save-request').onclick=()=>byId('save-request-dialog').close();
   byId('export-workspace').onclick=exportWorkspaceBackup;byId('export-encrypted-workspace').onclick=exportEncryptedWorkspaceBackup;byId('restore-workspace').onclick=()=>byId('restore-workspace-file').click();byId('restore-workspace-file').addEventListener('change',restoreWorkspaceBackup);
   byId('protect-existing-secrets').onclick=protectExistingSecrets;
   byId('secret-vault-create').onclick=()=>void createSecretVaultFromUi();byId('secret-vault-unlock').onclick=()=>void unlockSecretVaultFromUi();byId('secret-vault-lock').onclick=()=>void lockSecretVaultFromUi();byId('secret-vault-remove').onclick=()=>void removeSecretVault();byId('secret-vault-add').onclick=event=>void addSecretVaultEntry(event);

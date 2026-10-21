@@ -9,6 +9,35 @@ const test = require('node:test');
 
 const cliPath = path.join(__dirname, 'tools', 'vortix-runner.cjs');
 
+test('request editor exposes safe cURL generation and copy controls', async () => {
+  const html = await fs.readFile(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = await fs.readFile(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const requestStart = app.indexOf('function curlRequestFromForm('), requestEnd = app.indexOf('\nfunction updateCurlExportPreview', requestStart);
+  assert.ok(requestStart >= 0 && requestEnd > requestStart);
+  assert.match(app.slice(requestStart, requestEnd), /bodyModeHeaders\(/);
+  assert.match(html, /id="generate-curl"[^>]*>[^<]*cURL/i);
+  assert.match(html, /<dialog[^>]*id="curl-export-dialog"[^>]*aria-labelledby="curl-export-title"/);
+  assert.match(html, /id="curl-shell"[\s\S]*?<option value="powershell">[\s\S]*?<option value="bash">/);
+  assert.match(html, /id="curl-include-sensitive"[^>]*type="checkbox"/);
+  assert.match(html, /id="curl-command-preview"/);
+  assert.match(app, /function openCurlExportDialog\(/);
+  assert.match(app, /function updateCurlExportPreview\(/);
+  assert.match(app, /generate-curl'\)\.onclick=openCurlExportDialog/);
+  assert.match(app, /confirmWithDialog\(\{[\s\S]*?includeSensitive/);
+  const copyStart = app.indexOf('async function copyCurlCommand('), copyEnd = app.indexOf('\nfunction openImportDialog', copyStart);
+  assert.ok(copyStart >= 0 && copyEnd > copyStart);
+  assert.match(app.slice(copyStart, copyEnd), /navigator\.clipboard\.writeText\(command\)/);
+});
+
+test('README documents cURL export safety and shell formats', async () => {
+  const readme = await fs.readFile(path.join(__dirname, 'README.md'), 'utf8');
+  assert.match(readme, /## Gerar comando cURL/);
+  assert.match(readme, /PowerShell \(Windows\)[\s\S]*Bash \/ zsh/);
+  assert.match(readme, /Body.*Auth.*sensíveis.*omitidos por padrão/i);
+  assert.match(readme, /templates.*não são resolvidos/i);
+  assert.match(readme, /não envia a request nem salva/i);
+});
+
 function runCli(args, extraEnv = {}) {
   return new Promise(resolve => {
     const child = spawn(process.execPath, [cliPath, ...args], { cwd: __dirname, env: { ...process.env, ...extraEnv } });

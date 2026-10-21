@@ -2553,3 +2553,256 @@ test('Exporta variáveis sensíveis como Postman secret somente quando usuário 
   assert.doesNotMatch(JSON.stringify(exported), /COOKIE_SENTINEL|PRIVATE_KEY_SENTINEL|PRIVATE_KEY_SPACE_SENTINEL|PRIVATE_DOT_PEM_SENTINEL/);
   assert.equal(importPostmanEnvironment(exported).variables.token, 'TOKEN_SENTINEL');
 });
+
+test('buildCurlCommand redacts auth, sensitive headers and query params, and the whole body by default', () => {
+  const { buildCurlCommand } = runnerLogic();
+  const marker = 'CURL_SECRET_SENTINEL_4f8c';
+  const result = buildCurlCommand({
+    method: 'post',
+    url: `https://api.example.test/v1/items?page=2&token=${marker}&region=south`,
+    headers: `Content-Type: application/json\nAuthorization: Bearer ${marker}\nX-Api-Key: ${marker}\nX-Trace: trace-1`,
+    body: `{"token":"${marker}"}`,
+    authType: 'bearer',
+    bearerToken: marker
+  }, { shell: 'bash' });
+
+  assert.equal(result.command, "curl --request POST --url 'https://api.example.test/v1/items?page=2&region=south' --header 'Content-Type: application/json' --header 'X-Trace: trace-1'");
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(marker));
+  assert.ok(result.warnings.some(warning => /autentica/i.test(warning)), 'auth omission should be announced');
+  assert.ok(result.warnings.some(warning => /header/i.test(warning)), 'sensitive header omission should be announced');
+  assert.ok(result.warnings.some(warning => /query/i.test(warning)), 'sensitive query omission should be announced');
+  assert.ok(result.warnings.some(warning => /body/i.test(warning)), 'body omission should be announced');
+  assert.doesNotMatch(result.warnings.join(' '), /includeSensitive|true/);
+});
+
+test('buildCurlCommand also omits the configured API Key query name when it is generic', () => {
+  const { buildCurlCommand } = runnerLogic();
+  const key = 'GENERIC_QUERY_KEY_CANARY';
+  const result = buildCurlCommand({
+    method: 'GET', url: `https://api.example.test/users?page=2&key=${key}`,
+    authType: 'apiKey', apiKeyName: 'key', apiKeyLocation: 'query', apiKeyValue: key
+  }, { shell: 'bash' });
+  assert.equal(result.command, "curl --request GET --url 'https://api.example.test/users?page=2'");
+  assert.doesNotMatch(result.command, new RegExp(key));
+  assert.ok(result.warnings.some(warning => /query/i.test(warning)));
+});
+
+test('buildCurlCommand omits a configured API Key header even when its name looks ordinary', () => {
+  const { buildCurlCommand } = runnerLogic();
+  const key = 'CUSTOM_HEADER_KEY_CANARY';
+  const result = buildCurlCommand({
+    method: 'GET', url: 'https://api.example.test/users',
+    headers: `X-Subscription: ${key}\nAccept: application/json`,
+    authType: 'apiKey', apiKeyName: 'X-Subscription', apiKeyLocation: 'header', apiKeyValue: key
+  }, { shell: 'bash' });
+  assert.equal(result.command, "curl --request GET --url 'https://api.example.test/users' --header 'Accept: application/json'");
+  assert.doesNotMatch(result.command, new RegExp(key));
+  assert.ok(result.warnings.some(warning => /header/i.test(warning)));
+});
+
+test('buildCurlCommand includes opted-in auth, headers, API key, and body with shell-specific quoting', () => {
+  const { buildCurlCommand } = runnerLogic();
+  const quoteBash = value => "'" + String(value).replaceAll("'", "'\\''") + "'";
+  const quotePowerShell = value => "'" + String(value).replaceAll("'", "''") + "'";
+  const body = '{"name":"Ana\'s"}';
+  const request = {
+    method: 'PATCH',
+    url: 'https://api.example.test/v1/items?region=south',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    authType: 'basic',
+    basicUsername: 'alice',
+    basicPassword: 'p@ss'
+  };
+
+  const bash = buildCurlCommand(request, { includeSensitive: true, shell: 'bash' });
+  assert.ok(bash.command.startsWith("curl --request PATCH --url 'https://api.example.test/v1/items?region=south'"));
+  assert.ok(bash.command.includes("--user 'alice:p@ss'"));
+  assert.ok(bash.command.includes("--header 'Content-Type: application/json'"));
+  assert.doesNotMatch(bash.command, /Authorization: Basic/);
+  assert.ok(bash.command.includes('--data-raw ' + quoteBash(body)));
+  assert.deepEqual(bash.warnings, []);
+
+  const powershell = buildCurlCommand(request, { includeSensitive: true, shell: 'powershell' });
+  assert.ok(powershell.command.startsWith('curl.exe '));
+  assert.ok(powershell.command.includes('--data-raw ' + quotePowerShell(body)));
+
+  const apiKeyHeader = buildCurlCommand({
+    method: 'GET', url: 'https://api.example.test/v1/items', headers: 'Accept: application/json',
+    authType: 'apiKey', apiKeyName: 'X-API-Key', apiKeyLocation: 'header', apiKeyValue: 'key with space'
+  }, { includeSensitive: true, shell: 'bash' });
+  assert.ok(apiKeyHeader.command.includes("--header 'X-API-Key: key with space'"));
+
+  const apiKeyQuery = buildCurlCommand({
+    method: 'GET', url: 'https://api.example.test/v1/items', headers: 'Accept: application/json',
+    authType: 'apiKey', apiKeyName: 'api key', apiKeyLocation: 'query', apiKeyValue: 'a&b c'
+  }, { includeSensitive: true, shell: 'bash' });
+  assert.equal(apiKeyQuery.command, "curl --request GET --url 'https://api.example.test/v1/items?api%20key=a%26b%20c' --header 'Accept: application/json'");
+
+  const redactedQuery = buildCurlCommand({
+    method: 'GET', url: 'https://api.example.test/v1/items', headers: 'Accept: application/json',
+    authType: 'apiKey', apiKeyName: 'api key', apiKeyLocation: 'query', apiKeyValue: 'a&b c'
+  }, { shell: 'bash' });
+  assert.equal(redactedQuery.command, "curl --request GET --url 'https://api.example.test/v1/items' --header 'Accept: application/json'");
+  assert.ok(redactedQuery.warnings.some(warning => /autentica/i.test(warning)));
+});
+
+test('buildCurlCommand quotes command substitutions and quotes safely for Bash and PowerShell', () => {
+  const { buildCurlCommand } = runnerLogic();
+  const quoteBash = value => "'" + String(value).replaceAll("'", "'\\''") + "'";
+  const quotePowerShell = value => "'" + String(value).replaceAll("'", "''") + "'";
+  const headerValue = 'a\'b $(touch nope) `id` "c"';
+  const body = 'O\'Brien $(touch nope) `whoami` "quoted"';
+  const request = { method: 'POST', url: 'https://api.example.test/v1/items', headers: `X-Test: ${headerValue}`, body };
+
+  const bash = buildCurlCommand(request, { includeSensitive: true, shell: 'bash' });
+  assert.ok(bash.command.startsWith('curl --request POST --url '));
+  assert.ok(bash.command.includes('--header ' + quoteBash('X-Test: ' + headerValue)));
+  assert.ok(bash.command.includes('--data-raw ' + quoteBash(body)));
+
+  const powershell = buildCurlCommand(request, { includeSensitive: true, shell: 'powershell' });
+  assert.ok(powershell.command.startsWith('curl.exe --request POST --url '));
+  assert.ok(powershell.command.includes('--header ' + quotePowerShell('X-Test: ' + headerValue)));
+  assert.ok(powershell.command.includes('--data-raw ' + quotePowerShell(body)));
+});
+
+test('buildCurlCommand validates the HTTP method allowlist and absolute HTTP(S) URLs', () => {
+  const { buildCurlCommand } = runnerLogic();
+  const valid = { method: 'GET', url: 'https://api.example.test/v1/items' };
+
+  assert.throws(() => buildCurlCommand({ ...valid, method: 'TRACE' }), /método/i);
+  assert.throws(() => buildCurlCommand({ ...valid, url: '/v1/items' }), /absoluta|HTTP/i);
+  assert.throws(() => buildCurlCommand({ ...valid, url: 'ftp://api.example.test/v1/items' }), /HTTP/i);
+  assert.throws(() => buildCurlCommand({ ...valid, url: 'https://user:pass@api.example.test/v1/items' }), /credenciais/i);
+  assert.throws(() => buildCurlCommand({ ...valid, url: 'https://api.example.test/v1/items#fragment' }), /fragmento/i);
+  assert.throws(() => buildCurlCommand({ ...valid, body: '{}' }), /body/i);
+});
+
+test('buildCurlCommand preserves Vortix templates and warns that they are not resolved outside the app', () => {
+  const { buildCurlCommand } = runnerLogic();
+  const result = buildCurlCommand({
+    method: 'POST',
+    url: 'https://api.example.test/v1/{{path}}?id={{id}}',
+    headers: 'X-Tenant: {{tenant}}',
+    body: '{"id":"{{id}}"}',
+    authType: 'apiKey', apiKeyName: 'X-API-Key', apiKeyLocation: 'header', apiKeyValue: '{{apiKey}}'
+  }, { includeSensitive: true, shell: 'bash' });
+
+  assert.ok(result.command.includes("--url 'https://api.example.test/v1/{{path}}?id={{id}}'"));
+  assert.ok(result.command.includes("--header 'X-Tenant: {{tenant}}'"));
+  assert.ok(result.command.includes("--header 'X-API-Key: {{apiKey}}'"));
+  assert.ok(result.command.includes('--data-raw \'{"id":"{{id}}"}\''));
+  assert.ok(result.warnings.some(warning => /template.*vortix|vortix.*template/i.test(warning)));
+});
+
+test('buildCurlCommand preserves pure and partial base URL templates with string warnings', () => {
+  const { buildCurlCommand } = runnerLogic();
+  for (const url of ['{{baseUrl}}', '{{baseUrl}}/v1/items', '{{baseUrl}}/v1/items?page={{page}}']) {
+    const result = buildCurlCommand({ method: 'GET', url }, { shell: 'bash' });
+    assert.equal(result.command, "curl --request GET --url '" + url + "'");
+    assert.ok(Array.isArray(result.warnings));
+    assert.ok(result.warnings.every(warning => typeof warning === 'string'));
+    assert.ok(result.warnings.some(warning => /template/i.test(warning) && /substitu/i.test(warning) && /vortix/i.test(warning)));
+    assert.doesNotMatch(result.command, /Authorization|Basic/);
+  }
+});
+
+test('buildCurlCommand validates literal HTTP(S) structure after safely masking URL templates', () => {
+  const { buildCurlCommand } = runnerLogic();
+  const url = 'https://{{tenant}}.api.example.test/v1/{{path}}?id={{id}}&token={{token}}';
+  const result = buildCurlCommand({ method: 'GET', url }, { includeSensitive: true, shell: 'bash' });
+  assert.equal(result.command, "curl --request GET --url '" + url + "'");
+  assert.ok(result.warnings.some(warning => /template/i.test(warning)));
+
+  const port = buildCurlCommand({ method: 'GET', url: 'https://api.example.test:{{port}}/v1' }, { shell: 'bash' });
+  assert.equal(port.command, "curl --request GET --url 'https://api.example.test:{{port}}/v1'");
+});
+
+test('buildCurlCommand rejects malformed or unsafe URL templates without masking credentials or fragments', () => {
+  const { buildCurlCommand } = runnerLogic();
+  const request = url => ({ method: 'GET', url });
+
+  assert.throws(() => buildCurlCommand(request('https://{{user}}:{{pass}}@api.example.test/x'), { includeSensitive: true }), /credenciais/i);
+  assert.throws(() => buildCurlCommand(request('https://{{userinfo}}@api.example.test/x'), { includeSensitive: true }), /credenciais/i);
+  assert.throws(() => buildCurlCommand(request('https://api.example.test/{{path}}#fragment')), /fragmento/i);
+  assert.throws(() => buildCurlCommand(request('{{baseUrl}}#fragment')), /fragmento/i);
+  assert.throws(() => buildCurlCommand(request('{{baseUrl}}@api.example.test')), /credenciais/i);
+  assert.throws(() => buildCurlCommand(request('{{scheme}}://api.example.test/x')), /esquema/i);
+  assert.throws(() => buildCurlCommand(request('{{baseUrl}}evil.example.test')), /posição insegura/i);
+  assert.throws(() => buildCurlCommand(request('https://api.example.test/{{oops')), /malformado/i);
+  assert.throws(() => buildCurlCommand(request('https://api.example.test/{{a b}}')), /template/i);
+});
+
+test('buildCurlCommand keeps Basic credential templates verbatim in --user and never base64-encodes placeholders', () => {
+  const { buildCurlCommand } = runnerLogic();
+  const request = {
+    method: 'POST', url: 'https://api.example.test/oauth/token', body: 'grant_type=client_credentials',
+    authType: 'basic', basicUsername: '{{clientId}}', basicPassword: '{{secret}}'
+  };
+  const bash = buildCurlCommand(request, { includeSensitive: true, shell: 'bash' });
+  assert.ok(bash.command.includes("--user '{{clientId}}:{{secret}}'"));
+  assert.doesNotMatch(bash.command, /Authorization: Basic/);
+  assert.equal(bash.command.includes(Buffer.from('{{clientId}}:{{secret}}', 'utf8').toString('base64')), false);
+  assert.ok(bash.warnings.some(warning => /template/i.test(warning) && /vortix/i.test(warning)));
+
+  const powershell = buildCurlCommand(request, { includeSensitive: true, shell: 'powershell' });
+  assert.ok(powershell.command.includes("--user '{{clientId}}:{{secret}}'"));
+
+  const literal = buildCurlCommand({
+    method: 'GET', url: 'https://api.example.test/me',
+    authType: 'basic', basicUsername: "o'neil", basicPassword: 'p@ss $(touch nope)'
+  }, { includeSensitive: true, shell: 'bash' });
+  assert.ok(literal.command.includes("--user 'o'\\''neil:p@ss $(touch nope)'"));
+});
+
+test('buildCurlCommand fails instead of emitting manual Authorization that the proxy rejects', () => {
+  const { buildCurlCommand } = runnerLogic();
+  const request = {
+    method: 'GET', url: 'https://api.example.test/me',
+    headers: 'Authorization: Bearer header-secret\nAccept: application/json',
+    authType: 'bearer', bearerToken: 'configured-secret'
+  };
+  assert.throws(() => buildCurlCommand(request, { includeSensitive: true, shell: 'bash' }), error => {
+    assert.match(error.message, /Authorization/i);
+    assert.match(error.message, /proxy|Auth|Headers/i);
+    assert.doesNotMatch(error.message, /header-secret|configured-secret/);
+    return true;
+  });
+  assert.throws(() => buildCurlCommand({
+    method: 'GET', url: 'https://api.example.test/me', headers: 'authorization: Bearer manual-secret'
+  }, { includeSensitive: true }), /Authorization/i);
+
+  const safe = buildCurlCommand(request, { shell: 'bash' });
+  assert.doesNotMatch(safe.command, /header-secret|configured-secret|Authorization/i);
+  assert.ok(safe.warnings.some(warning => /header/i.test(warning)));
+});
+
+test('buildCurlCommand rejects case-insensitive API key header duplication that the proxy blocks', () => {
+  const { buildCurlCommand } = runnerLogic();
+  const request = {
+    method: 'GET', url: 'https://api.example.test/items',
+    headers: 'x-api-key: manual-key\nAccept: application/json',
+    authType: 'apiKey', apiKeyName: 'X-API-Key', apiKeyLocation: 'header', apiKeyValue: 'configured-key'
+  };
+  assert.throws(() => buildCurlCommand(request, { includeSensitive: true, shell: 'bash' }), error => {
+    assert.match(error.message, /API Key/i);
+    assert.match(error.message, /header|Headers/i);
+    assert.doesNotMatch(error.message, /manual-key|configured-key/);
+    return true;
+  });
+
+  const safe = buildCurlCommand(request, { shell: 'bash' });
+  assert.doesNotMatch(safe.command, /manual-key|configured-key|API-Key/i);
+  assert.ok(safe.warnings.some(warning => /header/i.test(warning)));
+});
+
+test('buildCurlCommand serializes non-multipart bodies literally and warns about remaining templates', () => {
+  const { buildCurlCommand } = runnerLogic();
+  const quoteBash = value => "'" + String(value).replaceAll("'", "'\\''") + "'";
+  const body = '{"text":"O\'Brien {{name}}","nested":{"value":"x&y"}}';
+  const result = buildCurlCommand({
+    method: 'POST', url: 'https://api.example.test/items', body, bodyMode: 'json'
+  }, { includeSensitive: true, shell: 'bash' });
+  assert.ok(result.command.includes('--data-raw ' + quoteBash(body)));
+  assert.ok(result.warnings.some(warning => /template/i.test(warning)));
+});
