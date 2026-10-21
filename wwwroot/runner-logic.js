@@ -1479,6 +1479,25 @@
     }
   }
 
+  function appendOpenApiAcceptTypes(acceptTypes, value, warn) {
+    for (const type of parseOpenApiMediaTypes(value)) {
+      if (openApiIsValidMediaType(type, true)) acceptTypes.push(type);
+      else warn('Tipo de mídia inválido foi omitido do OpenAPI.');
+    }
+  }
+
+  function appendOpenApiHeaderParameter(parameters, seenHeaders, name, warn) {
+    const lower = name.toLowerCase();
+    if (['authorization', 'proxy-authorization', 'cookie', 'set-cookie'].includes(lower) || isSensitiveVariableName(name)) {
+      warn('Header sensível foi omitido do OpenAPI.');
+      return;
+    }
+    if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)) { warn('Header com nome inválido foi omitido do OpenAPI.'); return; }
+    if (seenHeaders.has(lower)) return;
+    seenHeaders.add(lower);
+    parameters.push({ name, in: 'header', required: false, schema: { type: 'string' } });
+  }
+
   function readOpenApiHeaderParameters(parameters, headerEntries, warn) {
     const seenHeaders = new Set();
     const acceptTypes = [];
@@ -1486,10 +1505,7 @@
     for (const [name, value] of headerEntries) {
       const lower = name.toLowerCase();
       if (lower === 'accept') {
-        for (const type of parseOpenApiMediaTypes(value)) {
-          if (openApiIsValidMediaType(type, true)) acceptTypes.push(type);
-          else warn('Tipo de mídia inválido foi omitido do OpenAPI.');
-        }
+        appendOpenApiAcceptTypes(acceptTypes, value, warn);
         continue;
       }
       if (lower === 'content-type') {
@@ -1498,14 +1514,7 @@
         else { warn('Tipo de mídia inválido foi omitido do OpenAPI.'); contentType = ''; }
         continue;
       }
-      if (['authorization', 'proxy-authorization', 'cookie', 'set-cookie'].includes(lower) || isSensitiveVariableName(name)) {
-        warn('Header sensível foi omitido do OpenAPI.');
-        continue;
-      }
-      if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)) { warn('Header com nome inválido foi omitido do OpenAPI.'); continue; }
-      if (seenHeaders.has(lower)) continue;
-      seenHeaders.add(lower);
-      parameters.push({ name, in: 'header', required: false, schema: { type: 'string' } });
+      appendOpenApiHeaderParameter(parameters, seenHeaders, name, warn);
     }
     return { acceptTypes, contentType };
   }
