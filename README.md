@@ -529,6 +529,8 @@ No seletor **Formato**, escolha **HTTPie**. A prévia usa o terminal escolhido a
 
 HTTPie recebe o body literal por `--raw`. Requests com Body podem ser importadas de volta pelo Vortix; comandos `--auth` continuam exigindo configuração manual por segurança. A sintaxe oficial `--raw` envia o texto sem transformação ([documentação do HTTPie](https://httpie.io/docs/cli/request-data-via---raw)).
 
+Headers com valor vazio usam a forma `Nome;`. API Keys em query são codificadas diretamente na URL.
+
 Exemplo:
 
 ~~~sh
