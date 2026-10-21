@@ -9,7 +9,7 @@ const test = require('node:test');
 
 const cliPath = path.join(__dirname, 'tools', 'vortix-runner.cjs');
 
-test('request editor exposes safe cURL generation and copy controls', async () => {
+test('request editor exposes safe cURL and HTTPie generation and copy controls', async () => {
   const html = await fs.readFile(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
   const app = await fs.readFile(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
   const requestStart = app.indexOf('function curlRequestFromForm('), requestEnd = app.indexOf('\nfunction updateCurlExportPreview', requestStart);
@@ -18,10 +18,18 @@ test('request editor exposes safe cURL generation and copy controls', async () =
   assert.match(html, /id="generate-curl"[^>]*>[^<]*cURL/i);
   assert.match(html, /<dialog[^>]*id="curl-export-dialog"[^>]*aria-labelledby="curl-export-title"/);
   assert.match(html, /id="curl-shell"[\s\S]*?<option value="powershell">[\s\S]*?<option value="bash">/);
+  assert.match(html, /id="curl-format"[\s\S]*?<option value="curl">cURL<\/option>[\s\S]*?<option value="httpie">HTTPie<\/option>/);
   assert.match(html, /id="curl-include-sensitive"[^>]*type="checkbox"/);
   assert.match(html, /id="curl-command-preview"/);
   assert.match(app, /function openCurlExportDialog\(/);
   assert.match(app, /function updateCurlExportPreview\(/);
+  assert.match(app, /RunnerLogic\.buildHttpieCommand/);
+  assert.match(app, /hasCookieJar/);
+  assert.match(app, /Cookie jar do ambiente ativo não é exportado/);
+  assert.match(app, /curl-format/);
+  assert.match(app, /title:'Mostrar dados no '\+formatName\+'/);
+  assert.match(app, /Não foi possível gerar o comando '\+formatName/);
+  assert.match(html, /id="close-curl-export"[^>]*aria-label="Fechar prévia de comando"/);
   assert.match(app, /generate-curl'\)\.onclick=openCurlExportDialog/);
   assert.match(app, /confirmWithDialog\(\{[\s\S]*?includeSensitive/);
   const copyStart = app.indexOf('async function copyCurlCommand('), copyEnd = app.indexOf('\nfunction openImportDialog', copyStart);
@@ -36,6 +44,14 @@ test('README documents cURL export safety and shell formats', async () => {
   assert.match(readme, /Body.*Auth.*sensíveis.*omitidos por padrão/i);
   assert.match(readme, /templates.*não são resolvidos/i);
   assert.match(readme, /não envia a request nem salva/i);
+});
+
+test('README documents safe HTTPie export and its raw-body format', async () => {
+  const readme = await fs.readFile(path.join(__dirname, 'README.md'), 'utf8');
+  assert.match(readme, /### Gerar comando HTTPie/);
+  assert.match(readme, /--raw/);
+  assert.match(readme, /sensíveis.*omitidos por padrão/i);
+  assert.match(readme, /httpie\.io\/docs\/cli\/request-data-via---raw/);
 });
 
 function runCli(args, extraEnv = {}) {

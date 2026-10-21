@@ -166,6 +166,40 @@ test('rejects HTTPie Basic Auth, sensitive fields, file references, and unsafe U
   });
 });
 
+test('parses HTTPie --raw literal bodies in separate and inline forms without reading files', () => {
+  const { parseHttpieCommand } = runnerLogic();
+  const separate = parseHttpieCommand("http --raw 'Hello, world!' pie.dev/post");
+  assert.deepEqual(separate, {
+    method: 'POST',
+    url: 'http://pie.dev/post',
+    headers: [],
+    body: 'Hello, world!',
+    bearerToken: ''
+  });
+
+  const inline = parseHttpieCommand('http --raw="{\\"ok\\":true}" POST https://api.example.test/v1/check Content-Type:application/json');
+  assert.deepEqual(inline, {
+    method: 'POST',
+    url: 'https://api.example.test/v1/check',
+    headers: [['Content-Type', 'application/json']],
+    body: '{"ok":true}',
+    bearerToken: ''
+  });
+
+  const shellQuoted = parseHttpieCommand('http --raw={"ok":true} POST https://api.example.test/v1/check');
+  assert.equal(shellQuoted.body, '{ok:true}');
+});
+
+test('rejects HTTPie --raw combined with fields or with bodyless methods', () => {
+  const { parseHttpieCommand } = runnerLogic();
+  assert.throws(() => parseHttpieCommand("http --raw 'x' POST https://api.example.test/v1/check name=Ana"), /--raw.*campo|campo.*--raw/i);
+  assert.throws(() => parseHttpieCommand("http POST https://api.example.test/v1/check name=Ana --raw 'x'"), /--raw.*campo|campo.*--raw/i);
+  assert.throws(() => parseHttpieCommand("http --raw 'x' --form POST https://api.example.test/v1/check"), /--raw.*--form|--form.*--raw/i);
+  for (const method of ['GET', 'HEAD', 'OPTIONS']) {
+    assert.throws(() => parseHttpieCommand(`http ${method} --raw 'x' https://api.example.test/v1/check`), /body/i);
+  }
+});
+
 test('command import dialog exposes the HTTPie parser option', () => {
   const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
@@ -2805,4 +2839,215 @@ test('buildCurlCommand serializes non-multipart bodies literally and warns about
   }, { includeSensitive: true, shell: 'bash' });
   assert.ok(result.command.includes('--data-raw ' + quoteBash(body)));
   assert.ok(result.warnings.some(warning => /template/i.test(warning)));
+});
+
+test('buildHttpieCommand redacts auth, sensitive headers and query params, and the whole body by default', () => {
+  const { buildHttpieCommand } = runnerLogic();
+  const marker = 'HTTPIE_SECRET_SENTINEL_2d91';
+  const result = buildHttpieCommand({
+    method: 'post',
+    url: `https://api.example.test/v1/items?page=2&token=${marker}&region=south`,
+    headers: `Content-Type: application/json\nAuthorization: Bearer ${marker}\nX-Api-Key: ${marker}\nX-Trace: trace-1`,
+    body: `{"token":"${marker}"}`,
+    authType: 'bearer',
+    bearerToken: marker
+  }, { shell: 'bash' });
+
+  assert.equal(result.command, "http POST 'https://api.example.test/v1/items?page=2&region=south' 'Content-Type: application/json' 'X-Trace: trace-1'");
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(marker));
+  assert.ok(result.warnings.some(warning => /autentica/i.test(warning)), 'auth omission should be announced');
+  assert.ok(result.warnings.some(warning => /header/i.test(warning)), 'sensitive header omission should be announced');
+  assert.ok(result.warnings.some(warning => /query/i.test(warning)), 'sensitive query omission should be announced');
+  assert.ok(result.warnings.some(warning => /body/i.test(warning)), 'body omission should be announced');
+});
+
+test('buildHttpieCommand also omits the configured API Key name from query and headers by default', () => {
+  const { buildHttpieCommand } = runnerLogic();
+  const queryKey = 'HTTPIE_GENERIC_QUERY_KEY';
+  const query = buildHttpieCommand({
+    method: 'GET', url: `https://api.example.test/users?page=2&key=${queryKey}`,
+    authType: 'apiKey', apiKeyName: 'key', apiKeyLocation: 'query', apiKeyValue: queryKey
+  }, { shell: 'bash' });
+  assert.equal(query.command, "http GET 'https://api.example.test/users?page=2'");
+  assert.doesNotMatch(query.command, new RegExp(queryKey));
+  assert.ok(query.warnings.some(warning => /query/i.test(warning)));
+
+  const headerKey = 'HTTPIE_CUSTOM_HEADER_KEY';
+  const header = buildHttpieCommand({
+    method: 'GET', url: 'https://api.example.test/users',
+    headers: `X-Subscription: ${headerKey}\nAccept: application/json`,
+    authType: 'apiKey', apiKeyName: 'X-Subscription', apiKeyLocation: 'header', apiKeyValue: headerKey
+  }, { shell: 'bash' });
+  assert.equal(header.command, "http GET 'https://api.example.test/users' 'Accept: application/json'");
+  assert.doesNotMatch(header.command, new RegExp(headerKey));
+  assert.ok(header.warnings.some(warning => /header/i.test(warning)));
+});
+
+test('buildHttpieCommand includes opted-in auth, headers, API key, and body with shell-specific quoting', () => {
+  const { buildHttpieCommand } = runnerLogic();
+  const body = '{"name":"Ana\'s"}';
+  const request = {
+    method: 'PATCH',
+    url: 'https://api.example.test/v1/items?region=south',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    authType: 'basic',
+    basicUsername: 'alice',
+    basicPassword: 'p@ss'
+  };
+
+  const bash = buildHttpieCommand(request, { includeSensitive: true, shell: 'bash' });
+  assert.equal(bash.command, "http --auth 'alice:p@ss' --raw '{\"name\":\"Ana'\\''s\"}' PATCH 'https://api.example.test/v1/items?region=south' 'Content-Type: application/json'");
+  assert.deepEqual(bash.warnings, []);
+
+  const powershell = buildHttpieCommand(request, { includeSensitive: true, shell: 'powershell' });
+  assert.equal(powershell.command, "http.exe --auth 'alice:p@ss' --raw '{\"name\":\"Ana''s\"}' PATCH 'https://api.example.test/v1/items?region=south' 'Content-Type: application/json'");
+
+  const apiKeyHeader = buildHttpieCommand({
+    method: 'GET', url: 'https://api.example.test/v1/items', headers: 'Accept: application/json',
+    authType: 'apiKey', apiKeyName: 'X-API-Key', apiKeyLocation: 'header', apiKeyValue: 'key with space'
+  }, { includeSensitive: true, shell: 'bash' });
+  assert.equal(apiKeyHeader.command, "http GET 'https://api.example.test/v1/items' 'Accept: application/json' 'X-API-Key: key with space'");
+
+  const apiKeyQuery = buildHttpieCommand({
+    method: 'GET', url: 'https://api.example.test/v1/items', headers: 'Accept: application/json',
+    authType: 'apiKey', apiKeyName: 'api key', apiKeyLocation: 'query', apiKeyValue: 'a&b c'
+  }, { includeSensitive: true, shell: 'bash' });
+  assert.equal(apiKeyQuery.command, "http GET 'https://api.example.test/v1/items' 'Accept: application/json' 'api key==a&b c'");
+
+  const redactedQuery = buildHttpieCommand({
+    method: 'GET', url: 'https://api.example.test/v1/items', headers: 'Accept: application/json',
+    authType: 'apiKey', apiKeyName: 'api key', apiKeyLocation: 'query', apiKeyValue: 'a&b c'
+  }, { shell: 'bash' });
+  assert.equal(redactedQuery.command, "http GET 'https://api.example.test/v1/items' 'Accept: application/json'");
+  assert.ok(redactedQuery.warnings.some(warning => /autentica/i.test(warning)));
+});
+
+test('buildHttpieCommand quotes command substitutions and quotes safely for Bash and PowerShell', () => {
+  const { buildHttpieCommand } = runnerLogic();
+  const headerValue = 'a\'b $(touch nope) `id` "c"';
+  const body = 'O\'Brien $(touch nope) `whoami` "quoted"';
+  const request = { method: 'POST', url: 'https://api.example.test/v1/items', headers: `X-Test: ${headerValue}`, body };
+
+  const bash = buildHttpieCommand(request, { includeSensitive: true, shell: 'bash' });
+  assert.equal(bash.command, "http --raw 'O'\\''Brien $(touch nope) `whoami` \"quoted\"' POST 'https://api.example.test/v1/items' 'X-Test: a'\\''b $(touch nope) `id` \"c\"'");
+
+  const powershell = buildHttpieCommand(request, { includeSensitive: true, shell: 'powershell' });
+  assert.equal(powershell.command, "http.exe --raw 'O''Brien $(touch nope) `whoami` \"quoted\"' POST 'https://api.example.test/v1/items' 'X-Test: a''b $(touch nope) `id` \"c\"'");
+});
+
+test('buildHttpieCommand round-trips safe requests without secrets through the HTTPie importer', () => {
+  const { buildHttpieCommand, parseHttpieCommand } = runnerLogic();
+  const request = {
+    method: 'PATCH',
+    url: 'https://api.example.test/v1/items/42?notify=true',
+    headers: 'Accept: application/json\nContent-Type: application/json',
+    body: ''
+  };
+  const generated = buildHttpieCommand(request, { shell: 'bash' });
+  assert.equal(generated.command, "http PATCH 'https://api.example.test/v1/items/42?notify=true' 'Accept: application/json' 'Content-Type: application/json'");
+  assert.deepEqual(generated.warnings, []);
+  assert.deepEqual(parseHttpieCommand(generated.command), {
+    method: 'PATCH',
+    url: 'https://api.example.test/v1/items/42?notify=true',
+    headers: [['Accept', 'application/json'], ['Content-Type', 'application/json']],
+    body: '',
+    bearerToken: ''
+  });
+
+  const withBody = buildHttpieCommand({
+    method: 'POST',
+    url: 'https://api.example.test/v1/items',
+    headers: 'Content-Type: application/json',
+    body: '{"name":"Nova"}'
+  }, { includeSensitive: true, shell: 'bash' });
+  assert.equal(withBody.command, "http --raw '{\"name\":\"Nova\"}' POST 'https://api.example.test/v1/items' 'Content-Type: application/json'");
+  assert.deepEqual(parseHttpieCommand(withBody.command), {
+    method: 'POST',
+    url: 'https://api.example.test/v1/items',
+    headers: [['Content-Type', 'application/json']],
+    body: '{"name":"Nova"}',
+    bearerToken: ''
+  });
+});
+
+test('buildHttpieCommand preserves Vortix templates literally and warns about them', () => {
+  const { buildHttpieCommand } = runnerLogic();
+  const result = buildHttpieCommand({
+    method: 'POST',
+    url: 'https://api.example.test/v1/{{path}}?id={{id}}',
+    headers: 'X-Tenant: {{tenant}}',
+    body: '{"id":"{{id}}"}',
+    authType: 'apiKey', apiKeyName: 'X-API-Key', apiKeyLocation: 'header', apiKeyValue: '{{apiKey}}'
+  }, { includeSensitive: true, shell: 'bash' });
+
+  assert.equal(result.command, "http --raw '{\"id\":\"{{id}}\"}' POST 'https://api.example.test/v1/{{path}}?id={{id}}' 'X-Tenant: {{tenant}}' 'X-API-Key: {{apiKey}}'");
+  assert.ok(result.warnings.some(warning => /template/i.test(warning) && /vortix/i.test(warning)));
+
+  for (const url of ['{{baseUrl}}', '{{baseUrl}}/v1/items', '{{baseUrl}}/v1/items?page={{page}}']) {
+    const generated = buildHttpieCommand({ method: 'GET', url }, { shell: 'bash' });
+    assert.equal(generated.command, "http GET '" + url + "'");
+    assert.ok(generated.warnings.some(warning => /template/i.test(warning) && /substitu/i.test(warning) && /vortix/i.test(warning)));
+  }
+
+  const basic = buildHttpieCommand({
+    method: 'POST', url: 'https://api.example.test/oauth/token', body: 'grant_type=client_credentials',
+    authType: 'basic', basicUsername: '{{clientId}}', basicPassword: '{{secret}}'
+  }, { includeSensitive: true, shell: 'bash' });
+  assert.ok(basic.command.includes("--auth '{{clientId}}:{{secret}}'"));
+  assert.ok(basic.warnings.some(warning => /template/i.test(warning) && /vortix/i.test(warning)));
+});
+
+test('buildHttpieCommand validates methods, URLs, and proxy conflicts without leaking secrets', () => {
+  const { buildHttpieCommand } = runnerLogic();
+  const valid = { method: 'GET', url: 'https://api.example.test/v1/items' };
+
+  assert.throws(() => buildHttpieCommand(null), /HTTPie|request/i);
+  assert.throws(() => buildHttpieCommand({ ...valid, method: 'TRACE' }), /método/i);
+  assert.throws(() => buildHttpieCommand({ ...valid, url: '/v1/items' }), /absoluta|HTTP/i);
+  assert.throws(() => buildHttpieCommand({ ...valid, url: 'ftp://api.example.test/v1/items' }), /HTTP/i);
+  assert.throws(() => buildHttpieCommand({ ...valid, url: 'https://user:pass@api.example.test/v1/items' }), /credenciais/i);
+  assert.throws(() => buildHttpieCommand({ ...valid, url: 'https://api.example.test/v1/items#fragment' }), /fragmento/i);
+  assert.throws(() => buildHttpieCommand({ ...valid, body: '{}' }), /body/i);
+
+  const manualAuthorization = {
+    method: 'GET', url: 'https://api.example.test/me',
+    headers: 'Authorization: Bearer header-secret\nAccept: application/json',
+    authType: 'bearer', bearerToken: 'configured-secret'
+  };
+  assert.throws(() => buildHttpieCommand(manualAuthorization, { includeSensitive: true, shell: 'bash' }), error => {
+    assert.match(error.message, /Authorization/i);
+    assert.match(error.message, /proxy|Auth|Headers/i);
+    assert.doesNotMatch(error.message, /header-secret|configured-secret/);
+    return true;
+  });
+  const safe = buildHttpieCommand(manualAuthorization, { shell: 'bash' });
+  assert.equal(safe.command, "http GET 'https://api.example.test/me' 'Accept: application/json'");
+  assert.doesNotMatch(safe.command, /header-secret|configured-secret|Authorization/i);
+
+  const duplicateHeader = {
+    method: 'GET', url: 'https://api.example.test/items',
+    headers: 'x-api-key: manual-key\nAccept: application/json',
+    authType: 'apiKey', apiKeyName: 'X-API-Key', apiKeyLocation: 'header', apiKeyValue: 'configured-key'
+  };
+  assert.throws(() => buildHttpieCommand(duplicateHeader, { includeSensitive: true, shell: 'bash' }), error => {
+    assert.match(error.message, /API Key/i);
+    assert.match(error.message, /header|Headers/i);
+    assert.doesNotMatch(error.message, /manual-key|configured-key/);
+    return true;
+  });
+  const safeHeader = buildHttpieCommand(duplicateHeader, { shell: 'bash' });
+  assert.equal(safeHeader.command, "http GET 'https://api.example.test/items' 'Accept: application/json'");
+  assert.doesNotMatch(safeHeader.command, /manual-key|configured-key|API-Key/i);
+
+  const duplicateQuery = {
+    method: 'GET', url: 'https://api.example.test/items?key=manual-key',
+    authType: 'apiKey', apiKeyName: 'key', apiKeyLocation: 'query', apiKeyValue: 'configured-key'
+  };
+  assert.throws(() => buildHttpieCommand(duplicateQuery, { includeSensitive: true, shell: 'bash' }), error => {
+    assert.match(error.message, /API Key/i);
+    assert.match(error.message, /URL|duplicidade/i);
+    assert.doesNotMatch(error.message, /manual-key|configured-key/);
+    return true;
+  });
 });

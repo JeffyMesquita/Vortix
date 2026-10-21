@@ -272,6 +272,19 @@ Referências: [exportar um ambiente no Postman](https://learning.postman.com/doc
 - [x] Rodar 213 testes Node (212 passaram; 1 teste de symlink foi ignorado por `EPERM` no Windows), sintaxe JavaScript, build Release sem avisos e `git diff --check`.
 - [x] Conferir o fluxo desktop com Playwright em servidor e banco temporários: Body e Auth omitidos por padrão, aparecem após confirmação e a prévia volta ao modo seguro ao fechar; nenhuma API externa foi chamada.
 
+### 17. Gerar request como HTTPie
+
+**Objetivo:** copiar a request atual para o terminal HTTPie, mantendo as salvaguardas do export cURL.
+
+- [x] Gerar método, URL, headers, Params e body HTTPie.
+- [x] Emitir body arbitrário com `--raw` e permitir round-trip pelo importador sem executar o comando.
+- [x] Omitir Auth, Body e valores sensíveis por padrão; pedir confirmação explícita antes de revelar.
+- [x] Preservar templates e avisar sobre ações pré-request, arquivos e Cookie jar não exportados.
+- [x] Cobrir sintaxe, quoting PowerShell/Bash, redaction, duplicidades e validação com testes.
+- [x] Atualizar README com exemplos e documentação oficial do HTTPie.
+- [x] Validar testes, build Release, sintaxe JavaScript e `git diff --check`.
+- [x] Conferir o fluxo visual no desktop: seletor HTTPie/cURL, Bash/PowerShell, consentimento de Body e aviso do Cookie jar; modal volta ao modo seguro após fechar, sem enviar requests.
+
 ## Regra de sequência
 
 Fechamos cada feature com teste, documentação e revisão. Busca, histórico, comparação, HTTPie, schema GraphQL e fluxo PKCE visual foram validados em ambiente local/mock.

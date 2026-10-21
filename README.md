@@ -32,6 +32,7 @@
   - [Schema, confirmação e autocomplete](#schema-confirmação-e-autocomplete)
 - [Importar cURL](#importar-curl)
 - [Gerar comando cURL](#gerar-comando-curl)
+  - [Gerar comando HTTPie](#gerar-comando-httpie)
   - [Importar HTTPie](#importar-httpie)
 - [Importar OpenAPI JSON](#importar-openapi-json)
 - [Ambientes e variáveis](#ambientes-e-variáveis)
@@ -521,6 +522,20 @@ curl \
   --url 'https://api.example.com/v1/users?page=2' \
   --header 'Accept: application/json'
 ~~~
+
+### Gerar comando HTTPie
+
+No seletor **Formato**, escolha **HTTPie**. A prévia usa o terminal escolhido acima e mantém as mesmas regras de segurança do cURL: Auth, Body e valores sensíveis ficam omitidos até confirmação. No PowerShell, o comando começa com `http.exe`; no Bash/zsh, com `http`.
+
+HTTPie recebe o body literal por `--raw`. Requests com Body podem ser importadas de volta pelo Vortix; comandos `--auth` continuam exigindo configuração manual por segurança. A sintaxe oficial `--raw` envia o texto sem transformação ([documentação do HTTPie](https://httpie.io/docs/cli/request-data-via---raw)).
+
+Exemplo:
+
+~~~sh
+http --raw '{"name":"Ana"}' POST 'https://api.example.com/v1/users' 'Content-Type: application/json' 'Accept: application/json'
+~~~
+
+Templates continuam literais. Ações pré-request, body multipart, arquivos e Cookie jar não são convertidos para HTTPie.
 
 ### Importar HTTPie
 
