@@ -1705,30 +1705,50 @@ function openExportDialog(){
   for(const collection of collections){const option=document.createElement('option');option.value=collection.id;option.textContent=collection.name;option.selected=collection.id===selectedContainer.collectionId;select.append(option);}
   byId('export-format').value='api-studio';byId('export-include-bearer').checked=false;updateExportFormatUi();byId('export-dialog').showModal();
 }
+async function confirmSensitiveExport(collection,environment,includeBearer){
+  if(!includeBearer||!(collectionHasAuthCredentials(collection)||environmentHasAuthCredentials(environment.variables)))return true;
+  return confirmWithDialog({eyebrow:'DADOS SENSÍVEIS',title:'Exportar dados literais?',description:'O arquivo poderá conter Auth, variáveis sensíveis e texto literal de templates pré-request sem criptografia.',warning:'Qualquer pessoa com acesso ao arquivo poderá reutilizar esses valores.',confirmLabel:'Exportar dados literais',danger:true});
+}
+async function confirmResponseExamplesExport(collection){
+  if(!collectionHasResponseExamples(collection))return true;
+  return confirmWithDialog({eyebrow:'EXEMPLOS DE RESPOSTA',title:'Exportar bodies salvos?',description:'O arquivo incluirá bodies das respostas salvas. Eles podem conter tokens, dados pessoais ou informações privadas.',warning:'Arquivos JSON de coleção não são criptografados; headers de autenticação e cookies são omitidos.',confirmLabel:'Exportar exemplos',danger:true});
+}
+async function confirmAutomationExport(collection,format){
+  if(format==='api-studio'||!collectionHasResponseAutomation(collection))return true;
+  return confirmWithDialog({eyebrow:'SCRIPTS DE CICLO DE VIDA',title:'Exportar automações?',description:format==='insomnia-v4'?'O Insomnia executará ações antes do envio e scripts After-response desta coleção.':'O Postman executará ações pre-request e scripts após cada resposta.',warning:'Revise os scripts antes de enviar ou importar o arquivo.',confirmLabel:'Exportar automações',danger:true});
+}
+async function confirmExportLimitations(collection,environment,format,includeBearer){
+  if(!(await confirmSensitiveExport(collection,environment,includeBearer)))return false;
+  if(!(await confirmResponseExamplesExport(collection)))return false;
+  if(!(await confirmAutomationExport(collection,format)))return false;
+  return true;
+}
+async function buildOpenApiExportResult(collection,environment){
+  const result=RunnerLogic.buildOpenApi31Export(exportCollectionNode(collection,false),exportEnvironmentVariables(environment.variables,false));
+  const warnings=Array.isArray(result.warnings)?result.warnings:[];
+  if(!(await confirmWithDialog({eyebrow:'OPENAPI 3.1',title:'Baixar esquema OpenAPI?',description:'“'+collection.name+'” será exportado como OpenAPI 3.1 JSON. URLs de servidor, paths e nomes de parâmetros/campos são incluídos; revise identificadores e contexto interno antes de compartilhar.',detail:warnings.length?warnings.map((warning,index)=>(index+1)+'. '+warning).join('\n'):'Nenhuma limitação adicional detectada nesta coleção.',warning:'Valores de Auth, bodies e respostas salvas não são exportados. Auth aparece apenas como metadados de esquema, quando possível. Confira URLs e paths no arquivo antes de compartilhar.',confirmLabel:'Baixar OpenAPI'})))return null;
+  return{payload:result.document,suffix:'.openapi.json',message:'OpenAPI 3.1 baixado.'};
+}
+function buildCollectionExportResult(collection,environment,format,includeBearer){
+  const payload=format==='insomnia-v4'?buildInsomniaExport(collection,environment,includeBearer):format==='postman-v21'?buildPostmanExport(collection,environment,includeBearer):{format:'api-studio-collection',version:2,exportedAt:new Date().toISOString(),collection:exportCollectionNode(collection,includeBearer),environment:{name:environment.name,group:environment.group,variables:exportEnvironmentVariables(environment.variables,includeBearer)}};
+  const suffix=format==='insomnia-v4'?'.insomnia.json':format==='postman-v21'?'.postman_collection.json':'.vortix.json',message=format==='api-studio'?'Vortix JSON baixado.':format==='insomnia-v4'?'Insomnia JSON v4 baixado.':'Postman Collection v2.1 baixado.';
+  return{payload,suffix,message};
+}
+function downloadJsonExport(payload,collectionName,suffix){
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');
+  const filename=collectionName.normalize('NFKD').replace(/[^a-zA-Z0-9_-]+/g,'-').replace(/^-|-$/g,'')||'collection';
+  link.href=url;link.download=filename+suffix;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
 async function exportCollection(event){
   event.preventDefault();const collection=findCollection(byId('export-collection-select').value),format=byId('export-format').value;if(!collection)return;
   const openapi=format==='openapi-31',includeBearer=openapi?false:byId('export-include-bearer').checked;
   const environment=getEnvironment();
-  if(!openapi){
-    if(includeBearer&&(collectionHasAuthCredentials(collection)||environmentHasAuthCredentials(environment.variables))&&!(await confirmWithDialog({eyebrow:'DADOS SENSÍVEIS',title:'Exportar dados literais?',description:'O arquivo poderá conter Auth, variáveis sensíveis e texto literal de templates pré-request sem criptografia.',warning:'Qualquer pessoa com acesso ao arquivo poderá reutilizar esses valores.',confirmLabel:'Exportar dados literais',danger:true})))return;
-    if(collectionHasResponseExamples(collection)&&!(await confirmWithDialog({eyebrow:'EXEMPLOS DE RESPOSTA',title:'Exportar bodies salvos?',description:'O arquivo incluirá bodies das respostas salvas. Eles podem conter tokens, dados pessoais ou informações privadas.',warning:'Arquivos JSON de coleção não são criptografados; headers de autenticação e cookies são omitidos.',confirmLabel:'Exportar exemplos',danger:true})))return;
-    if(format!=='api-studio'&&collectionHasResponseAutomation(collection)&&!(await confirmWithDialog({eyebrow:'SCRIPTS DE CICLO DE VIDA',title:'Exportar automações?',description:format==='insomnia-v4'?'O Insomnia executará ações antes do envio e scripts After-response desta coleção.':'O Postman executará ações pre-request e scripts após cada resposta.',warning:'Revise os scripts antes de enviar ou importar o arquivo.',confirmLabel:'Exportar automações',danger:true})))return;
-  }
+  if(!openapi&&!(await confirmExportLimitations(collection,environment,format,includeBearer)))return;
   try{
-    let payload,suffix,message;
-    if(openapi){
-      const result=RunnerLogic.buildOpenApi31Export(exportCollectionNode(collection,false),exportEnvironmentVariables(environment.variables,false));
-      const warnings=Array.isArray(result.warnings)?result.warnings:[];
-      if(!(await confirmWithDialog({eyebrow:'OPENAPI 3.1',title:'Baixar esquema OpenAPI?',description:'“'+collection.name+'” será exportado como OpenAPI 3.1 JSON. URLs de servidor, paths e nomes de parâmetros/campos são incluídos; revise identificadores e contexto interno antes de compartilhar.',detail:warnings.length?warnings.map((warning,index)=>(index+1)+'. '+warning).join('\n'):'Nenhuma limitação adicional detectada nesta coleção.',warning:'Valores de Auth, bodies e respostas salvas não são exportados. Auth aparece apenas como metadados de esquema, quando possível. Confira URLs e paths no arquivo antes de compartilhar.',confirmLabel:'Baixar OpenAPI'})))return;
-      payload=result.document;suffix='.openapi.json';message='OpenAPI 3.1 baixado.';
-    }else{
-      payload=format==='insomnia-v4'?buildInsomniaExport(collection,environment,includeBearer):format==='postman-v21'?buildPostmanExport(collection,environment,includeBearer):{format:'api-studio-collection',version:2,exportedAt:new Date().toISOString(),collection:exportCollectionNode(collection,includeBearer),environment:{name:environment.name,group:environment.group,variables:exportEnvironmentVariables(environment.variables,includeBearer)}};
-      suffix=format==='insomnia-v4'?'.insomnia.json':format==='postman-v21'?'.postman_collection.json':'.vortix.json';message=format==='api-studio'?'Vortix JSON baixado.':format==='insomnia-v4'?'Insomnia JSON v4 baixado.':'Postman Collection v2.1 baixado.';
-    }
-    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');
-    const filename=collection.name.normalize('NFKD').replace(/[^a-zA-Z0-9_-]+/g,'-').replace(/^-|-$/g,'')||'collection';
-    link.href=url;link.download=filename+suffix;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
-    byId('export-dialog').close();showToast('Coleção exportada',message,'success');
+    const result=openapi?await buildOpenApiExportResult(collection,environment):buildCollectionExportResult(collection,environment,format,includeBearer);
+    if(!result)return;
+    downloadJsonExport(result.payload,collection.name,result.suffix);
+    byId('export-dialog').close();showToast('Coleção exportada',result.message,'success');
   }catch(error){showToast('Falha na exportação',error.message||'Não foi possível gerar o arquivo JSON.','error');}
 }
 async function exportWorkspaceBackup(){
