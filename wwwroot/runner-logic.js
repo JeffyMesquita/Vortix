@@ -1265,6 +1265,474 @@
     return { command, warnings };
   }
 
+  const openApiServerPlaceholder = 'https://api.example.test';
+  const openApiAuthWarning = 'Auth não é representada integralmente: o OpenAPI contém apenas metadados de esquema; detalhes e valores de credenciais não são representados.';
+  const openApiResponseWarning = 'Exemplos e respostas salvas não são representados no OpenAPI; cada operação recebe uma resposta genérica.';
+  const openApiBodyValuesWarning = 'Valores literais de bodies não são exportados; somente o esquema é inferido dos campos para evitar compartilhar dados de exemplo.';
+  const openApiRouteExposureWarning = 'Nome da coleção, URLs de servidor, paths e nomes de parâmetros/campos são incluídos; revise identificadores e contexto interno antes de compartilhar.';
+  const openApiScriptWarning = 'Scripts e automações (pré-request, testes e captura) não são exportados para OpenAPI.';
+  const openApiCookieWarning = 'Cookies e Cookie jar não são exportados para OpenAPI.';
+  const openApiNestedFolderWarning = 'Pastas aninhadas não são preservadas como hierarquia no OpenAPI; os nomes viram tags achatadas.';
+  const openApiMultipartWarning = 'Multipart/form-data não é representado integralmente: arquivos e valores de campos não são incluídos.';
+  const openApiGraphqlWarning = 'GraphQL não é representado integralmente: query, variables e operationName não são incluídos no OpenAPI.';
+
+  function openApiHasEntries(value) {
+    if (Array.isArray(value)) return value.length > 0;
+    if (value && typeof value === 'object') return Object.keys(value).length > 0;
+    return value === true || (typeof value === 'string' && value.length > 0);
+  }
+
+  function openApiHasAuthValues(source) {
+    return !!source && typeof source === 'object' && ['bearerToken', 'basicUsername', 'basicPassword', 'apiKeyValue'].some(field => String(source[field] || '').trim());
+  }
+
+  function openApiAuthTypeOf(source) {
+    const raw = String(source?.authType || (source?.bearerToken ? 'bearer' : source?.basicUsername || source?.basicPassword ? 'basic' : source?.apiKeyValue ? 'apiKey' : 'none'));
+    return raw === 'api-key' ? 'apiKey' : raw;
+  }
+
+  function openApiAuthFromNode(source, fallback, warn) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return fallback;
+    if (source.authMode === 'none') return null;
+    if (source.authMode === 'inherit') return fallback;
+    if (!source.authType && !openApiHasAuthValues(source)) return fallback;
+    const type = openApiAuthTypeOf(source);
+    if (!['bearer', 'basic', 'apiKey'].includes(type)) return null;
+    if (openApiHasAuthValues(source)) warn(openApiAuthWarning);
+    warn(openApiAuthWarning);
+    return {
+      type,
+      name: type === 'apiKey' ? String(source.apiKeyName || '').trim() : '',
+      location: type === 'apiKey' && source.apiKeyLocation === 'query' ? 'query' : 'header'
+    };
+  }
+
+  function createOpenApiSecuritySchemes(warn) {
+    const securitySchemes = {}, securitySchemeKeys = new Map();
+    const ensureSecurityScheme = auth => {
+      if (!auth) return null;
+      const metadata = auth.type === 'apiKey'
+        ? { type: 'apiKey', in: auth.location, name: auth.name }
+        : { type: 'http', scheme: auth.type };
+      if (auth.type === 'apiKey' && !metadata.name) {
+        warn('Auth API Key sem nome de header/query não pôde ser representada como esquema de segurança.');
+        return null;
+      }
+      const key = JSON.stringify(metadata);
+      if (securitySchemeKeys.has(key)) return securitySchemeKeys.get(key);
+      const baseName = auth.type === 'apiKey' ? 'apiKeyAuth' : auth.type === 'basic' ? 'basicAuth' : 'bearerAuth';
+      let name = baseName, index = 2;
+      while (Object.hasOwn(securitySchemes, name)) name = baseName + index++;
+      securitySchemes[name] = metadata;
+      securitySchemeKeys.set(key, name);
+      return name;
+    };
+    return { securitySchemes, ensureSecurityScheme };
+  }
+
+  function warnOpenApiNodeSideData(node, warn) {
+    if (openApiHasEntries(node?.responseExamples) || openApiHasEntries(node?.responses) || openApiHasEntries(node?.examples)) warn(openApiResponseWarning);
+    if (openApiHasEntries(node?.preRequestActions) || openApiHasEntries(node?.responseTests) || openApiHasEntries(node?.scripts) || openApiHasEntries(node?.actions) || node?.captureResponseVariable === true) warn(openApiScriptWarning);
+    if (openApiHasEntries(node?.cookies) || openApiHasEntries(node?.cookieJar)) warn(openApiCookieWarning);
+  }
+
+  function openApiIsSafeHttpUrl(value) {
+    try {
+      const parsed = new URL(value);
+      return ['http:', 'https:'].includes(parsed.protocol) && !parsed.username && !parsed.password && !parsed.search && !parsed.hash;
+    } catch { return false; }
+  }
+
+  function openApiTemplate(value) {
+    return String(value).replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, name) => '{' + name + '}');
+  }
+
+  function openApiServerDefaults(templateNames, environment, warn) {
+    const defaults = {};
+    let safe = true;
+    for (const name of templateNames) {
+      if (reservedNames.has(name) || isSensitiveVariableName(name)) {
+        warn('Variável de servidor sensível não foi usada; foi aplicado o placeholder ' + openApiServerPlaceholder + '.');
+        safe = false;
+        continue;
+      }
+      if (!Object.hasOwn(environment, name)) {
+        warn('Variável de servidor ativa ausente (' + name + '); foi aplicado o placeholder ' + openApiServerPlaceholder + '.');
+        safe = false;
+        continue;
+      }
+      const value = String(environment[name] ?? '');
+      if (!value || /[\r\n]/.test(value) || /\{\{|\}\}/.test(value)) {
+        warn('Variável de servidor sem valor seguro (' + name + '); foi aplicado o placeholder ' + openApiServerPlaceholder + '.');
+        safe = false;
+        continue;
+      }
+      defaults[name] = value;
+    }
+    return { defaults, safe };
+  }
+
+  function resolveOpenApiServer(raw, environment, warn) {
+    const templateNames = [...new Set([...raw.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map(match => match[1]))];
+    if (!raw) {
+      warn('Servidor real ausente; foi aplicado o placeholder ' + openApiServerPlaceholder + '. Configure servers manualmente.');
+      return { url: openApiServerPlaceholder };
+    }
+    if (!templateNames.length) {
+      if (openApiIsSafeHttpUrl(raw)) return { url: raw.replace(/\/+$/, '') || raw };
+      warn('Servidor real inválido ou inseguro; foi aplicado o placeholder ' + openApiServerPlaceholder + '. Configure servers manualmente.');
+      return { url: openApiServerPlaceholder };
+    }
+    const { defaults, safe } = openApiServerDefaults(templateNames, environment, warn);
+    const substituted = raw.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, name) => Object.hasOwn(defaults, name) ? defaults[name] : whole);
+    if (safe && openApiIsSafeHttpUrl(substituted)) {
+      const variables = {};
+      for (const [name, value] of Object.entries(defaults)) variables[name] = { default: value };
+      return { url: openApiTemplate(raw).replace(/\/+$/, '') || openApiServerPlaceholder, variables };
+    }
+    warn('Servidor real não pôde ser usado com segurança; foi aplicado o placeholder ' + openApiServerPlaceholder + '. Configure servers manualmente.');
+    return { url: openApiServerPlaceholder };
+  }
+
+  function createOpenApiServerResolver(environment, warn) {
+    const serverCache = new Map();
+    return source => {
+      const raw = String(source || '').trim();
+      if (serverCache.has(raw)) return serverCache.get(raw);
+      const server = resolveOpenApiServer(raw, environment, warn);
+      serverCache.set(raw, server);
+      return server;
+    };
+  }
+
+  function inferOpenApiSchema(value, warn) {
+    if (Array.isArray(value)) return { type: 'array', items: value.length ? inferOpenApiSchema(value[0], warn) : {} };
+    if (value === null) return { type: 'null' };
+    if (typeof value === 'object') {
+      const properties = {};
+      for (const [name, child] of Object.entries(value)) {
+        if (reservedNames.has(name) || isSensitiveVariableName(name)) {
+          warn('Campo sensível do body foi omitido do esquema OpenAPI.');
+          continue;
+        }
+        properties[name] = inferOpenApiSchema(child, warn);
+      }
+      return { type: 'object', ...(Object.keys(properties).length ? { properties } : {}) };
+    }
+    if (typeof value === 'number') return { type: 'number' };
+    if (typeof value === 'boolean') return { type: 'boolean' };
+    return { type: 'string' };
+  }
+
+  function openApiDefaultContentType(mode) {
+    return ({
+      json: 'application/json', text: 'text/plain', xml: 'application/xml',
+      urlencoded: 'application/x-www-form-urlencoded', multipart: 'multipart/form-data', graphql: 'application/json'
+    })[mode] || 'application/json';
+  }
+
+  function parseOpenApiHeaderEntries(value) {
+    if (typeof value === 'string') {
+      return value.split('\n').map(line => {
+        const index = line.indexOf(':');
+        if (index <= 0) return null;
+        return [line.slice(0, index).trim(), line.slice(index + 1).trim()];
+      }).filter(Boolean);
+    }
+    if (Array.isArray(value)) return value.filter(entry => Array.isArray(entry) && entry.length >= 2).map(entry => [String(entry[0]).trim(), String(entry[1] ?? '').trim()]);
+    if (value && typeof value === 'object') return Object.entries(value).map(([name, item]) => [String(name).trim(), String(item ?? '').trim()]);
+    return [];
+  }
+
+  function openApiMediaType(value) {
+    return String(value || '').split(';')[0].trim();
+  }
+
+  function parseOpenApiMediaTypes(value) {
+    return String(value || '').split(',').map(part => openApiMediaType(part)).filter(Boolean);
+  }
+
+  function openApiIsValidMediaType(value, allowWildcard) {
+    const match = /^([!#$%&'*+\-.^_`|~0-9A-Za-z]+)\/([!#$%&'*+\-.^_`|~0-9A-Za-z]+)$/.exec(String(value || ''));
+    if (!match) return false;
+    const [, type, subtype] = match;
+    if (type === '*' || subtype === '*') return allowWildcard === true && subtype === '*' && (type === '*' || !type.includes('*'));
+    return !type.includes('*') && !subtype.includes('*');
+  }
+
+  function openApiPathParameters(pathNames) {
+    return pathNames.map(name => ({ name, in: 'path', required: true, schema: { type: 'string' } }));
+  }
+
+  function appendOpenApiQueryParameters(parameters, rawQuery, warn) {
+    const routeParams = [];
+    try { for (const entry of new URLSearchParams(rawQuery)) routeParams.push(entry); } catch { /* keep an empty query */ }
+    const seenQueries = new Set(parameters.filter(parameter => parameter.in === 'query').map(parameter => parameter.name));
+    for (const [name, value] of routeParams) {
+      if (!name) continue;
+      if (seenQueries.has(name)) continue;
+      seenQueries.add(name);
+      if (isSensitiveVariableName(name)) { warn('Parâmetro de query sensível foi omitido do OpenAPI.'); continue; }
+      const referencedNames = [...String(value).matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map(match => match[1]);
+      if (referencedNames.some(isSensitiveVariableName)) { warn('Parâmetro de query com template sensível foi omitido do OpenAPI.'); continue; }
+      parameters.push({ name, in: 'query', required: false, schema: { type: 'string' } });
+    }
+  }
+
+  function appendOpenApiAcceptTypes(acceptTypes, value, warn) {
+    for (const type of parseOpenApiMediaTypes(value)) {
+      if (openApiIsValidMediaType(type, true)) acceptTypes.push(type);
+      else warn('Tipo de mídia inválido foi omitido do OpenAPI.');
+    }
+  }
+
+  function appendOpenApiHeaderParameter(parameters, seenHeaders, name, warn) {
+    const lower = name.toLowerCase();
+    if (['authorization', 'proxy-authorization', 'cookie', 'set-cookie'].includes(lower) || isSensitiveVariableName(name)) {
+      warn('Header sensível foi omitido do OpenAPI.');
+      return;
+    }
+    if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)) { warn('Header com nome inválido foi omitido do OpenAPI.'); return; }
+    if (seenHeaders.has(lower)) return;
+    seenHeaders.add(lower);
+    parameters.push({ name, in: 'header', required: false, schema: { type: 'string' } });
+  }
+
+  function readOpenApiHeaderParameters(parameters, headerEntries, warn) {
+    const seenHeaders = new Set();
+    const acceptTypes = [];
+    let contentType = '';
+    for (const [name, value] of headerEntries) {
+      const lower = name.toLowerCase();
+      if (lower === 'accept') {
+        appendOpenApiAcceptTypes(acceptTypes, value, warn);
+        continue;
+      }
+      if (lower === 'content-type') {
+        const type = openApiMediaType(value);
+        if (openApiIsValidMediaType(type, false)) contentType = type;
+        else { warn('Tipo de mídia inválido foi omitido do OpenAPI.'); contentType = ''; }
+        continue;
+      }
+      appendOpenApiHeaderParameter(parameters, seenHeaders, name, warn);
+    }
+    return { acceptTypes, contentType };
+  }
+
+  function buildOpenApiResponses(acceptTypes) {
+    const responseContent = {};
+    for (const type of [...new Set(acceptTypes)]) responseContent[type] = { schema: {} };
+    const responses = { default: { description: 'Resposta genérica; consulte a API para status, headers e body reais.' } };
+    if (Object.keys(responseContent).length) responses.default.content = responseContent;
+    return responses;
+  }
+
+  function openApiJsonSchema(body, warn) {
+    let parsed;
+    try { parsed = JSON.parse(body); }
+    catch { warn('Body JSON inválido foi representado apenas como texto no OpenAPI.'); }
+    if (parsed !== undefined) return inferOpenApiSchema(parsed, warn);
+    warn('Body JSON inválido foi representado apenas como texto no OpenAPI.');
+    return { type: 'string' };
+  }
+
+  function openApiUrlEncodedSchema(body, warn) {
+    const properties = {};
+    for (const [key] of new URLSearchParams(body)) {
+      if (reservedNames.has(key) || isSensitiveVariableName(key)) { warn('Campo sensível ou reservado de formulário foi omitido do esquema OpenAPI.'); continue; }
+      properties[key] = { type: 'string' };
+    }
+    return { type: 'object', properties };
+  }
+
+  function buildOpenApiRequestBody(request, contentType, warn) {
+    const bodyMode = normalizeBodyMode(request.bodyMode);
+    if (bodyMode === 'multipart') {
+      warn(openApiMultipartWarning);
+      return { content: { 'multipart/form-data': { schema: { type: 'object' } } } };
+    }
+    if (bodyMode === 'graphql') {
+      warn(openApiGraphqlWarning);
+      return { content: { [contentType || 'application/json']: { schema: { type: 'object' } } } };
+    }
+    const body = String(request.body ?? '');
+    if (!body.trim()) return null;
+    const targetContentType = contentType || openApiDefaultContentType(bodyMode), content = { schema: {} };
+    if (bodyMode === 'json') content.schema = openApiJsonSchema(body, warn);
+    else if (bodyMode === 'urlencoded') content.schema = openApiUrlEncodedSchema(body, warn);
+    else {
+      content.schema = { type: 'string' };
+      if (bodyMode === 'text' || bodyMode === 'xml') warn('Conteúdo textual/XML não mapeável foi representado somente como esquema genérico; os valores foram omitidos.');
+    }
+    warn(openApiBodyValuesWarning);
+    return { content: { [targetContentType]: content } };
+  }
+
+  function canonicalizeOpenApiPath(path, registry) {
+    const originalNames = [];
+    const shape = path.replace(/\{([^{}]+)\}/g, (whole, name) => {
+      originalNames.push(name);
+      return '{p' + (originalNames.length - 1) + '}';
+    });
+    if (!registry.has(shape)) {
+      const used = new Set();
+      registry.set(shape, originalNames.map(name => {
+        const candidate = String(name || '').trim() || 'param';
+        let canonical = candidate, suffix = 2;
+        while (used.has(canonical)) canonical = candidate + suffix++;
+        used.add(canonical);
+        return canonical;
+      }));
+    }
+    const names = registry.get(shape);
+    let index = 0;
+    return {
+      path: path.replace(/\{([^{}]+)\}/g, () => '{' + names[index++] + '}'),
+      pathNames: names
+    };
+  }
+
+  function openApiRouteInfo(request, pathRegistry = new Map()) {
+    const rawRoute = String(request.route || '/');
+    const withoutFragment = rawRoute.split('#')[0];
+    const queryIndex = withoutFragment.indexOf('?');
+    const rawPath = queryIndex >= 0 ? withoutFragment.slice(0, queryIndex) : withoutFragment;
+    const rawQuery = queryIndex >= 0 ? withoutFragment.slice(queryIndex + 1) : '';
+    let path = rawPath.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, name) => '{' + name + '}').replace(/%7B/gi, '{').replace(/%7D/gi, '}');
+    if (!path.startsWith('/')) path = '/' + path;
+    if (!path) path = '/';
+    return { ...canonicalizeOpenApiPath(path, pathRegistry), rawQuery };
+  }
+
+  function createOpenApiOperationIdFactory() {
+    let operationNumber = 0;
+    return (method, path) => {
+      const base = (method.toLowerCase() + '_' + path).replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || 'operation';
+      return base + '_' + (++operationNumber);
+    };
+  }
+
+  function createOpenApiOperation({ operationId, request, method, path, responses, parameters, requestBody, tags, tagNames }) {
+    const operation = {
+      operationId,
+      summary: String(request.name || '').trim().slice(0, 120) || method + ' ' + path,
+      responses,
+      parameters
+    };
+    if (tags.length) {
+      const tag = tags[tags.length - 1];
+      operation.tags = [tag];
+      tagNames.add(tag);
+    }
+    if (requestBody) operation.requestBody = requestBody;
+    return operation;
+  }
+
+  function applyOpenApiOperationSecurity(operation, requestScheme, collectionScheme) {
+    if (!collectionScheme && !requestScheme) return;
+    if (requestScheme && requestScheme === collectionScheme) return;
+    operation.security = requestScheme ? [{ [requestScheme]: [] }] : [];
+  }
+
+  function walkOpenApiNode(node, depth, tags, inheritedAuth, flattened, warn) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+    if (depth > 20) { warn('A coleção tem mais de 20 níveis de pastas; os níveis excedentes foram ignorados.'); return; }
+    warnOpenApiNodeSideData(node, warn);
+    const nodeAuth = openApiAuthFromNode(node.auth, inheritedAuth, warn);
+    for (const request of Array.isArray(node.requests) ? node.requests : []) {
+      if (!request || typeof request !== 'object' || Array.isArray(request)) continue;
+      warnOpenApiNodeSideData(request, warn);
+      flattened.push({ request, tags, inheritedAuth: nodeAuth });
+    }
+    for (const folder of Array.isArray(node.folders) ? node.folders : []) {
+      if (!folder || typeof folder !== 'object' || Array.isArray(folder)) continue;
+      const name = String(folder.name || 'Pasta').trim().slice(0, 100) || 'Pasta';
+      if (depth + 1 >= 2) warn(openApiNestedFolderWarning);
+      walkOpenApiNode(folder, depth + 1, [...tags, name], openApiAuthFromNode(folder.auth, nodeAuth, warn), flattened, warn);
+    }
+  }
+
+  function collectOpenApiRequests(collection, warn) {
+    const flattened = [];
+    walkOpenApiNode(collection, 0, [], null, flattened, warn);
+    return flattened;
+  }
+
+  function buildOpenApiPaths(document, flattened, { warn, ensureSecurityScheme, collectionScheme, globalServer }) {
+    const tagNames = new Set();
+    const nextOperationId = createOpenApiOperationIdFactory();
+    const pathRegistry = new Map();
+    for (const item of flattened) {
+      const request = item.request;
+      const method = String(request.method || 'GET').trim().toUpperCase();
+      if (!methods.has(method)) { warn('Método ' + method + ' não suportado e foi ignorado no OpenAPI.'); continue; }
+      const route = openApiRouteInfo(request, pathRegistry);
+      const parameters = openApiPathParameters(route.pathNames);
+      appendOpenApiQueryParameters(parameters, route.rawQuery, warn);
+      const { acceptTypes, contentType } = readOpenApiHeaderParameters(parameters, parseOpenApiHeaderEntries(request.headers), warn);
+      const responses = buildOpenApiResponses(acceptTypes);
+      const requestBody = buildOpenApiRequestBody(request, contentType, warn);
+      const pathItem = document.paths[route.path] || (document.paths[route.path] = {});
+      const methodKey = method.toLowerCase();
+      if (pathItem[methodKey]) throw new Error('A coleção tem operações duplicadas com o mesmo método e path, que o OpenAPI não consegue representar. Combine-as ou renomeie requests antes de exportar.');
+      warn(openApiRouteExposureWarning);
+      const operation = createOpenApiOperation({
+        operationId: nextOperationId(method, route.path),
+        request,
+        method,
+        path: route.path,
+        responses,
+        parameters,
+        requestBody,
+        tags: item.tags,
+        tagNames
+      });
+      const effectiveAuth = openApiAuthFromNode(request, item.inheritedAuth, warn);
+      const requestScheme = ensureSecurityScheme(effectiveAuth);
+      applyOpenApiOperationSecurity(operation, requestScheme, collectionScheme);
+      if (JSON.stringify(item.server) !== JSON.stringify(globalServer)) operation.servers = [item.server];
+      pathItem[methodKey] = operation;
+    }
+    return tagNames;
+  }
+
+  function buildOpenApi31Export(collection, environmentVariables = {}) {
+    if (!collection || typeof collection !== 'object' || Array.isArray(collection)) throw Error('Coleção inválida para exportação OpenAPI.');
+    const environment = environmentVariables && typeof environmentVariables === 'object' && !Array.isArray(environmentVariables) ? environmentVariables : {};
+    const warnings = new Set();
+    const warn = message => { const text = String(message || '').trim(); if (text) warnings.add(text); };
+    const { securitySchemes, ensureSecurityScheme } = createOpenApiSecuritySchemes(warn);
+    const flattened = collectOpenApiRequests(collection, warn);
+    const collectionAuth = openApiAuthFromNode(collection.auth, null, warn);
+    const collectionScheme = ensureSecurityScheme(collectionAuth);
+    const document = {
+      openapi: '3.1.0',
+      info: {
+        title: String(collection.name || 'Coleção').trim().slice(0, 100) || 'Coleção',
+        version: '1.0.0',
+        description: 'Documento OpenAPI 3.1 gerado pelo Vortix. Limitações: credenciais de Auth, valores de variáveis sensíveis, exemplos/respostas salvas, scripts/automações, cookies, arquivos multipart e hierarquia de pastas não são representados. Revise os avisos exibidos antes do download.'
+      },
+      servers: [],
+      paths: {}
+    };
+    if (collectionScheme) document.security = [{ [collectionScheme]: [] }];
+    const getServer = createOpenApiServerResolver(environment, warn);
+    let globalServer = null;
+    for (const item of flattened) {
+      item.server = getServer(item.request.baseUrl);
+      if (!globalServer) globalServer = item.server;
+    }
+    if (!globalServer) {
+      globalServer = { url: openApiServerPlaceholder };
+      warn('A coleção não contém requests; o documento OpenAPI foi gerado sem operações e com o placeholder ' + openApiServerPlaceholder + '.');
+    }
+    document.servers.push(globalServer);
+    const tagNames = buildOpenApiPaths(document, flattened, { warn, ensureSecurityScheme, collectionScheme, globalServer });
+    if (tagNames.size) document.tags = [...tagNames].map(name => ({ name }));
+    if (Object.keys(securitySchemes).length) document.components = { securitySchemes };
+    return { document, warnings: [...warnings] };
+  }
+
   function parseOpenApiSpec(document) {
     if (!document || typeof document !== 'object' || Array.isArray(document)) throw Error('Documento OpenAPI invalido.');
     const version = String(document.openapi || '');
@@ -1307,6 +1775,7 @@
         return '{{' + name + '}}';
       });
       if (/[?#]/.test(source)) throw Error('URL de servidor OpenAPI com query ou fragmento nao suportada.');
+      if (/^\{\{[^{}]+\}\}\/?$/.test(resolved)) return { baseUrl: resolved.replace(/\/+$/, ''), prefix: '' };
       const validationUrl = resolved.replace(/\{\{\s*([^{}]+)\s*\}\}/g, 'vortix');
       if (/^[a-z][a-z0-9+.-]*:\/\//i.test(validationUrl)) {
         let parsed;
@@ -2472,5 +2941,5 @@
     return makeLocalSecretVault({ salt: saltBytes, key, cryptoProvider, secrets, envelope: { ...envelope, names: [...secrets.keys()] } });
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, buildCurlCommand, buildHttpieCommand, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { buildOpenApi31Export, parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, buildCurlCommand, buildHttpieCommand, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

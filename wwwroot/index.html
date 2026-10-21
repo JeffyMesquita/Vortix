@@ -623,9 +623,10 @@ insomnia.environment.set("token", body.access_token);</code></pre>
     <form method="dialog" id="export-form">
       <div class="dialog-heading"><div><p class="eyebrow">INTERCÂMBIO</p><h2>Exportar coleção</h2><p class="dialog-description">Leve esta coleção para outro workspace.</p></div><button class="icon-button dialog-close" id="close-export-dialog" type="button" aria-label="Fechar">×</button></div>
       <label for="export-collection-select">Coleção</label><select id="export-collection-select" required></select>
-      <label for="export-format">Formato</label><select id="export-format"><option value="api-studio">Vortix JSON</option><option value="insomnia-v4">Insomnia JSON (v4)</option><option value="postman-v21">Postman Collection v2.1</option></select>
-      <label class="check-row export-token-option" for="export-include-bearer"><input id="export-include-bearer" type="checkbox"><span>Incluir credenciais de Auth e variáveis sensíveis</span></label>
-      <p class="hint">O export inclui requests, pastas, ações e o ambiente ativo. Credenciais são omitidas por padrão; ações que parecem conter segredos literais também são removidas e desativadas. Ao incluir credenciais, o JSON fica sem criptografia. Scripts exportados para Insomnia/Postman podem executar ao enviar.</p>
+      <label for="export-format">Formato</label><select id="export-format"><option value="api-studio">Vortix JSON</option><option value="insomnia-v4">Insomnia JSON (v4)</option><option value="postman-v21">Postman Collection v2.1</option><option value="openapi-31">OpenAPI 3.1</option></select>
+      <label class="check-row export-token-option" for="export-include-bearer"><input id="export-include-bearer" type="checkbox"><span id="export-token-option-label">Incluir credenciais de Auth e variáveis sensíveis</span></label>
+      <p class="hint" id="export-format-hint" role="status" aria-live="polite">Credenciais são omitidas por padrão; ao incluí-las, o JSON fica sem criptografia. Scripts exportados para Insomnia/Postman podem executar ao enviar.</p>
+      <p class="hint" id="export-format-description">O export inclui requests, pastas, ações e o ambiente ativo.</p>
       <div class="dialog-actions"><button class="button secondary" id="cancel-export-dialog" type="button">Cancelar</button><button class="button primary" id="confirm-export-collection" type="submit">Baixar JSON</button></div>
     </form>
   </dialog>
