@@ -156,7 +156,7 @@ function captureResponseVariable(request, response, environment) {
 
 function safeApiCall(request, options, environmentId) {
   const call = { ...request };
-  for (const key of ['authMode', 'authSource', 'collectionId', 'folderId', 'graphqlQuery', 'graphqlVariables', 'graphqlOperationName', 'saveBearerToken', 'resolutionProvenance', 'responseCaptureTarget']) delete call[key];
+  for (const key of ['authMode', 'authSource', 'collectionId', 'folderId', 'graphqlQuery', 'graphqlVariables', 'graphqlOperationName', 'saveBearerToken', 'resolutionProvenance', 'responseCaptureTarget', 'preRequestActions', 'preRequestActionsEnabled', 'preRequestSecretValues', 'preRequestProvenance']) delete call[key];
   call.environmentId = environmentId;
   call.saveBearerToken = false;
   call.confirmTokenRequest = false;
@@ -253,7 +253,9 @@ function planCases(entries, datasets, environment, ciOverrides, options, environ
   const planned = [], planningCaptures = Object.create(null);
   for (const dataset of datasets) {
     for (const entry of entries) {
-      const request = RunnerLogic.prepareSavedRequest(entry.request, mergeEnvironment(environment, planningCaptures, ciOverrides), dataset, options.allowWrites, entry.authScopes || []);
+      const mergedEnvironment = mergeEnvironment(environment, planningCaptures, ciOverrides);
+      const preRequest = entry.request.preRequestActionsEnabled === false ? { variables: Object.create(null) } : RunnerLogic.runPreRequestActions(entry.request.preRequestActions, mergedEnvironment, dataset);
+      const request = RunnerLogic.prepareSavedRequest(entry.request, mergedEnvironment, dataset, options.allowWrites, entry.authScopes || [], {}, preRequest.variables);
       request.environmentId = environmentId;
       validatePreparedRequest(request, options);
       planned.push({ entry, dataset });
@@ -276,7 +278,9 @@ async function executeCases(cases, environment, ciOverrides, options, origin, en
     const { entry, dataset } = cases[caseIndex], started = Date.now();
     let outcome = 'passed', status = 0;
     try {
-      const request = RunnerLogic.prepareSavedRequest(entry.request, mergeEnvironment(environment, capturedVariables, ciOverrides), dataset, options.allowWrites, entry.authScopes || []);
+      const mergedEnvironment = mergeEnvironment(environment, capturedVariables, ciOverrides);
+      const preRequest = entry.request.preRequestActionsEnabled === false ? { variables: Object.create(null) } : RunnerLogic.runPreRequestActions(entry.request.preRequestActions, mergedEnvironment, dataset);
+      const request = RunnerLogic.prepareSavedRequest(entry.request, mergedEnvironment, dataset, options.allowWrites, entry.authScopes || [], {}, preRequest.variables);
       request.environmentId = environmentId;
       validatePreparedRequest(request, options);
       const { proxyStatus, result } = await invokeProxy(origin, safeApiCall(request, options, environmentId), signal);
