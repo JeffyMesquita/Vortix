@@ -902,7 +902,7 @@ function showHistoryResponse(entry){
   showResponse(status>=200&&status<300?statusText:statusText,status>=200&&status<300?'ok':'bad',JSON.stringify(RunnerLogic.normalizeHistoryResponseHeaders(response.headers),null,2),bodyText);
   byId('request-note').textContent='Resposta restaurada do histórico. Envie a request para consultar a API novamente.';
   byId('response-persistence-note').textContent='Resposta recuperada do histórico';
-  byId('response-status').title=`Resposta do histórico · ${Number(response.durationMs)||0} ms`;
+  byId('response-status').title=`${statusText} · Resposta do histórico · ${Number(response.durationMs)||0} ms`;
 }
 async function renderHistory(){
   const list=byId('request-history');list.replaceChildren();

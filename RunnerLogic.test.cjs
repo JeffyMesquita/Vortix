@@ -1118,6 +1118,13 @@ test('history response entries can reopen a saved response in the response viewe
   assert.ok(app.includes("entry.tokenRequest?'Body de resposta de token removido por segurança.'"));
 });
 
+test('restored history response keeps its full HTTP status in the status tooltip', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const start = app.indexOf('function showHistoryResponse('), end = app.indexOf('\nasync function renderHistory', start);
+  assert.ok(start >= 0 && end > start);
+  assert.match(app.slice(start, end), /byId\('response-status'\)\.title=.*statusText/);
+});
+
 test('README documents response history retention, privacy, and token exclusions', () => {
   const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
   assert.ok(readme.includes('## Histórico de respostas'));
