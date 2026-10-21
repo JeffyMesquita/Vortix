@@ -810,9 +810,10 @@
     let url = '', method = '', formMode = false, bearerToken = '', rawBody = null, rawProvided = false;
     const sensitiveName = name => /auth|bearer|token|secret|password|passwd|senha|credential|cookie|api[-_.]?key|private[-_.]?key/i.test(String(name || ''));
     const addHeader = raw => {
-      const colon = raw.indexOf(':');
-      if (colon < 1) throw Error('Header HTTPie inválido.');
-      const name = raw.slice(0, colon).trim(), value = raw.slice(colon + 1).trim();
+      const colon = raw.indexOf(':'), emptyValue = colon < 0 && raw.endsWith(';');
+      if (!emptyValue && colon < 1) throw Error('Header HTTPie inválido.');
+      const name = (emptyValue ? raw.slice(0, -1) : raw.slice(0, colon)).trim();
+      const value = emptyValue ? '' : raw.slice(colon + 1).trim();
       if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || /[\r\n]/.test(value)) throw Error('Header HTTPie inválido.');
       if (/^authorization$/i.test(name) && /^Bearer\s+\S[\s\S]*$/i.test(value)) {
         if (bearerToken) throw Error('O comando HTTPie contém mais de um token Bearer.');
@@ -846,7 +847,6 @@
           if (index + 1 >= tokens.length) throw Error('Falta valor para --raw no comando HTTPie.');
           value = tokens[++index];
         } else value = argument.slice('--raw='.length);
-        if (value.startsWith('@')) throw Error('Body por arquivo não suportado; anexe o arquivo manualmente.');
         rawProvided = true;
         rawBody = value;
         continue;
@@ -887,6 +887,7 @@
       }
       if (/^[^:@=]+@/.test(argument) || argument.startsWith('@')) throw Error('Body por arquivo não suportado; anexe o arquivo manualmente.');
       if (argument.includes(':')) { addHeader(argument); continue; }
+      if (argument.endsWith(';')) { addHeader(argument); continue; }
       throw Error('Item de request HTTPie não suportado.');
     }
     if (!url) throw Error('URL não encontrada no comando HTTPie.');
@@ -1214,7 +1215,7 @@
     }
     if (omittedHeaders.size) warn('Headers sensíveis foram omitidos por padrão: ' + [...omittedHeaders].join(', ') + '.');
 
-    const authHeaders = [], queryItems = [];
+    const authHeaders = [];
     let basicCredentials = '';
     if (auth.authType !== 'none' && !includeSensitive) {
       warn('Autenticação omitida por padrão. Marque a opção acima para incluir as credenciais.');
@@ -1237,7 +1238,7 @@
       if (auth.apiKeyLocation === 'query') {
         if (curlUrlHasQueryParameter(targetUrl, name))
           throw Error('A API Key já aparece nos parâmetros da URL; o proxy rejeita a duplicidade. Remova o parâmetro manual ou use apenas o campo Auth.');
-        queryItems.push([name, value]);
+        targetUrl = appendCurlQueryParameter(targetUrl, name, value);
       } else {
         if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)
           || ['authorization', 'proxy-authorization', 'host', 'content-length', 'transfer-encoding', 'content-type', 'cookie'].includes(name.toLowerCase()))
@@ -1257,9 +1258,7 @@
     if (includeSensitive && body) argumentsList.push('--raw', quote(body));
     argumentsList.push(method, quote(targetUrl));
     for (const [name, value] of [...sentHeaders, ...authHeaders])
-      argumentsList.push(quote(name + ': ' + value));
-    for (const [name, value] of queryItems)
-      argumentsList.push(quote(name + '==' + value));
+      argumentsList.push(quote(value === '' ? name + ';' : name + ': ' + value));
     const command = argumentsList.join(' ');
     if (hasTemplates)
       warn('Templates {{...}} não são resolvidos fora do Vortix; substitua-os manualmente antes de executar o comando HTTPie, que só funciona depois de substituir esses valores.');

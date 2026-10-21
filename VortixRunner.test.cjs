@@ -52,6 +52,8 @@ test('README documents safe HTTPie export and its raw-body format', async () => 
   assert.match(readme, /--raw/);
   assert.match(readme, /sensíveis.*omitidos por padrão/i);
   assert.match(readme, /httpie\.io\/docs\/cli\/request-data-via---raw/);
+  assert.match(readme, /headers com valor vazio usam a forma `Nome;`/i);
+  assert.match(readme, /API Keys em query são codificadas diretamente na URL/i);
 });
 
 function runCli(args, extraEnv = {}) {

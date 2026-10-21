@@ -190,6 +190,20 @@ test('parses HTTPie --raw literal bodies in separate and inline forms without re
   assert.equal(shellQuoted.body, '{ok:true}');
 });
 
+test('parses HTTPie --raw @value as a literal body without reading files', () => {
+  const { parseHttpieCommand } = runnerLogic();
+  const separate = parseHttpieCommand("http --raw '@alice' pie.dev/post");
+  assert.equal(separate.method, 'POST');
+  assert.equal(separate.body, '@alice');
+
+  const inline = parseHttpieCommand('http --raw=@alice pie.dev/post');
+  assert.equal(inline.method, 'POST');
+  assert.equal(inline.body, '@alice');
+
+  assert.throws(() => parseHttpieCommand('http POST https://api.example.test @/tmp/body'), /arquivo/i);
+  assert.throws(() => parseHttpieCommand('http POST https://api.example.test payload=@/tmp/body'), /arquivo/i);
+});
+
 test('rejects HTTPie --raw combined with fields or with bodyless methods', () => {
   const { parseHttpieCommand } = runnerLogic();
   assert.throws(() => parseHttpieCommand("http --raw 'x' POST https://api.example.test/v1/check name=Ana"), /--raw.*campo|campo.*--raw/i);
@@ -2913,7 +2927,7 @@ test('buildHttpieCommand includes opted-in auth, headers, API key, and body with
     method: 'GET', url: 'https://api.example.test/v1/items', headers: 'Accept: application/json',
     authType: 'apiKey', apiKeyName: 'api key', apiKeyLocation: 'query', apiKeyValue: 'a&b c'
   }, { includeSensitive: true, shell: 'bash' });
-  assert.equal(apiKeyQuery.command, "http GET 'https://api.example.test/v1/items' 'Accept: application/json' 'api key==a&b c'");
+  assert.equal(apiKeyQuery.command, "http GET 'https://api.example.test/v1/items?api%20key=a%26b%20c' 'Accept: application/json'");
 
   const redactedQuery = buildHttpieCommand({
     method: 'GET', url: 'https://api.example.test/v1/items', headers: 'Accept: application/json',
@@ -2921,6 +2935,29 @@ test('buildHttpieCommand includes opted-in auth, headers, API key, and body with
   }, { shell: 'bash' });
   assert.equal(redactedQuery.command, "http GET 'https://api.example.test/v1/items' 'Accept: application/json'");
   assert.ok(redactedQuery.warnings.some(warning => /autentica/i.test(warning)));
+});
+
+test('buildHttpieCommand encodes API Key query names and values in the URL instead of request items', () => {
+  const { buildHttpieCommand, parseHttpieCommand } = runnerLogic();
+  const colonName = buildHttpieCommand({
+    method: 'GET', url: 'https://api.example.test/v1/items?page=2',
+    authType: 'apiKey', apiKeyName: 'x:key', apiKeyLocation: 'query', apiKeyValue: 'a&b c'
+  }, { includeSensitive: true, shell: 'bash' });
+  assert.equal(colonName.command, "http GET 'https://api.example.test/v1/items?page=2&x%3Akey=a%26b%20c'");
+  assert.equal(colonName.command.includes('=='), false);
+  assert.equal(parseHttpieCommand(colonName.command).url, 'https://api.example.test/v1/items?page=2&x%3Akey=a%26b%20c');
+
+  const dashName = buildHttpieCommand({
+    method: 'GET', url: 'https://api.example.test/v1/items',
+    authType: 'apiKey', apiKeyName: '-key', apiKeyLocation: 'query', apiKeyValue: 'value'
+  }, { includeSensitive: true, shell: 'bash' });
+  assert.equal(dashName.command, "http GET 'https://api.example.test/v1/items?-key=value'");
+  assert.equal(dashName.command.includes("'-key=="), false);
+
+  assert.throws(() => buildHttpieCommand({
+    method: 'GET', url: 'https://api.example.test/v1/items?x%3Akey=manual',
+    authType: 'apiKey', apiKeyName: 'x:key', apiKeyLocation: 'query', apiKeyValue: 'configured'
+  }, { includeSensitive: true, shell: 'bash' }), /API Key/i);
 });
 
 test('buildHttpieCommand quotes command substitutions and quotes safely for Bash and PowerShell', () => {
@@ -2969,6 +3006,25 @@ test('buildHttpieCommand round-trips safe requests without secrets through the H
     body: '{"name":"Nova"}',
     bearerToken: ''
   });
+});
+
+test('buildHttpieCommand exports empty header values as Header; and the importer round-trips them', () => {
+  const { buildHttpieCommand, parseHttpieCommand } = runnerLogic();
+  const generated = buildHttpieCommand({
+    method: 'GET',
+    url: 'https://api.example.test/v1/items',
+    headers: 'X-Empty:\nX-Trace: trace-1'
+  }, { shell: 'bash' });
+
+  assert.equal(generated.command, "http GET 'https://api.example.test/v1/items' 'X-Empty;' 'X-Trace: trace-1'");
+  assert.deepEqual(parseHttpieCommand(generated.command), {
+    method: 'GET',
+    url: 'https://api.example.test/v1/items',
+    headers: [['X-Empty', ''], ['X-Trace', 'trace-1']],
+    body: '',
+    bearerToken: ''
+  });
+  assert.deepEqual(parseHttpieCommand("http GET https://api.example.test/v1/items 'X-Empty;'").headers, [['X-Empty', '']]);
 });
 
 test('buildHttpieCommand preserves Vortix templates literally and warns about them', () => {
