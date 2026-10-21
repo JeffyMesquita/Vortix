@@ -603,8 +603,10 @@ insomnia.environment.set("token", body.access_token);</code></pre>
   </dialog>
   <dialog class="app-dialog command-import-dialog curl-export-dialog" id="curl-export-dialog" aria-labelledby="curl-export-title">
     <form method="dialog">
-      <div class="dialog-heading"><div><p class="eyebrow">INTERCÂMBIO</p><h2 id="curl-export-title">Gerar comando cURL</h2><p class="dialog-description">A prévia é local: não envia a request nem salva o comando.</p></div><button class="icon-button dialog-close" id="close-curl-export" type="button" aria-label="Fechar prévia cURL">×</button></div>
+      <div class="dialog-heading"><div><p class="eyebrow">INTERCÂMBIO</p><h2 id="curl-export-title">Gerar comando cURL</h2><p class="dialog-description">A prévia é local: não envia a request nem salva o comando.</p></div><button class="icon-button dialog-close" id="close-curl-export" type="button" aria-label="Fechar prévia de comando">×</button></div>
       <div class="dialog-scroll">
+        <label for="curl-format">Formato</label>
+        <select id="curl-format"><option value="curl">cURL</option><option value="httpie">HTTPie</option></select>
         <label for="curl-shell">Terminal</label>
         <select id="curl-shell"><option value="powershell">PowerShell (Windows)</option><option value="bash">Bash / zsh</option></select>
         <label class="check-row" for="curl-include-sensitive"><input id="curl-include-sensitive" type="checkbox"><span>Incluir Body, Auth e campos sensíveis</span></label>

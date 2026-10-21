@@ -721,7 +721,9 @@
         if (character === '\\' && quote === '"' && index + 1 < input.length) { token += input[++index]; active = true; continue; }
         token += character; active = true; continue;
       }
-      if (character === "'" || character === '"') { quote = character; active = true; continue; }
+      if (character === "'" || character === '"') {
+        quote = character; active = true; continue;
+      }
       if (character === '\\' && index + 1 < input.length) { token += input[++index]; active = true; continue; }
       if (/\s/.test(character)) { if (active) { tokens.push(token); token = ''; active = false; } continue; }
       token += character; active = true;
@@ -805,7 +807,7 @@
     if (!tokens.length || !/^https?(?:\.exe)?$/i.test(tokens[0])) throw Error('Cole um comando iniciado por http ou https.');
     const defaultScheme = tokens[0].toLowerCase().startsWith('https') ? 'https' : 'http';
     const headers = [], query = [], bodyFields = Object.create(null);
-    let url = '', method = '', formMode = false, bearerToken = '';
+    let url = '', method = '', formMode = false, bearerToken = '', rawBody = null, rawProvided = false;
     const sensitiveName = name => /auth|bearer|token|secret|password|passwd|senha|credential|cookie|api[-_.]?key|private[-_.]?key/i.test(String(name || ''));
     const addHeader = raw => {
       const colon = raw.indexOf(':');
@@ -821,6 +823,7 @@
       headers.push([name, value]);
     };
     const addBodyField = (name, value) => {
+      if (rawProvided) throw Error('O comando HTTPie não pode misturar --raw com campos de body.');
       if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(name) || ['__proto__','prototype','constructor'].includes(name.toLowerCase())) throw Error('Nome de campo HTTPie inválido.');
       if (sensitiveName(name)) throw Error('Campo sensível não suportado pela importação HTTPie; configure Auth manualmente.');
       if (Object.hasOwn(bodyFields, name)) throw Error('Campo repetido não suportado pela importação HTTPie.');
@@ -828,8 +831,26 @@
     };
     for (let index = 1; index < tokens.length; index++) {
       const argument = tokens[index];
-      if (argument === '--form' || argument === '-f') { formMode = true; continue; }
+      if (argument === '--form' || argument === '-f') {
+        if (rawProvided) throw Error('O comando HTTPie não pode misturar --raw com --form.');
+        formMode = true;
+        continue;
+      }
       if (argument === '--json' || argument === '-j') { formMode = false; continue; }
+      if (argument === '--raw' || argument.startsWith('--raw=')) {
+        if (rawProvided) throw Error('O comando HTTPie contém mais de um --raw.');
+        if (formMode) throw Error('O comando HTTPie não pode misturar --raw com --form.');
+        if (Object.keys(bodyFields).length) throw Error('O comando HTTPie não pode misturar --raw com campos de body.');
+        let value;
+        if (argument === '--raw') {
+          if (index + 1 >= tokens.length) throw Error('Falta valor para --raw no comando HTTPie.');
+          value = tokens[++index];
+        } else value = argument.slice('--raw='.length);
+        if (value.startsWith('@')) throw Error('Body por arquivo não suportado; anexe o arquivo manualmente.');
+        rawProvided = true;
+        rawBody = value;
+        continue;
+      }
       if (argument === '--auth' || argument === '-a' || argument.startsWith('--auth=') || argument.startsWith('-a=')) throw Error('Auth Basic do comando HTTPie não é importada; configure Auth manualmente.');
       if (argument === '--auth-type' || argument.startsWith('--auth-type=') || argument === '--session' || argument.startsWith('--session=')) throw Error('Opções de Auth/sessão HTTPie não são importadas; configure Auth manualmente.');
       if (argument.startsWith('-')) throw Error('Opção HTTPie não suportada: ' + argument.split('=', 1)[0] + '.');
@@ -878,12 +899,13 @@
     for (const [name] of parsedUrl.searchParams) if (sensitiveName(name)) throw Error('Parâmetro sensível não suportado pela importação HTTPie; use variável de ambiente.');
     for (const [name, value] of query) parsedUrl.searchParams.append(name, value);
     const fieldNames = Object.keys(bodyFields);
-    const effectiveMethod = method || (fieldNames.length ? 'POST' : 'GET');
+    const effectiveMethod = method || ((fieldNames.length || rawProvided) ? 'POST' : 'GET');
     if (!['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(effectiveMethod)) throw Error('Método HTTP não suportado pelo Vortix.');
-    if (fieldNames.length && ['GET','HEAD','OPTIONS'].includes(effectiveMethod)) throw Error('O comando HTTPie envia body com método que não aceita body no Vortix.');
+    if ((fieldNames.length || rawProvided) && ['GET','HEAD','OPTIONS'].includes(effectiveMethod)) throw Error('O comando HTTPie envia body com método que não aceita body no Vortix.');
     const hasHeader = name => headers.some(([headerName]) => headerName.toLowerCase() === name);
     let body = '';
-    if (fieldNames.length) {
+    if (rawProvided) body = rawBody;
+    else if (fieldNames.length) {
       if (formMode) {
         const params = new URLSearchParams();
         for (const name of fieldNames) {
@@ -951,9 +973,10 @@
   const curlTemplatePattern = /\{\{[^{}]+\}\}/;
   const curlTemplateNamePattern = /^[A-Za-z_][A-Za-z0-9_.-]{0,79}$/;
 
-  function validateCurlUrl(value) {
+  function validateCurlUrl(value, commandLabel = 'cURL') {
+    const label = String(commandLabel || 'cURL');
     const source = String(value ?? '').trim();
-    if (!source) throw Error('Informe uma URL absoluta HTTP ou HTTPS para o comando cURL.');
+    if (!source) throw Error('Informe uma URL absoluta HTTP ou HTTPS para o comando ' + label + '.');
     let cursor = 0;
     for (const match of source.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) {
       if (!curlTemplateNamePattern.test(match[1].trim()))
@@ -980,9 +1003,9 @@
       throw Error('Remova o fragmento da URL antes de gerar o comando.');
     const literalScheme = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//.exec(source);
     if (!literalScheme && !leading)
-      throw Error('Informe uma URL absoluta HTTP ou HTTPS para o comando cURL.');
+      throw Error('Informe uma URL absoluta HTTP ou HTTPS para o comando ' + label + '.');
     if (literalScheme && !['http', 'https'].includes(literalScheme[1].toLowerCase()))
-      throw Error('A URL do comando cURL precisa usar HTTP ou HTTPS.');
+      throw Error('A URL do comando ' + label + ' precisa usar HTTP ou HTTPS.');
     let masked = '';
     cursor = 0;
     for (const match of source.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) {
@@ -997,11 +1020,11 @@
     masked += source.slice(cursor);
     let parsed;
     try { parsed = new URL(masked); }
-    catch { throw Error('Informe uma URL absoluta HTTP ou HTTPS para o comando cURL.'); }
-    if (!['http:', 'https:'].includes(parsed.protocol)) throw Error('A URL do comando cURL precisa usar HTTP ou HTTPS.');
+    catch { throw Error('Informe uma URL absoluta HTTP ou HTTPS para o comando ' + label + '.'); }
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw Error('A URL do comando ' + label + ' precisa usar HTTP ou HTTPS.');
     if (parsed.username || parsed.password) throw Error('Remova as credenciais embutidas na URL antes de gerar o comando.');
     if (parsed.hash) throw Error('Remova o fragmento da URL antes de gerar o comando.');
-    if (!parsed.hostname) throw Error('Informe uma URL absoluta HTTP ou HTTPS para o comando cURL.');
+    if (!parsed.hostname) throw Error('Informe uma URL absoluta HTTP ou HTTPS para o comando ' + label + '.');
     return source;
   }
 
@@ -1056,7 +1079,7 @@
       .some(value => curlTemplatePattern.test(String(value ?? '')))
       || headerPairs.some(([name, value]) => curlTemplatePattern.test(name) || curlTemplatePattern.test(value));
 
-    let targetUrl = validateCurlUrl(request.url);
+    let targetUrl = validateCurlUrl(request.url, 'cURL');
     if (!includeSensitive) {
       const queryIndex = targetUrl.indexOf('?');
       if (queryIndex >= 0) {
@@ -1131,6 +1154,115 @@
     const command = argumentsList.join(' ');
     if (hasTemplates)
       warn('Templates {{...}} não são resolvidos fora do Vortix; substitua-os manualmente antes de executar o comando cURL, que só funciona depois de substituir esses valores.');
+    return { command, warnings };
+  }
+
+  function buildHttpieCommand(request, options = {}) {
+    if (!request || typeof request !== 'object' || Array.isArray(request))
+      throw Error('Request inválida para gerar o comando HTTPie.');
+    const shell = options?.shell === 'powershell' ? 'powershell' : 'bash';
+    const includeSensitive = options?.includeSensitive === true;
+    const method = String(request.method || 'GET').trim().toUpperCase();
+    if (!methods.has(method)) throw Error('Método HTTP não suportado: ' + method);
+    const body = String(request.body ?? '');
+    if (body.trim() && ['GET', 'HEAD', 'OPTIONS'].includes(method))
+      throw Error('GET, HEAD e OPTIONS não enviam body.');
+    const rawAuthType = String(request.authType ?? '').trim();
+    const normalizedAuthType = rawAuthType
+      ? (['api-key', 'apikey'].includes(rawAuthType.toLowerCase()) ? 'apiKey' : rawAuthType.toLowerCase())
+      : undefined;
+    const auth = normalizeAuthFields({ ...request, authType: normalizedAuthType });
+    const warnings = [], warningSet = new Set();
+    const warn = message => {
+      const text = String(message ?? '');
+      if (text && !warningSet.has(text)) { warningSet.add(text); warnings.push(text); }
+    };
+
+    const headerPairs = parseCurlRequestHeaders(request.headers);
+    if (includeSensitive && headerPairs.some(([name]) => /^authorization$/i.test(name)))
+      throw Error('O proxy rejeita Authorization manual em Headers; configure a credencial em Auth e remova esse header.');
+    const hasTemplates = [request.url, body, auth.bearerToken, auth.basicUsername, auth.basicPassword, auth.apiKeyName, auth.apiKeyValue]
+      .some(value => curlTemplatePattern.test(String(value ?? '')))
+      || headerPairs.some(([name, value]) => curlTemplatePattern.test(name) || curlTemplatePattern.test(value));
+
+    let targetUrl = validateCurlUrl(request.url, 'HTTPie');
+    if (!includeSensitive) {
+      const queryIndex = targetUrl.indexOf('?');
+      if (queryIndex >= 0) {
+        const apiKeyQueryName = auth.authType === 'apiKey' && auth.apiKeyLocation === 'query' ? auth.apiKeyName.toLowerCase() : '';
+        const prefix = targetUrl.slice(0, queryIndex), query = targetUrl.slice(queryIndex + 1);
+        const kept = [], omitted = new Set();
+        for (const part of query.split('&')) {
+          if (!part) { kept.push(part); continue; }
+          const rawName = part.split('=', 1)[0];
+          let name;
+          try { name = decodeURIComponent(rawName.replace(/\+/g, ' ')); }
+          catch { name = rawName; }
+          if (isSensitiveVariableName(name) || (apiKeyQueryName && name.toLowerCase() === apiKeyQueryName)) { omitted.add(name); continue; }
+          kept.push(part);
+        }
+        if (omitted.size) warn('Parâmetros de query sensíveis foram omitidos por padrão: ' + [...omitted].join(', ') + '.');
+        targetUrl = kept.join('') ? prefix + '?' + kept.join('&') : prefix;
+      }
+    }
+
+    const apiKeyHeaderName = auth.authType === 'apiKey' && auth.apiKeyLocation === 'header' ? auth.apiKeyName.toLowerCase() : '';
+    const omittedHeaders = new Set(), sentHeaders = [];
+    for (const [name, value] of headerPairs) {
+      if (!includeSensitive && (isSensitiveVariableName(name) || (apiKeyHeaderName && name.toLowerCase() === apiKeyHeaderName))) { omittedHeaders.add(name); continue; }
+      sentHeaders.push([name, value]);
+    }
+    if (omittedHeaders.size) warn('Headers sensíveis foram omitidos por padrão: ' + [...omittedHeaders].join(', ') + '.');
+
+    const authHeaders = [], queryItems = [];
+    let basicCredentials = '';
+    if (auth.authType !== 'none' && !includeSensitive) {
+      warn('Autenticação omitida por padrão. Marque a opção acima para incluir as credenciais.');
+      if (auth.authType === 'apiKey' && auth.apiKeyLocation === 'query')
+        warn('A API Key na query foi omitida por padrão. Marque a opção acima para incluí-la.');
+    } else if (auth.authType === 'bearer' && includeSensitive) {
+      let token = auth.bearerToken.trim();
+      if (/^Bearer\s+/i.test(token)) token = token.replace(/^Bearer\s+/i, '').trim();
+      if (/[\r\n]/.test(token)) throw Error('Token Bearer inválido para o comando HTTPie.');
+      if (token) authHeaders.push(['Authorization', 'Bearer ' + token]);
+    } else if (auth.authType === 'basic' && includeSensitive) {
+      const username = auth.basicUsername, password = auth.basicPassword;
+      if (!username.trim() || username.includes(':') || /[\r\n]/.test(username) || !password || /[\r\n]/.test(password))
+        throw Error('Basic Auth requer usuário e senha válidos, sem dois-pontos no usuário.');
+      basicCredentials = username + ':' + password;
+    } else if (auth.authType === 'apiKey' && includeSensitive) {
+      const name = auth.apiKeyName.trim(), value = auth.apiKeyValue;
+      if (!name || !value || /[\r\n]/.test(name) || /[\r\n]/.test(value))
+        throw Error('API Key requer nome e valor válidos.');
+      if (auth.apiKeyLocation === 'query') {
+        if (curlUrlHasQueryParameter(targetUrl, name))
+          throw Error('A API Key já aparece nos parâmetros da URL; o proxy rejeita a duplicidade. Remova o parâmetro manual ou use apenas o campo Auth.');
+        queryItems.push([name, value]);
+      } else {
+        if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)
+          || ['authorization', 'proxy-authorization', 'host', 'content-length', 'transfer-encoding', 'content-type', 'cookie'].includes(name.toLowerCase()))
+          throw Error('Nome de header da API Key inválido ou reservado.');
+        if (headerPairs.some(([headerName]) => headerName.toLowerCase() === name.toLowerCase()))
+          throw Error('O header da API Key já aparece em Headers; o proxy rejeita a duplicidade. Remova o header manual ou use apenas o campo Auth.');
+        authHeaders.push([name, value]);
+      }
+    }
+
+    if (body && !includeSensitive)
+      warn('O body foi omitido por padrão. Marque a opção acima para incluí-lo no comando.');
+
+    const quote = shell === 'powershell' ? quotePowerShellArgument : quoteBashArgument;
+    const argumentsList = [shell === 'powershell' ? 'http.exe' : 'http'];
+    if (basicCredentials) argumentsList.push('--auth', quote(basicCredentials));
+    if (includeSensitive && body) argumentsList.push('--raw', quote(body));
+    argumentsList.push(method, quote(targetUrl));
+    for (const [name, value] of [...sentHeaders, ...authHeaders])
+      argumentsList.push(quote(name + ': ' + value));
+    for (const [name, value] of queryItems)
+      argumentsList.push(quote(name + '==' + value));
+    const command = argumentsList.join(' ');
+    if (hasTemplates)
+      warn('Templates {{...}} não são resolvidos fora do Vortix; substitua-os manualmente antes de executar o comando HTTPie, que só funciona depois de substituir esses valores.');
     return { command, warnings };
   }
 
@@ -2341,5 +2473,5 @@
     return makeLocalSecretVault({ salt: saltBytes, key, cryptoProvider, secrets, envelope: { ...envelope, names: [...secrets.keys()] } });
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, buildCurlCommand, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, buildCurlCommand, buildHttpieCommand, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });
