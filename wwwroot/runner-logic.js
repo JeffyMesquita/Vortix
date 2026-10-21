@@ -1265,6 +1265,313 @@
     return { command, warnings };
   }
 
+  function buildOpenApi31Export(collection, environmentVariables = {}) {
+    if (!collection || typeof collection !== 'object' || Array.isArray(collection)) throw Error('Coleção inválida para exportação OpenAPI.');
+    const environment = environmentVariables && typeof environmentVariables === 'object' && !Array.isArray(environmentVariables) ? environmentVariables : {};
+    const warnings = new Set();
+    const warn = message => { const text = String(message || '').trim(); if (text) warnings.add(text); };
+    const placeholderServer = 'https://api.example.test';
+    const securitySchemes = {}, securitySchemeKeys = new Map();
+    const authWarning = 'Auth não é representada integralmente: o OpenAPI contém apenas metadados de esquema; detalhes e valores de credenciais não são representados.';
+    const responseWarning = 'Exemplos e respostas salvas não são representados no OpenAPI; cada operação recebe uma resposta genérica.';
+    const bodyValuesWarning = 'Valores literais de bodies não são exportados; somente o esquema é inferido dos campos para evitar compartilhar dados de exemplo.';
+    const routeExposureWarning = 'Nome da coleção, URLs de servidor, paths e nomes de parâmetros/campos são incluídos; revise identificadores e contexto interno antes de compartilhar.';
+    const scriptWarning = 'Scripts e automações (pré-request, testes e captura) não são exportados para OpenAPI.';
+    const cookieWarning = 'Cookies e Cookie jar não são exportados para OpenAPI.';
+    const nestedFolderWarning = 'Pastas aninhadas não são preservadas como hierarquia no OpenAPI; os nomes viram tags achatadas.';
+    const multipartWarning = 'Multipart/form-data não é representado integralmente: arquivos e valores de campos não são incluídos.';
+    const graphqlWarning = 'GraphQL não é representado integralmente: query, variables e operationName não são incluídos no OpenAPI.';
+    const hasEntries = value => Array.isArray(value) ? value.length > 0 : !!value && typeof value === 'object' ? Object.keys(value).length > 0 : value === true || (typeof value === 'string' && value.length > 0);
+    const hasAuthValues = source => !!source && typeof source === 'object' && ['bearerToken', 'basicUsername', 'basicPassword', 'apiKeyValue'].some(field => String(source[field] || '').trim());
+    const authTypeOf = source => {
+      const raw = String(source?.authType || (source?.bearerToken ? 'bearer' : source?.basicUsername || source?.basicPassword ? 'basic' : source?.apiKeyValue ? 'apiKey' : 'none'));
+      return raw === 'api-key' ? 'apiKey' : raw;
+    };
+    const authFromNode = (source, fallback) => {
+      if (!source || typeof source !== 'object' || Array.isArray(source)) return fallback;
+      if (source.authMode === 'none') return null;
+      if (source.authMode === 'inherit') return fallback;
+      if (!source.authType && !hasAuthValues(source)) return fallback;
+      const type = authTypeOf(source);
+      if (!['bearer', 'basic', 'apiKey'].includes(type)) return null;
+      if (hasAuthValues(source)) warn(authWarning);
+      warn(authWarning);
+      return {
+        type,
+        name: type === 'apiKey' ? String(source.apiKeyName || '').trim() : '',
+        location: type === 'apiKey' && source.apiKeyLocation === 'query' ? 'query' : 'header'
+      };
+    };
+    const ensureSecurityScheme = auth => {
+      if (!auth) return null;
+      const metadata = auth.type === 'apiKey'
+        ? { type: 'apiKey', in: auth.location, name: auth.name }
+        : { type: 'http', scheme: auth.type };
+      if (auth.type === 'apiKey' && !metadata.name) {
+        warn('Auth API Key sem nome de header/query não pôde ser representada como esquema de segurança.');
+        return null;
+      }
+      const key = JSON.stringify(metadata);
+      if (securitySchemeKeys.has(key)) return securitySchemeKeys.get(key);
+      const baseName = auth.type === 'apiKey' ? 'apiKeyAuth' : auth.type === 'basic' ? 'basicAuth' : 'bearerAuth';
+      let name = baseName, index = 2;
+      while (Object.hasOwn(securitySchemes, name)) name = baseName + index++;
+      securitySchemes[name] = metadata;
+      securitySchemeKeys.set(key, name);
+      return name;
+    };
+    const warnNodeSideData = node => {
+      if (hasEntries(node?.responseExamples) || hasEntries(node?.responses) || hasEntries(node?.examples)) warn(responseWarning);
+      if (hasEntries(node?.preRequestActions) || hasEntries(node?.responseTests) || hasEntries(node?.scripts) || hasEntries(node?.actions) || node?.captureResponseVariable === true) warn(scriptWarning);
+      if (hasEntries(node?.cookies) || hasEntries(node?.cookieJar)) warn(cookieWarning);
+    };
+    const isSafeHttpUrl = value => {
+      try {
+        const parsed = new URL(value);
+        return ['http:', 'https:'].includes(parsed.protocol) && !parsed.username && !parsed.password && !parsed.search && !parsed.hash;
+      } catch { return false; }
+    };
+    const openApiTemplate = value => String(value).replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, name) => '{' + name + '}');
+    const serverCache = new Map();
+    const getServer = source => {
+      const raw = String(source || '').trim();
+      if (serverCache.has(raw)) return serverCache.get(raw);
+      let server;
+      const templateNames = [...new Set([...raw.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map(match => match[1]))];
+      if (!raw) {
+        warn('Servidor real ausente; foi aplicado o placeholder ' + placeholderServer + '. Configure servers manualmente.');
+        server = { url: placeholderServer };
+      } else if (!templateNames.length) {
+        if (isSafeHttpUrl(raw)) server = { url: raw.replace(/\/+$/, '') || raw };
+        else {
+          warn('Servidor real inválido ou inseguro; foi aplicado o placeholder ' + placeholderServer + '. Configure servers manualmente.');
+          server = { url: placeholderServer };
+        }
+      } else {
+        const defaults = {};
+        let safe = true;
+        for (const name of templateNames) {
+          if (['__proto__', 'prototype', 'constructor'].includes(name) || isSensitiveVariableName(name)) {
+            warn('Variável de servidor sensível não foi usada; foi aplicado o placeholder ' + placeholderServer + '.');
+            safe = false;
+            continue;
+          }
+          if (!Object.hasOwn(environment, name)) {
+            warn('Variável de servidor ativa ausente (' + name + '); foi aplicado o placeholder ' + placeholderServer + '.');
+            safe = false;
+            continue;
+          }
+          const value = String(environment[name] ?? '');
+          if (!value || /[\r\n]/.test(value) || /\{\{|\}\}/.test(value)) {
+            warn('Variável de servidor sem valor seguro (' + name + '); foi aplicado o placeholder ' + placeholderServer + '.');
+            safe = false;
+            continue;
+          }
+          defaults[name] = value;
+        }
+        const substituted = raw.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, name) => Object.hasOwn(defaults, name) ? defaults[name] : whole);
+        if (safe && isSafeHttpUrl(substituted)) {
+          const variables = {};
+          for (const [name, value] of Object.entries(defaults)) variables[name] = { default: value };
+          server = { url: openApiTemplate(raw).replace(/\/+$/, '') || placeholderServer, variables };
+        } else {
+          warn('Servidor real não pôde ser usado com segurança; foi aplicado o placeholder ' + placeholderServer + '. Configure servers manualmente.');
+          server = { url: placeholderServer };
+        }
+      }
+      serverCache.set(raw, server);
+      return server;
+    };
+    const inferSchema = value => {
+      if (Array.isArray(value)) return { type: 'array', items: value.length ? inferSchema(value[0]) : {} };
+      if (value === null) return { type: 'null' };
+      if (typeof value === 'object') {
+        const properties = {};
+        for (const [name, child] of Object.entries(value)) {
+          if (['__proto__', 'prototype', 'constructor'].includes(name) || isSensitiveVariableName(name)) {
+            warn('Campo sensível do body foi omitido do esquema OpenAPI.');
+            continue;
+          }
+          properties[name] = inferSchema(child);
+        }
+        return { type: 'object', ...(Object.keys(properties).length ? { properties } : {}) };
+      }
+      if (typeof value === 'number') return { type: 'number' };
+      if (typeof value === 'boolean') return { type: 'boolean' };
+      return { type: 'string' };
+    };
+    const defaultContentType = mode => ({
+      json: 'application/json', text: 'text/plain', xml: 'application/xml',
+      urlencoded: 'application/x-www-form-urlencoded', multipart: 'multipart/form-data', graphql: 'application/json'
+    })[mode] || 'application/json';
+    const parseHeaderEntries = value => {
+      if (typeof value === 'string') {
+        return value.split('\n').map(line => {
+          const index = line.indexOf(':');
+          if (index <= 0) return null;
+          return [line.slice(0, index).trim(), line.slice(index + 1).trim()];
+        }).filter(Boolean);
+      }
+      if (Array.isArray(value)) return value.filter(entry => Array.isArray(entry) && entry.length >= 2).map(entry => [String(entry[0]).trim(), String(entry[1] ?? '').trim()]);
+      if (value && typeof value === 'object') return Object.entries(value).map(([name, item]) => [String(name).trim(), String(item ?? '').trim()]);
+      return [];
+    };
+    const parseMediaTypes = value => String(value || '').split(',').map(part => part.trim().split(';')[0].trim()).filter(Boolean);
+    const mediaType = value => String(value || '').split(';')[0].trim();
+    const flattened = [];
+    const walk = (node, depth, tags, inheritedAuth) => {
+      if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+      if (depth > 20) { warn('A coleção tem mais de 20 níveis de pastas; os níveis excedentes foram ignorados.'); return; }
+      warnNodeSideData(node);
+      const nodeAuth = authFromNode(node.auth, inheritedAuth);
+      for (const request of Array.isArray(node.requests) ? node.requests : []) {
+        if (!request || typeof request !== 'object' || Array.isArray(request)) continue;
+        warnNodeSideData(request);
+        flattened.push({ request, tags, inheritedAuth: nodeAuth });
+      }
+      for (const folder of Array.isArray(node.folders) ? node.folders : []) {
+        if (!folder || typeof folder !== 'object' || Array.isArray(folder)) continue;
+        const name = String(folder.name || 'Pasta').trim().slice(0, 100) || 'Pasta';
+        if (depth + 1 >= 2) warn(nestedFolderWarning);
+        walk(folder, depth + 1, [...tags, name], authFromNode(folder.auth, nodeAuth));
+      }
+    };
+    walk(collection, 0, [], null);
+    const collectionAuth = authFromNode(collection.auth, null);
+    const collectionScheme = ensureSecurityScheme(collectionAuth);
+    const document = {
+      openapi: '3.1.0',
+      info: {
+        title: String(collection.name || 'Coleção').trim().slice(0, 100) || 'Coleção',
+        version: '1.0.0',
+        description: 'Documento OpenAPI 3.1 gerado pelo Vortix. Limitações: credenciais de Auth, valores de variáveis sensíveis, exemplos/respostas salvas, scripts/automações, cookies, arquivos multipart e hierarquia de pastas não são representados. Revise os avisos exibidos antes do download.'
+      },
+      servers: [],
+      paths: {}
+    };
+    if (collectionScheme) document.security = [{ [collectionScheme]: [] }];
+    let globalServer = null;
+    for (const item of flattened) {
+      item.server = getServer(item.request.baseUrl);
+      if (!globalServer) globalServer = item.server;
+    }
+    if (!globalServer) {
+      globalServer = { url: placeholderServer };
+      warn('A coleção não contém requests; o documento OpenAPI foi gerado sem operações e com o placeholder ' + placeholderServer + '.');
+    }
+    document.servers.push(globalServer);
+    const tagNames = new Set();
+    let operationNumber = 0;
+    const nextOperationId = (method, path) => {
+      const base = (method.toLowerCase() + '_' + path).replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || 'operation';
+      return base + '_' + (++operationNumber);
+    };
+    for (const item of flattened) {
+      const request = item.request;
+      const method = String(request.method || 'GET').trim().toUpperCase();
+      if (!methods.has(method)) { warn('Método ' + method + ' não suportado e foi ignorado no OpenAPI.'); continue; }
+      const rawRoute = String(request.route || '/');
+      const withoutFragment = rawRoute.split('#')[0];
+      const queryIndex = withoutFragment.indexOf('?');
+      const rawPath = queryIndex >= 0 ? withoutFragment.slice(0, queryIndex) : withoutFragment;
+      const rawQuery = queryIndex >= 0 ? withoutFragment.slice(queryIndex + 1) : '';
+      let path = rawPath.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, name) => '{' + name + '}').replace(/%7B/gi, '{').replace(/%7D/gi, '}');
+      if (!path.startsWith('/')) path = '/' + path;
+      if (!path) path = '/';
+      const pathNames = [...new Set([...path.matchAll(/\{([^{}]+)\}/g)].map(match => match[1]))];
+      const parameters = pathNames.map(name => ({ name, in: 'path', required: true, schema: { type: 'string' } }));
+      const seenHeaders = new Set();
+      let contentType = '';
+      const acceptTypes = [];
+      const routeParams = [];
+      try { for (const entry of new URLSearchParams(rawQuery)) routeParams.push(entry); } catch { /* keep an empty query */ }
+      for (const [name, value] of routeParams) {
+        if (!name) continue;
+        if (isSensitiveVariableName(name)) { warn('Parâmetro de query sensível foi omitido do OpenAPI.'); continue; }
+        const referencedNames = [...String(value).matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map(match => match[1]);
+        if (referencedNames.some(isSensitiveVariableName)) { warn('Parâmetro de query com template sensível foi omitido do OpenAPI.'); continue; }
+        parameters.push({ name, in: 'query', required: false, schema: { type: 'string' } });
+      }
+      for (const [name, value] of parseHeaderEntries(request.headers)) {
+        const lower = name.toLowerCase();
+        if (lower === 'accept') { acceptTypes.push(...parseMediaTypes(value)); continue; }
+        if (lower === 'content-type') { contentType = mediaType(value); continue; }
+        if (['authorization', 'proxy-authorization', 'cookie', 'set-cookie'].includes(lower) || isSensitiveVariableName(name)) {
+          warn('Header sensível foi omitido do OpenAPI.');
+          continue;
+        }
+        if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)) { warn('Header com nome inválido foi omitido do OpenAPI.'); continue; }
+        if (seenHeaders.has(lower)) continue;
+        seenHeaders.add(lower);
+        parameters.push({ name, in: 'header', required: false, schema: { type: 'string' } });
+      }
+      const responseContent = {};
+      for (const type of [...new Set(acceptTypes)]) responseContent[type] = { schema: {} };
+      const responses = { default: { description: 'Resposta genérica; consulte a API para status, headers e body reais.' } };
+      if (Object.keys(responseContent).length) responses.default.content = responseContent;
+      const bodyMode = normalizeBodyMode(request.bodyMode);
+      let requestBody = null;
+      if (bodyMode === 'multipart') {
+        warn(multipartWarning);
+        requestBody = { content: { 'multipart/form-data': { schema: { type: 'object' } } } };
+      } else if (bodyMode === 'graphql') {
+        warn(graphqlWarning);
+        requestBody = { content: { [contentType || 'application/json']: { schema: { type: 'object' } } } };
+      } else {
+        const body = String(request.body ?? '');
+        if (body.trim()) {
+          const targetContentType = contentType || defaultContentType(bodyMode), content = { schema: {} };
+          if (bodyMode === 'json') {
+            let parsed;
+            try { parsed = JSON.parse(body); }
+            catch { warn('Body JSON inválido foi representado apenas como texto no OpenAPI.'); }
+            if (parsed !== undefined) content.schema = inferSchema(parsed);
+            else { content.schema = { type: 'string' }; warn('Body JSON inválido foi representado apenas como texto no OpenAPI.'); }
+          } else if (bodyMode === 'urlencoded') {
+            const properties = {};
+            for (const [key] of new URLSearchParams(body)) {
+              if (['__proto__', 'prototype', 'constructor'].includes(key) || isSensitiveVariableName(key)) { warn('Campo sensível ou reservado de formulário foi omitido do esquema OpenAPI.'); continue; }
+              properties[key] = { type: 'string' };
+            }
+            content.schema = { type: 'object', properties };
+          } else {
+            content.schema = { type: 'string' };
+            if (bodyMode === 'text' || bodyMode === 'xml') warn('Conteúdo textual/XML não mapeável foi representado somente como esquema genérico; os valores foram omitidos.');
+          }
+          warn(bodyValuesWarning);
+          requestBody = { content: { [targetContentType]: content } };
+        }
+      }
+      const pathItem = document.paths[path] || (document.paths[path] = {});
+      const methodKey = method.toLowerCase();
+      if (pathItem[methodKey]) throw Error('A coleção tem operações duplicadas com o mesmo método e path, que o OpenAPI não consegue representar. Combine-as ou renomeie requests antes de exportar.');
+      warn(routeExposureWarning);
+      const operation = {
+        operationId: nextOperationId(method, path),
+        summary: String(request.name || '').trim().slice(0, 120) || method + ' ' + path,
+        responses,
+        parameters
+      };
+      if (item.tags.length) {
+        const tag = item.tags[item.tags.length - 1];
+        operation.tags = [tag];
+        tagNames.add(tag);
+      }
+      if (requestBody) operation.requestBody = requestBody;
+      const effectiveAuth = authFromNode(request, item.inheritedAuth);
+      const requestScheme = ensureSecurityScheme(effectiveAuth);
+      if (collectionScheme || requestScheme) {
+        if (requestScheme && requestScheme === collectionScheme) { /* inherited collection security */ }
+        else operation.security = requestScheme ? [{ [requestScheme]: [] }] : [];
+      }
+      if (JSON.stringify(item.server) !== JSON.stringify(globalServer)) operation.servers = [item.server];
+      pathItem[methodKey] = operation;
+    }
+    if (tagNames.size) document.tags = [...tagNames].map(name => ({ name }));
+    if (Object.keys(securitySchemes).length) document.components = { securitySchemes };
+    return { document, warnings: [...warnings] };
+  }
+
   function parseOpenApiSpec(document) {
     if (!document || typeof document !== 'object' || Array.isArray(document)) throw Error('Documento OpenAPI invalido.');
     const version = String(document.openapi || '');
@@ -2472,5 +2779,5 @@
     return makeLocalSecretVault({ salt: saltBytes, key, cryptoProvider, secrets, envelope: { ...envelope, names: [...secrets.keys()] } });
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, buildCurlCommand, buildHttpieCommand, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { buildOpenApi31Export, parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, buildCurlCommand, buildHttpieCommand, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

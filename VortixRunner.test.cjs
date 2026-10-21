@@ -56,6 +56,39 @@ test('README documents safe HTTPie export and its raw-body format', async () => 
   assert.match(readme, /API Keys em query são codificadas diretamente na URL/i);
 });
 
+test('export dialog offers OpenAPI 3.1 with a safe credential notice and limitation confirmation', async () => {
+  const html = await fs.readFile(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = await fs.readFile(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.match(html, /<option value="openapi-31">OpenAPI 3\.1<\/option>/);
+  assert.match(html, /id="export-format-hint"[^>]*role="status"/);
+  assert.match(app, /label\.textContent='Credenciais não são incluídas no OpenAPI 3\.1'/);
+  assert.match(app, /function updateExportFormatUi\(/);
+  assert.match(app, /export-format'\)\.addEventListener\('change',updateExportFormatUi\)/);
+  assert.match(app, /RunnerLogic\.buildOpenApi31Export\(exportCollectionNode\(collection,false\),exportEnvironmentVariables\(environment\.variables,false\)\)/);
+  assert.match(app, /\.openapi\.json/);
+  assert.match(app, /confirmWithDialog\(\{[\s\S]*?OpenAPI 3\.1[\s\S]*?warnings/);
+  assert.match(app, /URLs de servidor, paths e nomes de parâmetros\/campos são incluídos/i);
+  assert.match(app, /Valores de Auth, bodies e respostas salvas não são exportados/i);
+  assert.match(app, /catch\(error\)\{showToast\('Falha na exportação',error\.message/);
+  assert.match(html, /id="export-format-description"/);
+  assert.ok(app.includes("description.textContent='OpenAPI 3.1 exporta métodos, paths, nomes de parâmetros e schemas de body sem valores literais."));
+  assert.ok(app.includes("description.textContent='O arquivo pode incluir requests, pastas, ações e o ambiente ativo, conforme o formato."));
+});
+
+test('README and ROADMAP document OpenAPI 3.1 export scope and limitations', async () => {
+  const readme = await fs.readFile(path.join(__dirname, 'README.md'), 'utf8');
+  const roadmap = await fs.readFile(path.join(__dirname, 'ROADMAP.md'), 'utf8');
+  assert.match(readme, /### Exportar OpenAPI 3\.1/);
+  assert.match(readme, /\.openapi\.json/);
+  assert.match(readme, /não inclui valores de Auth, body ou resposta/i);
+  assert.match(readme, /sem valores literais/i);
+  assert.match(readme, /requests repetidas[\s\S]*interrompem a exportação/i);
+  assert.match(readme, /multipart[\s\S]*GraphQL[\s\S]*Auth/i);
+  assert.match(readme, /https:\/\/api\.example\.test/);
+  assert.match(roadmap, /OpenAPI 3\.1/);
+  assert.match(roadmap, /credenciais/i);
+});
+
 function runCli(args, extraEnv = {}) {
   return new Promise(resolve => {
     const child = spawn(process.execPath, [cliPath, ...args], { cwd: __dirname, env: { ...process.env, ...extraEnv } });

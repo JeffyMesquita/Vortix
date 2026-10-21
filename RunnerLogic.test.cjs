@@ -3107,3 +3107,258 @@ test('buildHttpieCommand validates methods, URLs, and proxy conflicts without le
     return true;
   });
 });
+
+test('buildOpenApi31Export maps method, path, required path params, query, headers, Accept, Content-Type, and JSON body', () => {
+  const { buildOpenApi31Export } = runnerLogic();
+  const { document, warnings } = buildOpenApi31Export({
+    name: 'Loja de exemplo',
+    requests: [{
+      name: 'Criar item',
+      method: 'POST',
+      baseUrl: 'https://api.example.test/v1',
+      route: '/items/{itemId}?expand=owner&limit=10',
+      headers: 'Accept: application/json, text/plain\nContent-Type: application/json\nX-Trace: trace-1',
+      body: '{"name":"Ana","token":"BODY_SENTINEL_7d1"}',
+      bodyMode: 'json'
+    }],
+    folders: []
+  }, {});
+
+  assert.equal(document.openapi, '3.1.0');
+  assert.equal(document.info.title, 'Loja de exemplo');
+  assert.equal(document.info.version, '1.0.0');
+  assert.deepEqual(document.servers, [{ url: 'https://api.example.test/v1' }]);
+  const operation = document.paths['/items/{itemId}'].post;
+  assert.ok(operation, 'POST operation should be emitted');
+  assert.equal(operation.summary, 'Criar item');
+
+  const pathParameter = operation.parameters.find(parameter => parameter.in === 'path' && parameter.name === 'itemId');
+  assert.deepEqual(pathParameter, { name: 'itemId', in: 'path', required: true, schema: { type: 'string' } });
+  assert.equal(operation.parameters.some(parameter => parameter.in === 'query' && parameter.name === 'expand'), true);
+  assert.equal(operation.parameters.some(parameter => parameter.in === 'query' && parameter.name === 'limit'), true);
+  assert.equal(operation.parameters.some(parameter => parameter.in === 'header' && parameter.name === 'X-Trace'), true);
+  assert.equal(operation.parameters.some(parameter => parameter.name === 'Accept'), false);
+  assert.equal(operation.parameters.some(parameter => parameter.name === 'Content-Type'), false);
+  assert.equal(operation.parameters.some(parameter => parameter.in === 'header' && parameter.name === 'Content-Type'), false);
+
+  assert.deepEqual(Object.keys(operation.responses['default'].content), ['application/json', 'text/plain']);
+  assert.deepEqual(operation.requestBody.content['application/json'].schema, { type: 'object', properties: { name: { type: 'string' } } });
+  assert.equal(Object.hasOwn(operation.requestBody.content['application/json'], 'example'), false);
+  assert.equal(JSON.stringify(document).includes('BODY_SENTINEL_7d1'), false, 'sensitive JSON body fields must be removed');
+  assert.ok(Array.isArray(warnings));
+  assert.ok(warnings.some(warning => /valores literais de bodies/i.test(warning)));
+  assert.equal(warnings.some(warning => /Content-Type.*header/i.test(warning)), false);
+});
+
+test('buildOpenApi31Export always emits a non-empty response and keeps custom headers without inventing parameters', () => {
+  const { buildOpenApi31Export } = runnerLogic();
+  const { document } = buildOpenApi31Export({
+    name: 'Ping',
+    requests: [{ name: 'Ping', method: 'GET', baseUrl: 'https://api.example.test', route: '/ping', headers: '', body: '' }],
+    folders: []
+  }, {});
+  const operation = document.paths['/ping'].get;
+  assert.ok(operation.responses && Object.keys(operation.responses).length > 0);
+  assert.equal(typeof operation.responses['default'].description, 'string');
+  assert.equal(Object.hasOwn(operation.responses['default'], 'content'), false);
+});
+
+test('buildOpenApi31Export converts safe active server variables and falls back to a safe placeholder for sensitive or invalid defaults', () => {
+  const { buildOpenApi31Export } = runnerLogic();
+  const safe = buildOpenApi31Export({
+    name: 'Servidores',
+    requests: [{ method: 'GET', baseUrl: 'https://{{host}}/v1', route: '/status' }],
+    folders: []
+  }, { host: 'api.example.test' });
+  assert.deepEqual(safe.document.servers[0], {
+    url: 'https://{host}/v1',
+    variables: { host: { default: 'api.example.test' } }
+  });
+  assert.doesNotMatch(JSON.stringify(safe.document), /\{\{host\}\}/);
+
+  const pureTemplate = buildOpenApi31Export({
+    name: 'Servidor base',
+    requests: [{ method: 'GET', baseUrl: '{{baseUrl}}', route: '/status' }],
+    folders: []
+  }, { baseUrl: 'https://api.example.test' });
+  assert.deepEqual(pureTemplate.document.servers[0], {
+    url: '{baseUrl}',
+    variables: { baseUrl: { default: 'https://api.example.test' } }
+  });
+  assert.doesNotMatch(JSON.stringify(pureTemplate.document), /\{\{baseUrl\}\}/);
+
+  const placeholder = buildOpenApi31Export({
+    name: 'Servidores inseguros',
+    requests: [{ method: 'GET', baseUrl: 'https://{{token}}/v1', route: '/status' }],
+    folders: []
+  }, { token: 'https://user:pass@private.example.test/?secret=SERVER_SENTINEL' });
+  assert.equal(placeholder.document.servers[0].url, 'https://api.example.test');
+  assert.equal(JSON.stringify(placeholder.document).includes('SERVER_SENTINEL'), false);
+  assert.equal(JSON.stringify(placeholder.document).includes('private.example.test'), false);
+  assert.ok(placeholder.warnings.some(warning => /placeholder|servidor/i.test(warning)));
+
+  const missing = buildOpenApi31Export({
+    name: 'Servidor ausente',
+    requests: [{ method: 'GET', baseUrl: '{{baseUrl}}/v1', route: '/status' }],
+    folders: []
+  }, {});
+  assert.equal(missing.document.servers[0].url, 'https://api.example.test');
+  assert.doesNotMatch(JSON.stringify(missing.document), /\{\{baseUrl\}\}/);
+  assert.ok(missing.warnings.some(warning => /placeholder|servidor/i.test(warning)));
+});
+
+test('buildOpenApi31Export omits Auth values, response examples, scripts, cookies, and nested folder hierarchy with warnings', () => {
+  const { buildOpenApi31Export } = runnerLogic();
+  const marker = 'OPENAPI_SECRET_SENTINEL_91c4';
+  const { document, warnings } = buildOpenApi31Export({
+    name: 'Coleção segura',
+    auth: { authMode: 'custom', authType: 'bearer', bearerToken: marker },
+    cookieJar: [{ name: 'session', value: marker }],
+    requests: [{
+      name: 'Perfil',
+      method: 'GET',
+      baseUrl: 'https://api.example.test',
+      route: '/me',
+      headers: `Authorization: Bearer ${marker}\nCookie: session=${marker}\nX-Trace: ok`,
+      authMode: 'custom',
+      authType: 'apiKey',
+      apiKeyName: 'X-API-Key',
+      apiKeyLocation: 'header',
+      apiKeyValue: marker,
+      responseExamples: [{ status: 200, body: marker }],
+      responses: { '200': { body: marker } },
+      preRequestActions: [{ type: 'template', value: marker }],
+      responseTests: [{ source: marker }],
+      captureResponseVariable: true
+    }],
+    folders: [{
+      name: 'Admin',
+      folders: [{
+        name: 'Interno',
+        auth: { authMode: 'custom', authType: 'basic', basicUsername: marker, basicPassword: marker },
+        requests: [{ name: 'Interno', method: 'GET', baseUrl: 'https://api.example.test', route: '/admin/internal' }],
+        folders: []
+      }],
+      requests: [],
+      auth: { authMode: 'custom', authType: 'bearer', bearerToken: marker }
+    }]
+  }, { token: marker });
+
+  const serialized = JSON.stringify(document);
+  assert.equal(serialized.includes(marker), false, 'no credential, response example, script, or cookie value may be serialized');
+  assert.doesNotMatch(serialized, /"(?:responseExamples|preRequestActions|responseTests|cookieJar|Authorization|Cookie)"\s*:/i);
+  assert.ok(warnings.some(warning => /Auth/i.test(warning)), 'Auth limitation must be announced');
+  assert.ok(warnings.some(warning => /exemplos|respostas/i.test(warning)), 'response examples limitation must be announced');
+  assert.ok(warnings.some(warning => /scripts|automa/i.test(warning)), 'scripts limitation must be announced');
+  assert.ok(warnings.some(warning => /cookies/i.test(warning)), 'cookie limitation must be announced');
+  assert.ok(warnings.some(warning => /pastas aninhadas/i.test(warning)), 'nested folders limitation must be announced');
+});
+
+test('buildOpenApi31Export exports only Auth scheme metadata and a security requirement without credentials', () => {
+  const { buildOpenApi31Export } = runnerLogic();
+  const marker = 'AUTH_METADATA_SENTINEL_42f0';
+  const { document, warnings } = buildOpenApi31Export({
+    name: 'Auth metadata',
+    auth: { authMode: 'custom', authType: 'basic', basicUsername: marker, basicPassword: marker },
+    requests: [{ name: 'Seguro', method: 'GET', baseUrl: 'https://api.example.test', route: '/secure', authMode: 'inherit' }],
+    folders: []
+  }, {});
+
+  assert.deepEqual(document.security, [{ basicAuth: [] }]);
+  assert.deepEqual(document.components.securitySchemes.basicAuth, { type: 'http', scheme: 'basic' });
+  assert.equal(JSON.stringify(document).includes(marker), false);
+  assert.ok(warnings.some(warning => /credenciais|valores/i.test(warning)));
+});
+
+test('buildOpenApi31Export warns about multipart and GraphQL without serializing file contents or GraphQL values', () => {
+  const { buildOpenApi31Export } = runnerLogic();
+  const marker = 'MULTIPART_SENTINEL_5a2d';
+  const multipart = buildOpenApi31Export({
+    name: 'Upload',
+    requests: [{
+      name: 'Upload', method: 'POST', baseUrl: 'https://api.example.test', route: '/upload',
+      headers: 'Content-Type: multipart/form-data', bodyMode: 'multipart',
+      multipartFields: [{ name: 'token', type: 'text', value: marker }, { name: 'file', type: 'file', fileName: 'secret.txt' }]
+    }],
+    folders: []
+  }, {});
+  assert.ok(multipart.document.paths['/upload'].post.requestBody.content['multipart/form-data']);
+  assert.equal(JSON.stringify(multipart.document).includes(marker), false);
+  assert.equal(JSON.stringify(multipart.document).includes('secret.txt'), false);
+  assert.ok(multipart.warnings.some(warning => /multipart/i.test(warning)));
+
+  const graphql = buildOpenApi31Export({
+    name: 'GraphQL',
+    requests: [{
+      name: 'Consulta', method: 'POST', baseUrl: 'https://api.example.test', route: '/graphql',
+      bodyMode: 'graphql', graphqlQuery: `query { token }`, graphqlVariables: `{"token":"${marker}"}`
+    }],
+    folders: []
+  }, {});
+  assert.ok(graphql.document.paths['/graphql'].post.requestBody.content['application/json']);
+  assert.equal(JSON.stringify(graphql.document).includes(marker), false);
+  assert.ok(graphql.warnings.some(warning => /GraphQL/i.test(warning)));
+});
+
+test('buildOpenApi31Export turns Vortix path templates into required OpenAPI parameters', () => {
+  const { buildOpenApi31Export } = runnerLogic();
+  const { document } = buildOpenApi31Export({
+    name: 'Path templates',
+    requests: [{ method: 'GET', baseUrl: 'https://api.example.test', route: '/users/{{userId}}/orders/{{orderId}}' }],
+    folders: []
+  }, {});
+
+  const operation = document.paths['/users/{userId}/orders/{orderId}'].get;
+  assert.deepEqual(operation.parameters.filter(parameter => parameter.in === 'path'), [
+    { name: 'userId', in: 'path', required: true, schema: { type: 'string' } },
+    { name: 'orderId', in: 'path', required: true, schema: { type: 'string' } }
+  ]);
+});
+
+test('buildOpenApi31Export rejects duplicate method and path instead of silently dropping an operation', () => {
+  const { buildOpenApi31Export } = runnerLogic();
+  assert.throws(() => buildOpenApi31Export({
+    name: 'Ambiguous operations',
+    requests: [
+      { name: 'List compact', method: 'GET', baseUrl: 'https://api.example.test', route: '/users' },
+      { name: 'List detailed', method: 'GET', baseUrl: 'https://api.example.test', route: '/users?expand=roles' }
+    ],
+    folders: []
+  }, {}), /operações duplicadas com o mesmo método e path/i);
+});
+
+test('buildOpenApi31Export infers body schemas without exporting literal request values', () => {
+  const { buildOpenApi31Export } = runnerLogic();
+  const marker = 'OPENAPI_BODY_VALUE_SENTINEL_c8a1';
+  const { document, warnings } = buildOpenApi31Export({
+    name: 'Body schema',
+    requests: [
+      {
+        name: 'JSON', method: 'POST', baseUrl: 'https://api.example.test', route: '/users', bodyMode: 'json',
+        body: JSON.stringify({ name: 'Alice', access_token: marker, profile: { age: 33, enabled: true } })
+      },
+      {
+        name: 'Form', method: 'POST', baseUrl: 'https://api.example.test', route: '/form', bodyMode: 'urlencoded',
+        body: `name=Alice&${encodeURIComponent('client_secret')}=${encodeURIComponent(marker)}&city=Recife`
+      },
+      { name: 'Text', method: 'POST', baseUrl: 'https://api.example.test', route: '/text', bodyMode: 'text', body: marker }
+    ],
+    folders: []
+  }, {});
+
+  const jsonContent = document.paths['/users'].post.requestBody.content['application/json'];
+  assert.deepEqual(jsonContent.schema, {
+    type: 'object',
+    properties: {
+      name: { type: 'string' },
+      profile: { type: 'object', properties: { age: { type: 'number' }, enabled: { type: 'boolean' } } }
+    }
+  });
+  assert.equal(Object.hasOwn(jsonContent, 'example'), false);
+  const formProperties = document.paths['/form'].post.requestBody.content['application/x-www-form-urlencoded'].schema.properties;
+  assert.deepEqual(formProperties, { name: { type: 'string' }, city: { type: 'string' } });
+  assert.equal(Object.hasOwn(document.paths['/form'].post.requestBody.content['application/x-www-form-urlencoded'], 'example'), false);
+  assert.equal(Object.hasOwn(document.paths['/text'].post.requestBody.content['text/plain'], 'example'), false);
+  assert.equal(JSON.stringify(document).includes(marker), false);
+  assert.ok(warnings.some(warning => /valores literais de bodies/i.test(warning)));
+});

@@ -41,6 +41,7 @@
   - [Runner CLI para CI/CD](#runner-cli-para-cicd)
   - [Histórico do Runner](#histórico-do-runner)
 - [Importação e exportação](#importação-e-exportação)
+  - [Exportar OpenAPI 3.1](#exportar-openapi-31)
 - [Histórico de respostas](#histórico-de-respostas)
 - [Persistência e backups](#persistência-e-backups)
 - [Segurança](#segurança)
@@ -76,7 +77,7 @@ O modo público permite uso sem senha compartilhada. Cada navegador recebe uma s
 - **Runner:** execute requests de uma coleção ou pasta em sequência, com conjuntos de dados, intervalo, parada por falha, repetição das falhas e um histórico local seguro das rodadas.
 - **Temas e fontes:** Dracula, Monokai, One Dark, Nord, Solarized Dark e GitHub Dark; Fira Code, JetBrains Mono, Cascadia Code, Cascadia Mono e IBM Plex Mono.
 - **Editor JSON:** destaque de sintaxe e formatação com indentação de dois espaços.
-- **Intercâmbio:** Vortix JSON, ambientes Postman, Insomnia v4, Postman Collection v2.1, cURL, HTTPie, OpenAPI 3 em JSON.
+- **Intercâmbio:** Vortix JSON, ambientes Postman, Insomnia v4, Postman Collection v2.1, cURL, HTTPie, importação de OpenAPI 3 e exportação de coleção como OpenAPI 3.1 JSON.
 - **Backups:** exportação simples em JSON ou arquivo protegido por senha.
 
 Requests novas começam vazias. A URL base e os demais valores vêm do ambiente e da configuração que você criar.
@@ -754,10 +755,29 @@ Abra o Runner para ver a lista compacta. Cada item mostra a data e o resumo; as 
 | Insomnia Export JSON v4 | Sim | Sim |
 | Postman Collection v2.1 | Sim | Sim |
 | Comando cURL | Sim | - |
-| OpenAPI 3.0/3.1/3.2 JSON | Sim | - |
+| OpenAPI 3.0/3.1/3.2 JSON | Sim | OpenAPI 3.1, em JSON |
 | Ambiente Postman JSON | Sim | Sim, por ambiente |
 
 Na importação, o Vortix pede confirmação antes de guardar credenciais Bearer, Basic, API Key e variáveis sensíveis com proteção local. A exportação omite credenciais por padrão; se marcar a opção, o JSON poderá conter esses valores sem criptografia. Cookies e chaves privadas continuam fora do export.
+
+### Exportar OpenAPI 3.1
+
+No diálogo **Exportar coleção**, escolha **OpenAPI 3.1** para baixar um arquivo `*.openapi.json` com `openapi: "3.1.0"`, `info.title` igual ao nome da coleção e `info.version` fixa. O builder recebe apenas a coleção sanitizada e as variáveis não sensíveis do ambiente ativo; não há controles adicionais de título ou versão.
+
+O documento inclui método, path e nomes de parâmetros de path/query/header. Todo `{{param}}` ou `{param}` no path vira um parâmetro `in: "path"` obrigatório, com o mesmo nome. `Accept` define os tipos em `responses.default.content`; `Content-Type` escolhe `requestBody.content` e nunca é emitido como parâmetro de header. Todo body produz um schema inferido de sua estrutura, sem valores literais, e campos sensíveis são omitidos. Toda operação tem `responses` não vazio, com resposta `default` genérica quando não há uma resposta específica representável. Requests repetidas com o mesmo método e path interrompem a exportação para evitar descartar operações silenciosamente.
+
+Servidores com `{{var}}` são convertidos para a forma OpenAPI `{var}` e recebem `default` somente quando a variável ativa correspondente existe, não tem nome sensível e a URL HTTP(S) resultante é válida, sem usuário, senha, query ou fragmento. Caso contrário, o arquivo usa o placeholder seguro `https://api.example.test` e mostra um aviso. Nenhum alvo real de credencial ou valor sensível é exposto.
+
+O OpenAPI 3.1 não inclui valores de Auth, body ou resposta. Auth é exportada apenas como metadados de esquema (`bearer`, `basic` ou `apiKey`) e, quando possível, um `security requirement`. Headers, query values, scripts, cookies e valores de exemplo não são representados. O documento inclui o nome da coleção, URLs de servidor, paths e nomes de parâmetros/campos; eles podem revelar identificadores ou contexto interno. Antes de compartilhar, revise o arquivo baixado e os avisos que aparecem antes do download. O formato também não preserva integralmente:
+
+- exemplos e respostas salvas, scripts, ações pré-request, testes e captura de variáveis;
+- cookies e Cookie jar;
+- arquivos e valores de multipart, que viram um `requestBody` genérico;
+- query, variables e `operationName` de GraphQL;
+- hierarquia de pastas aninhadas, achatada em tags;
+- conteúdo textual ou XML não mapeável, representado somente como schema genérico.
+
+Auth permanece apenas como metadados de esquema, sem valores. A exportação OpenAPI não altera os formatos Vortix, Insomnia ou Postman e não envia requests nem grava o rascunho.
 
 Em **Configurações → Ambientes**, clique em **Exportar** no ambiente desejado para baixar um `*.postman_environment.json` independente. Postman e Insomnia aceitam esse formato para importar ambientes. O Vortix detecta possíveis segredos pelo nome da variável e os omite por padrão; revise os valores antes de compartilhar. Para incluí-los, confirme a inclusão e o aviso sobre o arquivo sem criptografia. As entradas incluídas usam `type: "secret"` para serem mascaradas no Postman, mas seus valores continuam legíveis no JSON. Cookies, chaves privadas e o cofre de segredos nunca entram no arquivo. O formato Postman não guarda os grupos do Vortix; ao importar, o ambiente entra no grupo **Importado**. A exportação usa somente os valores visíveis no formulário e não salva o rascunho.
 
