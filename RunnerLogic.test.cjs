@@ -296,6 +296,37 @@ test('workspace exposes the Runner and its dataset/write safety controls', () =>
   assert.match(html, /id="runner-stop-on-error"/);
 });
 
+test('sidebar collection actions use vector icons and the tree overflow menu has a descriptive accessible name', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const start = html.indexOf('<div class="collection-tools">'), end = html.indexOf('</div>', start);
+  const toolbar = html.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  for (const id of ['import-collection', 'export-collection', 'run-collection', 'add-collection-heading']) {
+    const button = toolbar.match(new RegExp(`<button[^>]*id="${id}"[^>]*>[\\s\\S]*?<\\/button>`))?.[0] || '';
+    assert.match(button, /<svg[^>]*aria-hidden="true"/, `${id} should use a decorative SVG icon`);
+  }
+  assert.doesNotMatch(toolbar, /[⇩⇧▶＋]/);
+  const rowStart = app.indexOf('function makeContainerRow('), rowEnd = app.indexOf('\nfunction appendSavedRequest', rowStart);
+  assert.ok(rowStart >= 0 && rowEnd > rowStart);
+  assert.match(app.slice(rowStart, rowEnd), /menu\.setAttribute\('aria-label',/);
+});
+
+test('response status announces updates and keeps the full status available', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  assert.match(html, /id="response-status"[^>]*role="status"[^>]*aria-live="polite">Aguardando<\/span>/);
+  const start = app.indexOf('function showResponse('), end = app.indexOf('\nfunction ', start + 1);
+  assert.ok(start >= 0 && end > start);
+  assert.match(app.slice(start, end), /status\.title=statusText/);
+});
+
+test('sidebar hover feedback stays theme-colored without casting accent glows', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'wwwroot', 'style.css'), 'utf8');
+  assert.doesNotMatch(css, /box-shadow:\s*0 2px 9px color-mix\(in srgb, var\(--accent\)/);
+  assert.doesNotMatch(css, /box-shadow:\s*0 2px 8px color-mix\(in srgb, var\(--accent\)/);
+});
+
 test('Runner history is reachable, accessible, and wired to persistent workspace settings', () => {
   const html = fs.readFileSync(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');

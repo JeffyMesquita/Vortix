@@ -1372,7 +1372,7 @@ function syncActiveWorkspaceTab(markDirty=false){
   try{tab.request=getSnapshot();}catch{}
   renderWorkspaceTabs();scheduleWorkspaceTabsPersist();return tab;
 }
-function clearWorkspaceResponse(){clearCurrentResponseExample();showResponse('Aguardando envio','idle','','');byId('response-variable-result').hidden=true;renderResponseTestResults([]);}
+function clearWorkspaceResponse(){clearCurrentResponseExample();showResponse('Aguardando','idle','','');byId('response-variable-result').hidden=true;renderResponseTestResults([]);}
 function applyWorkspaceDraft(draft){
   method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(draft.method)?draft.method:'GET';byId('base-url').value=draft.baseUrl||'';baseUrlAuto=!!draft.baseUrlAuto;byId('allow-insecure-http').checked=draft.allowInsecureHttp===true;route.value=String(draft.route??'');renderQueryParams(Array.isArray(draft.params)?draft.params:[]);byId('headers').value=draft.headers||'';body.value=draft.body||'';applyBodyMode(draft.bodyMode);renderMultipartFields(draft.multipartFields||[]);renderGraphqlFields(draft);selectedContainer={collectionId:draft.collectionId||'',folderId:draft.folderId||''};byId('save-token-history').checked=draft.saveBearerToken!==false;applyAuthFields(draft);byId('token-client-id').value=draft.tokenClientId||'';byId('token-client-secret').value='';byId('token-helper').open=!!draft.tokenHelperOpen;
   renderPreRequestActions(draft.preRequestActions||[]);byId('pre-request-actions-enabled').checked=draft.preRequestActionsEnabled!==false;byId('pre-request-literal-consent').checked=draft.preRequestActionsLiteralConsent===true;updatePreRequestActionsUi();byId('capture-response-variable').checked=!!draft.captureResponseVariable;byId('response-variable-name').value=draft.responseVariableName||'token';byId('response-value-source').value=draft.responseValueSource==='text'?'text':'json';byId('response-json-path').value=draft.responseJsonPath||'access_token';byId('response-success-only').checked=draft.responseSuccessOnly!==false;byId('response-capture-target').value=draft.responseCaptureTarget==='vault'?'vault':'environment';byId('response-variable-result').hidden=true;restoreResponseTestDraft(draft.responseTests);
@@ -1441,13 +1441,18 @@ function makeContainerRow(item,collectionId,folderId,kind,count){
   const expand=document.createElement('button');expand.className='tree-tool tree-expand';expand.type='button';expand.textContent=collapsed.has(item.id)?'›':'⌄';expand.setAttribute('aria-label',collapsed.has(item.id)?'Expandir':'Recolher');
   expand.onclick=()=>{collapsed.has(item.id)?collapsed.delete(item.id):collapsed.add(item.id);renderCollectionTree();};
   const select=document.createElement('button');select.className='tree-select'+(selectedContainer.collectionId===collectionId&&selectedContainer.folderId===folderId?' selected':'');select.type='button';select.title=item.name;
-  const icon=document.createElement('span');icon.className='tree-icon';icon.textContent=kind==='collection'?'▤':'▰';
+  const icon=document.createElement('span');icon.className='tree-icon';icon.append(createSidebarIcon(kind==='collection'?'collection':'folder'));
   const name=document.createElement('span');name.className='tree-name';name.textContent=item.name;select.append(icon,name);
   if(count){const badge=document.createElement('span');badge.className='tree-count';badge.textContent=String(count);select.append(badge);}
   select.onclick=()=>selectContainer(collectionId,folderId);
-  const add=document.createElement('button');add.className='tree-tool';add.type='button';add.textContent='+';add.title='Criar subpasta';add.setAttribute('aria-label','Criar subpasta em '+item.name);add.onclick=()=>addFolder(collectionId,folderId);
-  const menu=document.createElement('button');menu.className='tree-tool';menu.type='button';menu.textContent='···';menu.title='Renomear ou excluir';menu.onclick=()=>manageNode(collectionId,folderId,kind);
+  const add=document.createElement('button');add.className='tree-tool';add.type='button';add.append(createSidebarIcon('plus'));add.title='Criar subpasta';add.setAttribute('aria-label','Criar subpasta em '+item.name);add.onclick=()=>addFolder(collectionId,folderId);
+  const menu=document.createElement('button');menu.className='tree-tool';menu.type='button';menu.append(createSidebarIcon('more'));menu.title='Opções de '+item.name;menu.setAttribute('aria-label','Mais opções para '+item.name);menu.onclick=()=>manageNode(collectionId,folderId,kind);
   row.append(expand,select,add,menu);return row;
+}
+function createSidebarIcon(name){
+  const namespace='http://www.w3.org/2000/svg',svg=document.createElementNS(namespace,'svg');svg.setAttribute('aria-hidden','true');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.7');svg.setAttribute('stroke-linecap','round');svg.setAttribute('stroke-linejoin','round');
+  const paths={collection:['M4 5.5h16v13H4z','M8 9h8','M8 12h8','M8 15h5'],folder:['M3.5 6.5h6l2 2h9v10h-17z','M3.5 9h17'],plus:['M12 5v14','M5 12h14'],more:['M5 12h.01','M12 12h.01','M19 12h.01']};
+  for(const d of paths[name]||[]){const path=document.createElementNS(namespace,'path');path.setAttribute('d',d);svg.append(path);}return svg;
 }
 function appendSavedRequest(parent,request,collectionId,folderId){
   const row=document.createElement('div');row.className='saved-request-row';const select=document.createElement('button');select.className='tree-select';select.type='button';select.title=request.name;
@@ -2089,7 +2094,7 @@ function handleJsonKeydown(event){
   }
 }
 function showResponse(statusText,statusClass,headersText,bodyText){
-  const status=byId('response-status');status.textContent=statusText;status.className='status '+statusClass;
+  const status=byId('response-status');status.textContent=statusText;status.title=statusText;status.className='status '+statusClass;
   const headers=byId('response-headers');headers.innerHTML=headersText?highlightJson(headersText):'A resposta aparecerá aqui.';headers.classList.toggle('empty',!headersText);
   responseBodyState=RunnerLogic.parseResponseBody(bodyText);responseTreeSource=null;
   if(!responseBodyState.isJson&&responseBodyView==='tree')responseBodyView='pretty';
