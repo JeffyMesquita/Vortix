@@ -902,6 +902,238 @@
     return { method: effectiveMethod, url: parsedUrl.href, headers, body, bearerToken };
   }
 
+  function quoteBashArgument(value) {
+    return "'" + String(value ?? '').replaceAll("'", "'\\''") + "'";
+  }
+
+  function quotePowerShellArgument(value) {
+    return "'" + String(value ?? '').replaceAll("'", "''") + "'";
+  }
+
+  function parseCurlRequestHeaders(source) {
+    const pairs = [];
+    const add = (rawName, rawValue) => {
+      const name = String(rawName ?? '').trim(), value = String(rawValue ?? '').trim();
+      if (!name || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || /[\r\n]/.test(value))
+        throw Error('Header inválido na request; revise nomes e valores.');
+      pairs.push([name, value]);
+    };
+    const addLine = line => {
+      const text = String(line ?? '').trim();
+      if (!text) return;
+      const colon = text.indexOf(':');
+      if (colon < 1) throw Error('Header inválido na request; use o formato Nome: valor.');
+      add(text.slice(0, colon), text.slice(colon + 1));
+    };
+    if (source == null || source === '') return pairs;
+    if (typeof source === 'string') {
+      for (const line of source.split(/\r?\n/)) addLine(line);
+      return pairs;
+    }
+    if (Array.isArray(source)) {
+      for (const item of source) {
+        if (Array.isArray(item)) add(item[0], item[1]);
+        else if (typeof item === 'string') addLine(item);
+        else if (item && typeof item === 'object') add(item.name ?? item.key, item.value);
+        else throw Error('Headers da request inválidos.');
+      }
+      return pairs;
+    }
+    if (typeof source === 'object') {
+      for (const [name, rawValues] of Object.entries(source)) {
+        for (const value of Array.isArray(rawValues) ? rawValues : [rawValues]) add(name, value);
+      }
+      return pairs;
+    }
+    throw Error('Headers da request inválidos.');
+  }
+
+  const curlTemplatePattern = /\{\{[^{}]+\}\}/;
+  const curlTemplateNamePattern = /^[A-Za-z_][A-Za-z0-9_.-]{0,79}$/;
+
+  function validateCurlUrl(value) {
+    const source = String(value ?? '').trim();
+    if (!source) throw Error('Informe uma URL absoluta HTTP ou HTTPS para o comando cURL.');
+    let cursor = 0;
+    for (const match of source.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) {
+      if (!curlTemplateNamePattern.test(match[1].trim()))
+        throw Error('Template de URL inválido; use nomes simples como {{baseUrl}} ou {{id}}.');
+      if (/[{}]/.test(source.slice(cursor, match.index)))
+        throw Error('Template de URL malformado; remova chaves extras.');
+      cursor = match.index + match[0].length;
+    }
+    if (/[{}]/.test(source.slice(cursor)))
+      throw Error('Template de URL malformado; remova chaves extras.');
+    const leading = /^\{\{\s*([^{}]+?)\s*\}\}/.exec(source);
+    if (leading) {
+      const suffix = source.slice(leading[0].length);
+      if (/^#/.test(suffix)) throw Error('Remova o fragmento da URL antes de gerar o comando.');
+      if (/^@/.test(suffix)) throw Error('Remova as credenciais embutidas na URL antes de gerar o comando.');
+      if (/^:\/\//.test(suffix))
+        throw Error('Templates não podem definir o esquema da URL; use uma URL HTTP(S) completa.');
+      if (suffix && !/^[/?]/.test(suffix) && !/^:(?:\d+|\{\{)/.test(suffix))
+        throw Error('Template de URL em posição insegura; use {{baseUrl}} ou inclua o esquema HTTP(S) literalmente.');
+    }
+    if (/\{\{[^{}]+\}\}:\/\//.test(source))
+      throw Error('Templates não podem definir o esquema da URL; use uma URL HTTP(S) completa.');
+    if (source.includes('#'))
+      throw Error('Remova o fragmento da URL antes de gerar o comando.');
+    const literalScheme = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//.exec(source);
+    if (!literalScheme && !leading)
+      throw Error('Informe uma URL absoluta HTTP ou HTTPS para o comando cURL.');
+    if (literalScheme && !['http', 'https'].includes(literalScheme[1].toLowerCase()))
+      throw Error('A URL do comando cURL precisa usar HTTP ou HTTPS.');
+    let masked = '';
+    cursor = 0;
+    for (const match of source.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) {
+      masked += source.slice(cursor, match.index);
+      if (match.index === 0) masked += 'https://vortix.invalid';
+      else {
+        const previous = source[match.index - 1], next = source[match.index + match[0].length] || '';
+        masked += previous === ':' && (next === '/' || next === '?' || next === '') ? '1' : 'vortix';
+      }
+      cursor = match.index + match[0].length;
+    }
+    masked += source.slice(cursor);
+    let parsed;
+    try { parsed = new URL(masked); }
+    catch { throw Error('Informe uma URL absoluta HTTP ou HTTPS para o comando cURL.'); }
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw Error('A URL do comando cURL precisa usar HTTP ou HTTPS.');
+    if (parsed.username || parsed.password) throw Error('Remova as credenciais embutidas na URL antes de gerar o comando.');
+    if (parsed.hash) throw Error('Remova o fragmento da URL antes de gerar o comando.');
+    if (!parsed.hostname) throw Error('Informe uma URL absoluta HTTP ou HTTPS para o comando cURL.');
+    return source;
+  }
+
+  function encodeCurlQueryComponent(value) {
+    return String(value ?? '').split(/(\{\{[^{}]+\}\})/g).map((part, index) => index % 2 ? part : encodeURIComponent(part)).join('');
+  }
+
+  function appendCurlQueryParameter(url, name, value) {
+    const pair = encodeCurlQueryComponent(name) + '=' + encodeCurlQueryComponent(value);
+    if (url.endsWith('?') || url.endsWith('&')) return url + pair;
+    return url + (url.includes('?') ? '&' : '?') + pair;
+  }
+
+  function curlUrlHasQueryParameter(url, name) {
+    const queryIndex = url.indexOf('?');
+    if (queryIndex < 0) return false;
+    for (const part of url.slice(queryIndex + 1).split('&')) {
+      const rawName = part.split('=', 1)[0];
+      let decoded;
+      try { decoded = decodeURIComponent(rawName.replace(/\+/g, ' ')); }
+      catch { decoded = rawName; }
+      if (decoded.toLowerCase() === String(name ?? '').toLowerCase()) return true;
+    }
+    return false;
+  }
+
+  function buildCurlCommand(request, options = {}) {
+    if (!request || typeof request !== 'object' || Array.isArray(request))
+      throw Error('Request inválida para gerar o comando cURL.');
+    const shell = options?.shell === 'powershell' ? 'powershell' : 'bash';
+    const includeSensitive = options?.includeSensitive === true;
+    const method = String(request.method || 'GET').trim().toUpperCase();
+    if (!methods.has(method)) throw Error('Método HTTP não suportado: ' + method);
+    const body = String(request.body ?? '');
+    if (body.trim() && ['GET', 'HEAD', 'OPTIONS'].includes(method))
+      throw Error('GET, HEAD e OPTIONS não enviam body.');
+    const rawAuthType = String(request.authType ?? '').trim();
+    const normalizedAuthType = rawAuthType
+      ? (['api-key', 'apikey'].includes(rawAuthType.toLowerCase()) ? 'apiKey' : rawAuthType.toLowerCase())
+      : undefined;
+    const auth = normalizeAuthFields({ ...request, authType: normalizedAuthType });
+    const warnings = [], warningSet = new Set();
+    const warn = message => {
+      const text = String(message ?? '');
+      if (text && !warningSet.has(text)) { warningSet.add(text); warnings.push(text); }
+    };
+
+    const headerPairs = parseCurlRequestHeaders(request.headers);
+    if (includeSensitive && headerPairs.some(([name]) => /^authorization$/i.test(name)))
+      throw Error('O proxy rejeita Authorization manual em Headers; configure a credencial em Auth e remova esse header.');
+    const hasTemplates = [request.url, body, auth.bearerToken, auth.basicUsername, auth.basicPassword, auth.apiKeyName, auth.apiKeyValue]
+      .some(value => curlTemplatePattern.test(String(value ?? '')))
+      || headerPairs.some(([name, value]) => curlTemplatePattern.test(name) || curlTemplatePattern.test(value));
+
+    let targetUrl = validateCurlUrl(request.url);
+    if (!includeSensitive) {
+      const queryIndex = targetUrl.indexOf('?');
+      if (queryIndex >= 0) {
+        const apiKeyQueryName = auth.authType === 'apiKey' && auth.apiKeyLocation === 'query' ? auth.apiKeyName.toLowerCase() : '';
+        const prefix = targetUrl.slice(0, queryIndex), query = targetUrl.slice(queryIndex + 1);
+        const kept = [], omitted = new Set();
+        for (const part of query.split('&')) {
+          if (!part) { kept.push(part); continue; }
+          const rawName = part.split('=', 1)[0];
+          let name;
+          try { name = decodeURIComponent(rawName.replace(/\+/g, ' ')); }
+          catch { name = rawName; }
+          if (isSensitiveVariableName(name) || (apiKeyQueryName && name.toLowerCase() === apiKeyQueryName)) { omitted.add(name); continue; }
+          kept.push(part);
+        }
+        if (omitted.size) warn('Parâmetros de query sensíveis foram omitidos por padrão: ' + [...omitted].join(', ') + '.');
+        targetUrl = kept.join('') ? prefix + '?' + kept.join('&') : prefix;
+      }
+    }
+
+    const apiKeyHeaderName = auth.authType === 'apiKey' && auth.apiKeyLocation === 'header' ? auth.apiKeyName.toLowerCase() : '';
+    const omittedHeaders = new Set(), sentHeaders = [];
+    for (const [name, value] of headerPairs) {
+      if (!includeSensitive && (isSensitiveVariableName(name) || (apiKeyHeaderName && name.toLowerCase() === apiKeyHeaderName))) { omittedHeaders.add(name); continue; }
+      sentHeaders.push([name, value]);
+    }
+    if (omittedHeaders.size) warn('Headers sensíveis foram omitidos por padrão: ' + [...omittedHeaders].join(', ') + '.');
+
+    const authHeaders = [];
+    let basicCredentials = '';
+    if (auth.authType !== 'none' && !includeSensitive) {
+      warn('Autenticação omitida por padrão. Marque a opção acima para incluir as credenciais.');
+      if (auth.authType === 'apiKey' && auth.apiKeyLocation === 'query')
+        warn('A API Key na query foi omitida por padrão. Marque a opção acima para incluí-la.');
+    } else if (auth.authType === 'bearer' && includeSensitive) {
+      let token = auth.bearerToken.trim();
+      if (/^Bearer\s+/i.test(token)) token = token.replace(/^Bearer\s+/i, '').trim();
+      if (/[\r\n]/.test(token)) throw Error('Token Bearer inválido para o comando cURL.');
+      if (token) authHeaders.push(['Authorization', 'Bearer ' + token]);
+    } else if (auth.authType === 'basic' && includeSensitive) {
+      const username = auth.basicUsername, password = auth.basicPassword;
+      if (!username.trim() || username.includes(':') || /[\r\n]/.test(username) || !password || /[\r\n]/.test(password))
+        throw Error('Basic Auth requer usuário e senha válidos, sem dois-pontos no usuário.');
+      basicCredentials = username + ':' + password;
+    } else if (auth.authType === 'apiKey' && includeSensitive) {
+      const name = auth.apiKeyName.trim(), value = auth.apiKeyValue;
+      if (!name || !value || /[\r\n]/.test(name) || /[\r\n]/.test(value))
+        throw Error('API Key requer nome e valor válidos.');
+      if (auth.apiKeyLocation === 'query') {
+        if (curlUrlHasQueryParameter(targetUrl, name))
+          throw Error('A API Key já aparece nos parâmetros da URL; o proxy rejeita a duplicidade. Remova o parâmetro manual ou use apenas o campo Auth.');
+        targetUrl = appendCurlQueryParameter(targetUrl, name, value);
+      } else {
+        if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)
+          || ['authorization', 'proxy-authorization', 'host', 'content-length', 'transfer-encoding', 'content-type', 'cookie'].includes(name.toLowerCase()))
+          throw Error('Nome de header da API Key inválido ou reservado.');
+        if (headerPairs.some(([headerName]) => headerName.toLowerCase() === name.toLowerCase()))
+          throw Error('O header da API Key já aparece em Headers; o proxy rejeita a duplicidade. Remova o header manual ou use apenas o campo Auth.');
+        authHeaders.push([name, value]);
+      }
+    }
+
+    if (body && !includeSensitive)
+      warn('O body foi omitido por padrão. Marque a opção acima para incluí-lo no comando.');
+
+    const quote = shell === 'powershell' ? quotePowerShellArgument : quoteBashArgument;
+    const argumentsList = [shell === 'powershell' ? 'curl.exe' : 'curl', '--request', method, '--url', quote(targetUrl)];
+    if (basicCredentials) argumentsList.push('--user', quote(basicCredentials));
+    for (const [name, value] of [...sentHeaders, ...authHeaders])
+      argumentsList.push('--header', quote(name + ': ' + value));
+    if (includeSensitive && body) argumentsList.push('--data-raw', quote(body));
+    const command = argumentsList.join(' ');
+    if (hasTemplates)
+      warn('Templates {{...}} não são resolvidos fora do Vortix; substitua-os manualmente antes de executar o comando cURL, que só funciona depois de substituir esses valores.');
+    return { command, warnings };
+  }
+
   function parseOpenApiSpec(document) {
     if (!document || typeof document !== 'object' || Array.isArray(document)) throw Error('Documento OpenAPI invalido.');
     const version = String(document.openapi || '');
@@ -2109,5 +2341,5 @@
     return makeLocalSecretVault({ salt: saltBytes, key, cryptoProvider, secrets, envelope: { ...envelope, names: [...secrets.keys()] } });
   }
 
-  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, buildCurlCommand, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

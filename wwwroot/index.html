@@ -84,6 +84,7 @@
             </select>
             <label class="visually-hidden" for="route">Rota</label>
             <input id="route" class="route-input" type="text" autocomplete="off" spellcheck="false" aria-label="Rota da API" placeholder="/v1/resource">
+            <button class="button secondary request-curl-button" id="generate-curl" type="button" title="Gerar comando cURL">cURL</button>
             <button class="button primary send-button" id="send-request" type="button"><span aria-hidden="true">▶</span> Enviar</button>
           </div>
           <label class="base-url-label" for="base-url">URL base</label>
@@ -598,6 +599,21 @@ insomnia.environment.set("token", body.access_token);</code></pre>
         <p class="hint command-import-error" id="command-import-error" role="alert" hidden></p>
       </div>
       <div class="dialog-actions"><button class="button secondary" id="cancel-import-dialog" type="button">Cancelar</button><button class="button primary" id="create-imported-request" type="button">Abrir como rascunho</button></div>
+    </form>
+  </dialog>
+  <dialog class="app-dialog command-import-dialog curl-export-dialog" id="curl-export-dialog" aria-labelledby="curl-export-title">
+    <form method="dialog">
+      <div class="dialog-heading"><div><p class="eyebrow">INTERCÂMBIO</p><h2 id="curl-export-title">Gerar comando cURL</h2><p class="dialog-description">A prévia é local: não envia a request nem salva o comando.</p></div><button class="icon-button dialog-close" id="close-curl-export" type="button" aria-label="Fechar prévia cURL">×</button></div>
+      <div class="dialog-scroll">
+        <label for="curl-shell">Terminal</label>
+        <select id="curl-shell"><option value="powershell">PowerShell (Windows)</option><option value="bash">Bash / zsh</option></select>
+        <label class="check-row" for="curl-include-sensitive"><input id="curl-include-sensitive" type="checkbox"><span>Incluir Body, Auth e campos sensíveis</span></label>
+        <p class="hint curl-export-safety" id="curl-export-safety">Por segurança, esses valores ficam fora do comando até você confirmar. Templates <code>{{variavel}}</code> não são resolvidos fora do Vortix.</p>
+        <pre class="curl-command-preview" id="curl-command-preview" tabindex="0" aria-label="Prévia do comando cURL"><code></code></pre>
+        <p class="hint curl-export-hint" id="curl-export-hint" role="status" aria-live="polite"></p>
+        <p class="hint command-import-error" id="curl-export-error" role="alert" hidden></p>
+      </div>
+      <div class="dialog-actions"><button class="button secondary" id="cancel-curl-export" type="button">Fechar</button><button class="button primary" id="copy-curl-command" type="button" disabled>Copiar cURL</button></div>
     </form>
   </dialog>
 

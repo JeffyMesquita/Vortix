@@ -31,6 +31,7 @@
 - [GraphQL](#graphql)
   - [Schema, confirmação e autocomplete](#schema-confirmação-e-autocomplete)
 - [Importar cURL](#importar-curl)
+- [Gerar comando cURL](#gerar-comando-curl)
   - [Importar HTTPie](#importar-httpie)
 - [Importar OpenAPI JSON](#importar-openapi-json)
 - [Ambientes e variáveis](#ambientes-e-variáveis)
@@ -494,6 +495,32 @@ A importação converte método, URL, Params, headers e body. Também entende as
 A primeira versão aceita `-X`/`--request`, `-H`/`--header`, `--url`, `-d`/`--data`, `--data-raw`, `--data-binary`, `--json` e `-I`/`--head`. Body enviado sem método explícito vira POST; `--data` sem Content-Type recebe `application/x-www-form-urlencoded`.
 
 O Vortix rejeita comandos com credenciais na URL, parâmetros de query sensíveis, autenticação Basic, cookies, upload de arquivo e opções não reconhecidas. Isso evita importar uma chamada alterada silenciosamente. Configure esses campos manualmente e importe a request novamente quando terminar.
+
+## Gerar comando cURL
+
+Na linha da request, clique em **cURL** para abrir uma prévia em **PowerShell (Windows)** ou **Bash / zsh**. A geração local não envia a request nem salva o comando. O clipboard só muda ao clicar em **Copiar cURL**.
+
+Body, Auth, headers sensíveis e Params de query sensíveis são omitidos por padrão. Para incluí-los, marque **Incluir Body, Auth e campos sensíveis** e confirme. Valores então aparecem na tela e podem ser copiados; trate o comando como uma credencial e revise antes de colar ou compartilhar.
+
+Templates como `{{baseUrl}}` e `{{token}}` não são resolvidos: Vortix não lê o ambiente nem o cofre para gerar o comando. Substitua esses templates no terminal. Ações pré-request não são executadas; body multipart, arquivos locais e Cookie jar também não entram na prévia. Configure esses itens manualmente no terminal.
+
+Exemplo PowerShell:
+
+~~~powershell
+curl.exe `
+  --request 'GET' `
+  --url 'https://api.example.com/v1/users?page=2' `
+  --header 'Accept: application/json'
+~~~
+
+Exemplo Bash / zsh:
+
+~~~sh
+curl \
+  --request 'GET' \
+  --url 'https://api.example.com/v1/users?page=2' \
+  --header 'Accept: application/json'
+~~~
 
 ### Importar HTTPie
 
