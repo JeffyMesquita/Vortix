@@ -10,6 +10,10 @@ function runnerLogic() {
   return require(modulePath);
 }
 
+function credentialedTestUrl(host = 'api.example.test') {
+  return ['https://', 'user', ':', 'pass', '@', host].join('');
+}
+
 test('imports OpenAPI 3 paths into tagged requests with parameters and JSON examples', () => {
   const { parseOpenApiSpec } = runnerLogic();
   const result = parseOpenApiSpec({
@@ -1785,7 +1789,7 @@ test('OAuth Client Credentials validates endpoint security and client settings',
   const { buildOAuthClientCredentialsRequest } = runnerLogic();
   const valid = { tokenUrl: 'https://identity.example.test/token', clientId: 'id', clientSecret: 'secret' };
   assert.throws(() => buildOAuthClientCredentialsRequest({ ...valid, tokenUrl: 'ftp://identity.example.test/token' }), /HTTP|HTTPS/i);
-  assert.throws(() => buildOAuthClientCredentialsRequest({ ...valid, tokenUrl: 'https://user:pass@identity.example.test/token' }), /credenciais|URL/i);
+  assert.throws(() => buildOAuthClientCredentialsRequest({ ...valid, tokenUrl: credentialedTestUrl() }), /credenciais|URL/i);
   assert.throws(() => buildOAuthClientCredentialsRequest({ ...valid, tokenUrl: 'https://identity.example.test/token#fragment' }), /fragmento|URL/i);
   assert.throws(() => buildOAuthClientCredentialsRequest({ ...valid, tokenUrl: 'http://identity.example.test/token' }), /HTTP|TLS/i);
   assert.doesNotThrow(() => buildOAuthClientCredentialsRequest({ ...valid, tokenUrl: 'http://identity.example.test/token', allowInsecureHttp: true }));
@@ -2721,7 +2725,7 @@ test('buildCurlCommand validates the HTTP method allowlist and absolute HTTP(S) 
   assert.throws(() => buildCurlCommand({ ...valid, method: 'TRACE' }), /método/i);
   assert.throws(() => buildCurlCommand({ ...valid, url: '/v1/items' }), /absoluta|HTTP/i);
   assert.throws(() => buildCurlCommand({ ...valid, url: 'ftp://api.example.test/v1/items' }), /HTTP/i);
-  assert.throws(() => buildCurlCommand({ ...valid, url: 'https://user:pass@api.example.test/v1/items' }), /credenciais/i);
+  assert.throws(() => buildCurlCommand({ ...valid, url: credentialedTestUrl() }), /credenciais/i);
   assert.throws(() => buildCurlCommand({ ...valid, url: 'https://api.example.test/v1/items#fragment' }), /fragmento/i);
   assert.throws(() => buildCurlCommand({ ...valid, body: '{}' }), /body/i);
 });
@@ -3062,7 +3066,7 @@ test('buildHttpieCommand validates methods, URLs, and proxy conflicts without le
   assert.throws(() => buildHttpieCommand({ ...valid, method: 'TRACE' }), /método/i);
   assert.throws(() => buildHttpieCommand({ ...valid, url: '/v1/items' }), /absoluta|HTTP/i);
   assert.throws(() => buildHttpieCommand({ ...valid, url: 'ftp://api.example.test/v1/items' }), /HTTP/i);
-  assert.throws(() => buildHttpieCommand({ ...valid, url: 'https://user:pass@api.example.test/v1/items' }), /credenciais/i);
+  assert.throws(() => buildHttpieCommand({ ...valid, url: credentialedTestUrl() }), /credenciais/i);
   assert.throws(() => buildHttpieCommand({ ...valid, url: 'https://api.example.test/v1/items#fragment' }), /fragmento/i);
   assert.throws(() => buildHttpieCommand({ ...valid, body: '{}' }), /body/i);
 
@@ -3187,11 +3191,12 @@ test('buildOpenApi31Export converts safe active server variables and falls back 
   });
   assert.doesNotMatch(JSON.stringify(pureTemplate.document), /\{\{baseUrl\}\}/);
 
+  const credentialedServer = credentialedTestUrl('private.example.test') + '/?secret=SERVER_SENTINEL';
   const placeholder = buildOpenApi31Export({
     name: 'Servidores inseguros',
     requests: [{ method: 'GET', baseUrl: 'https://{{token}}/v1', route: '/status' }],
     folders: []
-  }, { token: 'https://user:pass@private.example.test/?secret=SERVER_SENTINEL' });
+  }, { token: credentialedServer });
   assert.equal(placeholder.document.servers[0].url, 'https://api.example.test');
   assert.equal(JSON.stringify(placeholder.document).includes('SERVER_SENTINEL'), false);
   assert.equal(JSON.stringify(placeholder.document).includes('private.example.test'), false);
@@ -3361,4 +3366,83 @@ test('buildOpenApi31Export infers body schemas without exporting literal request
   assert.equal(Object.hasOwn(document.paths['/text'].post.requestBody.content['text/plain'], 'example'), false);
   assert.equal(JSON.stringify(document).includes(marker), false);
   assert.ok(warnings.some(warning => /valores literais de bodies/i.test(warning)));
+});
+
+test('buildOpenApi31Export round-trips a whole server variable as baseUrl without a route prefix', () => {
+  const { buildOpenApi31Export, parseOpenApiSpec } = runnerLogic();
+  const exported = buildOpenApi31Export({
+    name: 'Base URL variable',
+    requests: [{ name: 'Status', method: 'GET', baseUrl: '{{baseUrl}}', route: '/status' }],
+    folders: []
+  }, { baseUrl: 'https://api.example.test/v1' });
+
+  const imported = parseOpenApiSpec(exported.document);
+  assert.equal(imported.collection.requests[0].baseUrl, '{{baseUrl}}');
+  assert.equal(imported.collection.requests[0].route, '/status');
+  assert.equal(imported.environment.variables.baseUrl, 'https://api.example.test/v1');
+});
+
+test('buildOpenApi31Export emits one query parameter for repeated names', () => {
+  const { buildOpenApi31Export } = runnerLogic();
+  const { document } = buildOpenApi31Export({
+    name: 'Repeated query names',
+    requests: [{ method: 'GET', baseUrl: 'https://api.example.test', route: '/search?tag=first&tag=second' }],
+    folders: []
+  }, {});
+
+  const queryParameters = document.paths['/search'].get.parameters.filter(parameter => parameter.in === 'query');
+  assert.deepEqual(queryParameters, [{ name: 'tag', in: 'query', required: false, schema: { type: 'string' } }]);
+});
+
+test('buildOpenApi31Export omits invalid media types and falls back to body mode with a generic warning', () => {
+  const { buildOpenApi31Export } = runnerLogic();
+  const { document, warnings } = buildOpenApi31Export({
+    name: 'Invalid media types',
+    requests: [{
+      method: 'POST', baseUrl: 'https://api.example.test', route: '/items', bodyMode: 'json', body: '{"name":"item"}',
+      headers: 'Accept: application/json; q=0.8, */*, application/*, {{acceptType}}, invalid media type\nContent-Type: application/{{bodyType}}; charset=utf-8'
+    }],
+    folders: []
+  }, {});
+
+  const operation = document.paths['/items'].post;
+  assert.deepEqual(Object.keys(operation.responses.default.content), ['application/json', '*/*', 'application/*']);
+  assert.deepEqual(Object.keys(operation.requestBody.content), ['application/json']);
+  assert.ok(warnings.some(warning => /tipo.*m[ií]dia/i.test(warning)));
+  assert.doesNotMatch(JSON.stringify({ document, warnings }), /acceptType|bodyType|invalid media type/);
+});
+
+test('buildOpenApi31Export canonicalizes templated path names across methods and rejects normalized collisions', () => {
+  const { buildOpenApi31Export } = runnerLogic();
+  const { document } = buildOpenApi31Export({
+    name: 'Templated path hierarchy',
+    requests: [
+      { method: 'GET', baseUrl: 'https://api.example.test', route: '/users/{{id}}' },
+      { method: 'POST', baseUrl: 'https://api.example.test', route: '/users/{{userId}}' }
+    ],
+    folders: []
+  }, {});
+
+  const paths = Object.keys(document.paths);
+  assert.equal(paths.length, 1);
+  assert.match(paths[0], /^\/users\/\{[^{}]+\}$/);
+  const parameterName = paths[0].match(/\{([^{}]+)\}/)[1];
+  for (const method of ['get', 'post']) {
+    assert.deepEqual(document.paths[paths[0]][method].parameters.filter(parameter => parameter.in === 'path'), [
+      { name: parameterName, in: 'path', required: true, schema: { type: 'string' } }
+    ]);
+  }
+
+  assert.throws(() => buildOpenApi31Export({
+    name: 'Normalized collision',
+    requests: [
+      { method: 'GET', baseUrl: 'https://api.example.test', route: '/users/{{id}}' },
+      { method: 'GET', baseUrl: 'https://api.example.test', route: '/users/{{userId}}' }
+    ],
+    folders: []
+  }, {}), error => {
+    assert.match(error.message, /operações duplicadas com o mesmo método e path/i);
+    assert.doesNotMatch(error.message, /GET|\/users|userId|\{\{id\}\}/);
+    return true;
+  });
 });

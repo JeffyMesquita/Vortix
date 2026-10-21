@@ -1444,12 +1444,20 @@
     return [];
   }
 
-  function parseOpenApiMediaTypes(value) {
-    return String(value || '').split(',').map(part => part.trim().split(';')[0].trim()).filter(Boolean);
-  }
-
   function openApiMediaType(value) {
     return String(value || '').split(';')[0].trim();
+  }
+
+  function parseOpenApiMediaTypes(value) {
+    return String(value || '').split(',').map(part => openApiMediaType(part)).filter(Boolean);
+  }
+
+  function openApiIsValidMediaType(value, allowWildcard) {
+    const match = /^([!#$%&'*+\-.^_`|~0-9A-Za-z]+)\/([!#$%&'*+\-.^_`|~0-9A-Za-z]+)$/.exec(String(value || ''));
+    if (!match) return false;
+    const [, type, subtype] = match;
+    if (type === '*' || subtype === '*') return allowWildcard === true && subtype === '*' && (type === '*' || !type.includes('*'));
+    return !type.includes('*') && !subtype.includes('*');
   }
 
   function openApiPathParameters(pathNames) {
@@ -1459,8 +1467,11 @@
   function appendOpenApiQueryParameters(parameters, rawQuery, warn) {
     const routeParams = [];
     try { for (const entry of new URLSearchParams(rawQuery)) routeParams.push(entry); } catch { /* keep an empty query */ }
+    const seenQueries = new Set(parameters.filter(parameter => parameter.in === 'query').map(parameter => parameter.name));
     for (const [name, value] of routeParams) {
       if (!name) continue;
+      if (seenQueries.has(name)) continue;
+      seenQueries.add(name);
       if (isSensitiveVariableName(name)) { warn('Parâmetro de query sensível foi omitido do OpenAPI.'); continue; }
       const referencedNames = [...String(value).matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map(match => match[1]);
       if (referencedNames.some(isSensitiveVariableName)) { warn('Parâmetro de query com template sensível foi omitido do OpenAPI.'); continue; }
@@ -1474,8 +1485,19 @@
     let contentType = '';
     for (const [name, value] of headerEntries) {
       const lower = name.toLowerCase();
-      if (lower === 'accept') { acceptTypes.push(...parseOpenApiMediaTypes(value)); continue; }
-      if (lower === 'content-type') { contentType = openApiMediaType(value); continue; }
+      if (lower === 'accept') {
+        for (const type of parseOpenApiMediaTypes(value)) {
+          if (openApiIsValidMediaType(type, true)) acceptTypes.push(type);
+          else warn('Tipo de mídia inválido foi omitido do OpenAPI.');
+        }
+        continue;
+      }
+      if (lower === 'content-type') {
+        const type = openApiMediaType(value);
+        if (openApiIsValidMediaType(type, false)) contentType = type;
+        else { warn('Tipo de mídia inválido foi omitido do OpenAPI.'); contentType = ''; }
+        continue;
+      }
       if (['authorization', 'proxy-authorization', 'cookie', 'set-cookie'].includes(lower) || isSensitiveVariableName(name)) {
         warn('Header sensível foi omitido do OpenAPI.');
         continue;
@@ -1537,7 +1559,31 @@
     return { content: { [targetContentType]: content } };
   }
 
-  function openApiRouteInfo(request) {
+  function canonicalizeOpenApiPath(path, registry) {
+    const originalNames = [];
+    const shape = path.replace(/\{([^{}]+)\}/g, (whole, name) => {
+      originalNames.push(name);
+      return '{p' + (originalNames.length - 1) + '}';
+    });
+    if (!registry.has(shape)) {
+      const used = new Set();
+      registry.set(shape, originalNames.map(name => {
+        const candidate = String(name || '').trim() || 'param';
+        let canonical = candidate, suffix = 2;
+        while (used.has(canonical)) canonical = candidate + suffix++;
+        used.add(canonical);
+        return canonical;
+      }));
+    }
+    const names = registry.get(shape);
+    let index = 0;
+    return {
+      path: path.replace(/\{([^{}]+)\}/g, () => '{' + names[index++] + '}'),
+      pathNames: names
+    };
+  }
+
+  function openApiRouteInfo(request, pathRegistry = new Map()) {
     const rawRoute = String(request.route || '/');
     const withoutFragment = rawRoute.split('#')[0];
     const queryIndex = withoutFragment.indexOf('?');
@@ -1546,8 +1592,7 @@
     let path = rawPath.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, name) => '{' + name + '}').replace(/%7B/gi, '{').replace(/%7D/gi, '}');
     if (!path.startsWith('/')) path = '/' + path;
     if (!path) path = '/';
-    const pathNames = [...new Set([...path.matchAll(/\{([^{}]+)\}/g)].map(match => match[1]))];
-    return { path, rawQuery, pathNames };
+    return { ...canonicalizeOpenApiPath(path, pathRegistry), rawQuery };
   }
 
   function createOpenApiOperationIdFactory() {
@@ -1607,11 +1652,12 @@
   function buildOpenApiPaths(document, flattened, { warn, ensureSecurityScheme, collectionScheme, globalServer }) {
     const tagNames = new Set();
     const nextOperationId = createOpenApiOperationIdFactory();
+    const pathRegistry = new Map();
     for (const item of flattened) {
       const request = item.request;
       const method = String(request.method || 'GET').trim().toUpperCase();
       if (!methods.has(method)) { warn('Método ' + method + ' não suportado e foi ignorado no OpenAPI.'); continue; }
-      const route = openApiRouteInfo(request);
+      const route = openApiRouteInfo(request, pathRegistry);
       const parameters = openApiPathParameters(route.pathNames);
       appendOpenApiQueryParameters(parameters, route.rawQuery, warn);
       const { acceptTypes, contentType } = readOpenApiHeaderParameters(parameters, parseOpenApiHeaderEntries(request.headers), warn);
@@ -1619,7 +1665,7 @@
       const requestBody = buildOpenApiRequestBody(request, contentType, warn);
       const pathItem = document.paths[route.path] || (document.paths[route.path] = {});
       const methodKey = method.toLowerCase();
-      if (pathItem[methodKey]) throw Error('A coleção tem operações duplicadas com o mesmo método e path, que o OpenAPI não consegue representar. Combine-as ou renomeie requests antes de exportar.');
+      if (pathItem[methodKey]) throw new Error('A coleção tem operações duplicadas com o mesmo método e path, que o OpenAPI não consegue representar. Combine-as ou renomeie requests antes de exportar.');
       warn(openApiRouteExposureWarning);
       const operation = createOpenApiOperation({
         operationId: nextOperationId(method, route.path),
@@ -1720,6 +1766,7 @@
         return '{{' + name + '}}';
       });
       if (/[?#]/.test(source)) throw Error('URL de servidor OpenAPI com query ou fragmento nao suportada.');
+      if (/^\{\{[^{}]+\}\}\/?$/.test(resolved)) return { baseUrl: resolved.replace(/\/+$/, ''), prefix: '' };
       const validationUrl = resolved.replace(/\{\{\s*([^{}]+)\s*\}\}/g, 'vortix');
       if (/^[a-z][a-z0-9+.-]*:\/\//i.test(validationUrl)) {
         let parsed;

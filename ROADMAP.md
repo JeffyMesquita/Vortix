@@ -294,9 +294,10 @@ Referências: [exportar um ambiente no Postman](https://learning.postman.com/doc
 - [x] Projetar allowlist de método, path, query, headers, body, `Accept` e `Content-Type`; não serializar Auth, exemplos/respostas, scripts, cookies ou Cookie jar.
 - [x] Inferir schemas de body sem exportar valores literais; omitir campos sensíveis e avisar que nome, URL, path e nomes de campos podem revelar contexto.
 - [x] Emitir `openapi: "3.1.0"`, `info.title` com o nome da coleção e `responses` não vazio em toda operação.
-- [x] Converter templates `{{id}}` do Vortix em `{id}` e gerar parâmetros `in: path` obrigatórios.
-- [x] Interromper a exportação diante de colisão de método + path, sem descartar uma request silenciosamente.
-- [x] Converter `{{var}}` em `{var}` nos servidores, usar defaults apenas quando seguros e cair para `https://api.example.test` com aviso.
+- [x] Converter templates `{{id}}` do Vortix em `{id}`, canonicalizar placeholders pela posição no path e gerar parâmetros `in: path` obrigatórios com o mesmo nome canônico.
+- [x] Deduplicar parâmetros de query repetidos e validar media types de `Accept`/`Content-Type` antes de usá-los como chave, caindo no padrão do body com aviso genérico.
+- [x] Interromper a exportação diante de colisão de método + path canônico, sem descartar uma request silenciosamente.
+- [x] Converter `{{var}}` em `{var}` nos servidores, usar defaults apenas quando seguros, preservar o round-trip de uma variável que ocupa a URL inteira como `baseUrl` e cair para `https://api.example.test` com aviso.
 - [x] Exportar Auth somente como metadados de esquema e security requirement, sempre avisando que valores não são representados.
 - [x] Produzir avisos para multipart, GraphQL, conteúdo não mapeável, pastas aninhadas, cookies, scripts e exemplos antes do download.
 - [x] Atualizar README e ROADMAP com escopo e limitações.
