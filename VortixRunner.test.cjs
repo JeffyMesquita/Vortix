@@ -129,6 +129,32 @@ test('manual sends and collection Runner evaluate OpenAPI contracts and show par
   assert.match(html, /data-editor-panel="tests"[\s\S]*?(?:Contrato OpenAPI|contrato da resposta)/i);
 });
 
+test('manual and Runner flows validate imported request bodies without passing contracts to the proxy', async () => {
+  const app = await fs.readFile(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const html = await fs.readFile(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const functionBody = name => {
+    const start = app.indexOf(`function ${name}(`);
+    const nextSync = app.indexOf('\nfunction ', start + 1), nextAsync = app.indexOf('\nasync function ', start + 1);
+    const end = [nextSync, nextAsync].filter(index => index >= 0).reduce((first, index) => Math.min(first, index), app.length);
+    assert.ok(start >= 0 && end > start, `${name} should be present`);
+    return app.slice(start, end);
+  };
+
+  assert.match(functionBody('requestBodyContractTestResult'), /validateOpenApiRequestBodyContract/);
+  const manualSend = functionBody('performApiRequest');
+  assert.ok(manualSend.indexOf('requestBodyContractTestResult') < manualSend.indexOf('executeApiRequest'));
+  assert.match(functionBody('validateRequestBodyContractFromForm'), /runPreRequestActions/);
+  const runnerFlow = functionBody('runRunnerCases');
+  assert.match(runnerFlow, /requestBodyContractTestResult/);
+  assert.match(runnerFlow, /failedTests=responseTests\.filter/);
+  assert.match(runnerFlow, /requestBodyValidation[\s\S]*?caseWarning=.*advisoryBodyFailure/);
+  assert.match(runnerFlow, /caseFailed=caseFailed\|\|httpFailed\|\|failedTests\.length>0/);
+  assert.match(functionBody('executeApiRequest'), /delete proxyRequest\.responseContract/);
+  assert.match(html, /id="validate-request-body"/);
+  assert.match(html, /id="request-body-contract-note"/);
+  assert.match(app, /validate-request-body'\)\.onclick=validateRequestBodyContractFromForm/);
+});
+
 test('local response examples validate imported contracts against the active resolved base URL', async () => {
   const app = await fs.readFile(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
   const start = app.indexOf('async function simulateSavedResponseExample('), next = app.indexOf('\nfunction updateCopyButtons(', start);
@@ -142,12 +168,15 @@ test('README explains response contract results, supported schema, and safe refe
   const readme = await fs.readFile(path.join(__dirname, 'README.md'), 'utf8');
   const image = await fs.readFile(path.join(__dirname, 'docs', 'images', 'openapi-response-contract.svg'), 'utf8');
   assert.match(readme, /### Validar respostas com contrato OpenAPI/);
+  assert.match(readme, /#### Validar body da request/);
+  assert.match(readme, /não bloqueia o envio/i);
+  assert.match(readme, /requestBody:[\s\S]*required: true/);
   assert.match(readme, /Passou[\s\S]*Falhou[\s\S]*Parcial/);
   assert.match(readme, /additionalProperties/);
   assert.match(readme, /referências externas nunca são carregadas/i);
   assert.match(readme, /valores do body da resposta/i);
   assert.match(readme, /docs\/images\/openapi-response-contract\.svg/);
-  assert.match(image, /<title[^>]*>Validar respostas com contrato OpenAPI/);
+  assert.match(image, /<title[^>]*>Validar requests e respostas com contrato OpenAPI/);
 });
 
 test('Runner history labels partial contract outcomes without classifying them as completed', async () => {

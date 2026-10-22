@@ -320,14 +320,26 @@ insomnia.environment.set("token", body.access_token);</code></pre>
 
           <div class="tab-panel response-tests-panel" data-editor-panel="tests" hidden>
             <div class="response-tests-heading">
-              <div><h2 id="response-tests-title">Testes da resposta</h2><p>Valide status HTTP e campos JSON ao enviar ou rodar a coleção.</p></div>
+              <div><h2 id="response-tests-title">Testes e contratos</h2><p>Valide o body JSON, status HTTP e campos da resposta ao enviar ou rodar a coleção.</p></div>
               <button class="button secondary compact-button" id="add-response-test" type="button">＋ Adicionar teste</button>
             </div>
             <p class="hint response-tests-help">Ex.: status HTTP igual a 201, <code>data.id</code> existe ou <code>items[0].id</code> igual a 42.</p>
+            <section class="request-body-contract-panel" id="request-body-contract-panel" hidden>
+              <div class="response-tests-heading">
+                <div><h2>Body da request</h2><p>Compare o JSON atual com o schema importado.</p></div>
+                <button class="button secondary compact-button" id="validate-request-body" type="button">Validar body</button>
+              </div>
+              <p class="hint" id="request-body-contract-note" role="note"></p>
+              <p class="hint request-body-contract-advisory">Validação local e informativa. Ela não impede o envio.</p>
+              <section class="response-tests-output request-body-contract-output" id="request-body-contract-output" aria-labelledby="request-body-contract-output-title" hidden>
+                <div class="output-heading"><h2 id="request-body-contract-output-title">Validação do body</h2><strong id="request-body-contract-summary"></strong></div>
+                <ul id="request-body-contract-results" class="response-tests-results" aria-live="polite"></ul>
+              </section>
+            </section>
             <details class="script-help response-contract-help">
               <summary>Como funciona o contrato OpenAPI?</summary>
-              <p>Ao importar uma especificação, a request pode validar status, Content-Type e estrutura JSON no envio manual ou no Runner. “Parcial” significa que o método/rota mudou ou que a especificação usa uma regra não suportada; revise o contrato antes de confiar no resultado.</p>
-              <p>Referências locais limitadas são lidas do próprio arquivo. Referências externas não são carregadas. Valores de exemplo e o body da resposta não entram no contrato.</p>
+              <p>Ao importar uma especificação, você pode validar o body da request antes de enviar. O Vortix também verifica status, Content-Type e estrutura JSON da resposta no envio manual ou no Runner. Falhas são avisos e não impedem o envio; “Parcial” indica regra não suportada ou contrato incompleto.</p>
+              <p>Referências locais limitadas são lidas do próprio arquivo. Referências externas não são carregadas. Exemplos e valores do body não entram no contrato.</p>
             </details>
             <p class="hint" id="response-contract-note" role="note" hidden></p>
             <div id="response-tests-list" class="response-tests-list"></div>
@@ -399,7 +411,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
             <div id="response-examples-list" class="response-example-list"></div>
           </details>
           <section class="response-tests-output" id="response-tests-output" aria-labelledby="response-tests-output-title" hidden>
-            <div class="output-heading"><h2 id="response-tests-output-title">Testes da resposta</h2><strong id="response-tests-summary"></strong></div>
+            <div class="output-heading"><h2 id="response-tests-output-title">Validações</h2><strong id="response-tests-summary"></strong></div>
             <ul id="response-tests-results" class="response-tests-results" aria-live="polite"></ul>
           </section>
           <div class="response-footer"><span class="response-indicator"></span><span id="response-persistence-note">Resposta temporária · não armazenada</span></div>

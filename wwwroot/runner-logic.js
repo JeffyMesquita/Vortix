@@ -1747,6 +1747,9 @@
   const openApiSchemaMetadataKeywords = new Set(['title', 'description', 'example', 'examples', 'default', '$comment', 'deprecated', 'xml', 'externalDocs']);
   const openApiIgnoredSchemaKeywords = new Set(['enum', 'const', 'pattern', 'format', 'allOf', 'oneOf', 'anyOf', 'not', 'if', 'then', 'else', 'discriminator', 'dependentSchemas', 'propertyNames', 'unevaluatedProperties', 'unevaluatedItems', 'contains', 'prefixItems', 'readOnly', 'writeOnly']);
   const openApiResponseMapPartialMessage = 'O mapa de respostas OpenAPI está incompleto ou inválido.';
+  const openApiRequestBodyPartialMessage = 'O contrato do body da request contém regras que não podem ser validadas.';
+  const openApiRequestBodyMapPartialMessage = 'O mapa de conteúdo do body da request está incompleto ou inválido.';
+  const openApiRequestBodyReducedMessage = 'O schema do body excedeu 64 KB e foi reduzido.';
   const openApiSafePartialMessages = new Set([
     'O schema excede o limite de profundidade de 8 níveis.',
     'Referência externa de schema não foi resolvida.',
@@ -1764,6 +1767,14 @@
     'O contrato normalizado excedeu 64 KB e foi reduzido.',
     'A estrutura de respostas contém regras que não podem ser validadas.',
     openApiResponseMapPartialMessage,
+    openApiRequestBodyPartialMessage,
+    openApiRequestBodyMapPartialMessage,
+    openApiRequestBodyReducedMessage,
+    'Referência externa do body da request não foi resolvida.',
+    'Referência circular do body da request foi reduzida.',
+    'Referência local do body da request não foi encontrada.',
+    'O body da request excede o limite de profundidade de 8 níveis.',
+    'O body da request excede o limite de itens do contrato.',
     'A validação estrutural de conteúdo não JSON não é suportada.',
     'O contrato importado contém avisos não confiáveis e precisa de revisão manual.'
   ]);
@@ -2016,15 +2027,128 @@
     return response;
   }
 
+  function normalizeOpenApiRequestBodyObject(source, document = null, openApiVersion = null) {
+    const partialReasons = new Set();
+    const state = {
+      openApiVersion,
+      stack: new Set(),
+      nodesRemaining: openApiSchemaNodeLimit,
+      partial: reason => partialReasons.add(openApiSafePartialMessages.has(String(reason)) ? String(reason) : openApiRequestBodyPartialMessage)
+    };
+    for (const reason of Array.isArray(source?.partialReasons) ? source.partialReasons.slice(0, 50) : [])
+      state.partial(typeof reason === 'string' ? reason : '');
+
+    function normalize(sourceBody, depth = 0) {
+      if (!sourceBody || typeof sourceBody !== 'object' || Array.isArray(sourceBody)) {
+        state.partial(openApiRequestBodyPartialMessage);
+        state.partial(openApiRequestBodyMapPartialMessage);
+        return { required: false, content: {} };
+      }
+      if (depth > openApiSchemaDepthLimit) {
+        state.partial('O body da request excede o limite de profundidade de 8 níveis.');
+        return { required: false, content: {} };
+      }
+      if (state.nodesRemaining-- <= 0) {
+        state.partial('O body da request excede o limite de itens do contrato.');
+        return { required: false, content: {} };
+      }
+      if (Object.hasOwn(sourceBody, '$ref')) {
+        for (const key in sourceBody) {
+          if (!Object.hasOwn(sourceBody, key) || key === '$ref' || key === 'description' || key === 'summary') continue;
+          state.partial(openApiRequestBodyPartialMessage);
+        }
+        const ref = String(sourceBody.$ref || '');
+        if (!document || !openApiPointerParts(ref)) {
+          state.partial('Referência externa do body da request não foi resolvida.');
+          state.partial(openApiRequestBodyMapPartialMessage);
+          return { required: false, content: {} };
+        }
+        if (state.stack.has(ref)) {
+          state.partial('Referência circular do body da request foi reduzida.');
+          state.partial(openApiRequestBodyMapPartialMessage);
+          return { required: false, content: {} };
+        }
+        if (state.stack.size >= openApiSchemaDepthLimit) {
+          state.partial('O body da request excede o limite de profundidade de 8 níveis.');
+          state.partial(openApiRequestBodyMapPartialMessage);
+          return { required: false, content: {} };
+        }
+        const resolved = resolveOpenApiLocalPointer(document, ref);
+        if (!resolved.found) {
+          state.partial('Referência local do body da request não foi encontrada.');
+          state.partial(openApiRequestBodyMapPartialMessage);
+          return { required: false, content: {} };
+        }
+        state.stack.add(ref);
+        const normalized = normalize(resolved.value, depth + 1);
+        state.stack.delete(ref);
+        return normalized;
+      }
+
+      const required = Object.hasOwn(sourceBody, 'required') && typeof sourceBody.required === 'boolean' ? sourceBody.required : false;
+      if (Object.hasOwn(sourceBody, 'required') && typeof sourceBody.required !== 'boolean') state.partial(openApiRequestBodyPartialMessage);
+      const content = {};
+      if (Object.hasOwn(sourceBody, 'content') && (!sourceBody.content || typeof sourceBody.content !== 'object' || Array.isArray(sourceBody.content))) {
+        state.partial(openApiRequestBodyPartialMessage);
+        state.partial(openApiRequestBodyMapPartialMessage);
+      } else if (sourceBody.content && typeof sourceBody.content === 'object') {
+        let count = 0;
+        for (const rawMediaType in sourceBody.content) {
+          if (!Object.hasOwn(sourceBody.content, rawMediaType)) continue;
+          if (count++ >= openApiMediaTypeLimit) { state.partial('O body da request excede o limite de itens do contrato.'); state.partial(openApiRequestBodyMapPartialMessage); break; }
+          const mediaType = String(rawMediaType || '').trim().slice(0, 200);
+          if (!/^(?:\*|[a-z0-9!#$&^_.+-]+)\/(?:\*|[a-z0-9!#$&^_.+-]+)$/i.test(mediaType)) {
+            state.partial(openApiRequestBodyPartialMessage);
+            state.partial(openApiRequestBodyMapPartialMessage);
+            continue;
+          }
+          const rawMedia = sourceBody.content[rawMediaType], media = {};
+          if (!rawMedia || typeof rawMedia !== 'object' || Array.isArray(rawMedia)) state.partial(openApiRequestBodyPartialMessage);
+          else {
+            if (Object.hasOwn(rawMedia, 'schema')) media.schema = sanitizeOpenApiContractSchema(rawMedia.schema, state, document, depth + 1);
+            if (Object.hasOwn(rawMedia, 'encoding')) state.partial(openApiRequestBodyPartialMessage);
+          }
+          Object.defineProperty(content, mediaType, { value: media, enumerable: true, writable: true, configurable: true });
+        }
+      }
+      if (!Object.keys(content).length) {
+        state.partial(openApiRequestBodyPartialMessage);
+        state.partial(openApiRequestBodyMapPartialMessage);
+      }
+      return { required, content };
+    }
+
+    const normalized = normalize(source);
+    normalized.partialReasons = [...partialReasons].slice(0, 50);
+    return normalized;
+  }
+
   function capOpenApiResponseContract(contract) {
     const fits = () => openApiUtf8ByteLength(JSON.stringify(contract)) <= maxOpenApiResponseContractBytes;
     if (fits()) return contract;
     contract.partialReasons.push('O contrato normalizado excedeu 64 KB e foi reduzido.');
+    const requestBody = contract.requestBody && typeof contract.requestBody === 'object' ? contract.requestBody : null;
+    let requestBodySchemaReduced = false;
+    for (const media of Object.values(requestBody?.content || {})) {
+      if (!media || typeof media !== 'object' || !Object.hasOwn(media, 'schema')) continue;
+      media.schema = {};
+      requestBodySchemaReduced = true;
+    }
+    if (requestBodySchemaReduced) {
+      if (!requestBody.partialReasons.includes(openApiRequestBodyReducedMessage)) requestBody.partialReasons.push(openApiRequestBodyReducedMessage);
+      if (fits()) return contract;
+    }
     const responses = contract.responses && typeof contract.responses === 'object' && !Array.isArray(contract.responses) ? contract.responses : (contract.responses = {});
     for (const response of Object.values(responses)) {
       for (const media of Object.values(response?.content || {})) if (media && typeof media === 'object') media.schema = {};
     }
     if (fits()) return contract;
+    if (requestBody && Object.keys(requestBody.content || {}).length) {
+      requestBody.content = {};
+      if (!requestBody.partialReasons.includes(openApiRequestBodyReducedMessage)) requestBody.partialReasons.push(openApiRequestBodyReducedMessage);
+      if (!requestBody.partialReasons.includes(openApiRequestBodyMapPartialMessage)) requestBody.partialReasons.push(openApiRequestBodyMapPartialMessage);
+      if (fits()) return contract;
+    }
     for (const response of Object.values(responses)) response.content = {};
     if (fits()) return contract;
     for (const key of Object.keys(responses)) {
@@ -2099,6 +2223,7 @@
     }
     const normalized = { method, pathTemplate, partialReasons: [...partialReasons].slice(0, 50), responses };
     if (openApiVersion) normalized.openApiVersion = openApiVersion;
+    if (Object.hasOwn(source, 'requestBody')) normalized.requestBody = normalizeOpenApiRequestBodyObject(source.requestBody, null, openApiVersion);
     return capOpenApiResponseContract(normalized);
   }
 
@@ -2140,12 +2265,16 @@
       const key = status.toLowerCase() === 'default' ? 'default' : status.toUpperCase();
       Object.defineProperty(responses, key, { value: normalizeOpenApiResponseObject(source, document, state), enumerable: true, writable: true, configurable: true });
     }
+    const requestBody = operation && Object.hasOwn(operation, 'requestBody')
+      ? normalizeOpenApiRequestBodyObject(operation.requestBody, document, state.openApiVersion)
+      : null;
     const contract = {
       method: String(method || 'GET').toUpperCase().slice(0, 16),
       pathTemplate: String(pathTemplate || '/').slice(0, 4096),
       partialReasons: [...partialReasons].slice(0, 50),
       responses
     };
+    if (requestBody) contract.requestBody = requestBody;
     contract.openApiVersion = state.openApiVersion;
     return sanitizeOpenApiResponseContract(contract);
   }
@@ -2165,6 +2294,19 @@
       }
     }
     return '';
+  }
+
+  function openApiRequestHeader(headers, name) {
+    const target = String(name || '').toLowerCase();
+    if (typeof headers === 'string') {
+      for (const line of headers.split(/\r?\n/)) {
+        const separator = line.indexOf(':');
+        if (separator < 0 || line.slice(0, separator).trim().toLowerCase() !== target) continue;
+        return line.slice(separator + 1).trim();
+      }
+      return '';
+    }
+    return openApiResponseHeader(headers, target);
   }
 
   function openApiMediaMatches(declared, actual) {
@@ -2363,6 +2505,56 @@
     return { status: 'passed', issues, warnings };
   }
 
+  function validateOpenApiRequestBodyContract(contract, request = {}) {
+    const issues = [], warnings = [];
+    const safeContract = sanitizeOpenApiResponseContract(contract);
+    if (!safeContract)
+      return { status: 'partial', issues, warnings: ['Contrato OpenAPI da request indisponível.'] };
+    const requestBody = safeContract.requestBody;
+    if (!requestBody) return { status: 'skipped', issues, warnings };
+    warnings.push(...requestBody.partialReasons);
+    const requestMethod = String(request?.method || '').toUpperCase();
+    if (requestMethod && safeContract.method && requestMethod !== safeContract.method)
+      return { status: 'partial', issues, warnings: [...warnings, 'Método da request atual não corresponde ao contrato importado.'] };
+    if (request?.route && safeContract.pathTemplate && !openApiRouteMatchesTemplate(request.route, safeContract.pathTemplate, request.baseUrl))
+      return { status: 'partial', issues, warnings: [...warnings, 'Rota da request atual não corresponde ao contrato importado.'] };
+
+    const body = String(request?.body ?? '');
+    if (!body.trim()) {
+      if (requestBody.required) issues.push('O body da request é obrigatório.');
+      if (issues.length) return { status: 'failed', issues, warnings };
+      return { status: warnings.length ? 'partial' : 'passed', issues, warnings };
+    }
+    if (/\{\{\s*[^{}]+?\s*\}\}/.test(body))
+      return { status: 'partial', issues, warnings: [...warnings, 'Variáveis não resolvidas no body impedem validar o schema com segurança.'] };
+
+    const content = requestBody.content && typeof requestBody.content === 'object' && !Array.isArray(requestBody.content) ? requestBody.content : {};
+    const declaredTypes = Object.keys(content);
+    if (!declaredTypes.length && requestBody.partialReasons.includes(openApiRequestBodyMapPartialMessage))
+      return { status: 'partial', issues, warnings };
+    const actualType = openApiRequestHeader(request.headers, 'content-type');
+    const mediaType = declaredTypes.find(type => openApiMediaMatches(type, actualType)) || '';
+    if (!actualType || !mediaType) {
+      if (requestBody.partialReasons.includes(openApiRequestBodyMapPartialMessage))
+        return { status: 'partial', issues, warnings };
+      issues.push('Content-Type da request não corresponde ao contrato importado.');
+    } else if (!openApiJsonMediaType(mediaType) || !openApiJsonMediaType(actualType) || request.bodyMode === 'multipart' || request.bodyMode === 'urlencoded' || request.bodyMode === 'xml' || request.bodyMode === 'text') {
+      warnings.push('A validação estrutural de body não JSON não é suportada.');
+    } else {
+      let value;
+      try { value = JSON.parse(body); }
+      catch {
+        issues.push('O body da request não contém JSON válido para o contrato.');
+        value = undefined;
+      }
+      if (value !== undefined && Object.hasOwn(content[mediaType] || {}, 'schema'))
+        validateOpenApiSchemaValue(content[mediaType].schema, value, 'body', issues, warnings);
+    }
+    if (issues.length) return { status: 'failed', issues, warnings };
+    if (warnings.length) return { status: 'partial', issues, warnings };
+    return { status: 'passed', issues, warnings };
+  }
+
   function parseOpenApiSpec(document) {
     if (!document || typeof document !== 'object' || Array.isArray(document)) throw Error('Documento OpenAPI invalido.');
     const version = String(document.openapi || '');
@@ -2469,9 +2661,21 @@
         }
         if (accept.length && !headerMap.has('accept')) addHeader('Accept', [...new Set(accept)].join(', '));
         let body = '';
-        const requestBody = operation.requestBody;
-        if (requestBody?.$ref) warn('Request Body referenciado foi ignorado; referencias nao sao carregadas da rede.');
-        else if (requestBody?.content && typeof requestBody.content === 'object') {
+        let requestBody = operation.requestBody;
+        if (requestBody?.$ref) {
+          const seen = new Set();
+          for (let depth = 0; requestBody?.$ref && depth < openApiSchemaDepthLimit; depth++) {
+            const ref = String(requestBody.$ref);
+            if (!openApiPointerParts(ref) || seen.has(ref)) { requestBody = null; break; }
+            seen.add(ref);
+            const resolved = resolveOpenApiLocalPointer(document, ref);
+            if (!resolved.found) { requestBody = null; break; }
+            requestBody = resolved.value;
+          }
+          if (requestBody?.$ref) requestBody = null;
+          if (!requestBody) warn('Request Body referenciado não pôde ser resolvido localmente; body inicial vazio.');
+        }
+        if (requestBody?.content && typeof requestBody.content === 'object') {
           const content = requestBody.content, mediaTypes = Object.keys(content);
           const mediaType = mediaTypes.find(type => /^application\/(?:json|[^;]+\+json)$/i.test(type));
           if (!mediaType && mediaTypes.length) warn('Body nao JSON da OpenAPI nao foi importado.');
@@ -2480,7 +2684,12 @@
             if (value.found) body = JSON.stringify(value.value, null, 2);
             else if (media.schema?.type === 'object') body = '{}';
             else if (media.schema?.type === 'array') body = '[]';
-            else if (media.schema?.$ref) warn('Schema JSON referenciado nao foi carregado; body iniciado vazio.');
+            else if (media.schema?.$ref) {
+              const resolvedSchema = resolveOpenApiLocalPointer(document, String(media.schema.$ref));
+              if (resolvedSchema.found && resolvedSchema.value?.type === 'object') body = '{}';
+              else if (resolvedSchema.found && resolvedSchema.value?.type === 'array') body = '[]';
+              else warn('Schema JSON referenciado não pôde gerar um body inicial; confira o contrato importado.');
+            }
             addHeader('Content-Type', mediaType);
           }
         }
@@ -3590,5 +3799,5 @@
     return makeLocalSecretVault({ salt: saltBytes, key, cryptoProvider, secrets, envelope: { ...envelope, names: [...secrets.keys()] } });
   }
 
-  return { buildOpenApi31Export, parseOpenApiSpec, sanitizeOpenApiResponseContract, validateOpenApiResponseContract, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, buildCurlCommand, buildHttpieCommand, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { buildOpenApi31Export, parseOpenApiSpec, sanitizeOpenApiResponseContract, validateOpenApiResponseContract, validateOpenApiRequestBodyContract, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, buildCurlCommand, buildHttpieCommand, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

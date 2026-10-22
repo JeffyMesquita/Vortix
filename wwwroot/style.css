@@ -320,6 +320,10 @@ textarea.compact { min-height: 165px; }
 .response-tests-heading h2 { margin: 0; color: #d9e0e8; font-size: 13px; }
 .response-tests-heading p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .response-tests-help { margin: 9px 0; font-size: 12px; }
+.request-body-contract-panel { border-top: 1px solid var(--border); margin-top: 13px; padding-top: 12px; }
+.request-body-contract-advisory { margin: 5px 0 0; font-size: 11px; }
+.request-body-contract-output { margin-top: 8px; }
+#validate-request-body { white-space: nowrap; }
 .response-tests-list { display: grid; gap: 7px; }
 .response-test-row { display: grid; grid-template-columns: minmax(82px, .75fr) minmax(85px, .95fr) minmax(90px, .9fr) minmax(90px, .95fr) 30px; align-items: end; gap: 6px; border: 1px solid var(--border); border-radius: 6px; padding: 8px; background: var(--surface); }
 .response-test-field { display: grid; min-width: 0; gap: 4px; }

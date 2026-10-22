@@ -1265,17 +1265,18 @@ async function runRunnerCases(cases,options,allowWrites){
       responseVaultSecrets={...RunnerLogic.secretValuesUsedByProvenance(request.resolutionProvenance,secretVaultValues||{}),...preRequestExecution.vaultSecrets};
       if(RunnerLogic.remoteHttpOrigin(request.baseUrl)&&request.allowInsecureHttp!==true)throw Error('HTTP remoto exige habilitação explícita na request.');
       if(request.captureResponseVariable&&request.responseCaptureTarget==='vault')assertVaultCaptureAvailable(request);
-      const {proxyStatus,result}=await executeApiRequest(request),status=Number(result.status)||0,tests=responseResultsForRequest(request,result),failedTests=tests.filter(item=>!item.passed&&!item.partial),partialTests=tests.filter(item=>item.partial),hasTests=tests.some(item=>!item.partial);
-      stepStatus=status||null;stepTestsFailed=failedTests.length;stepTestsPassed=tests.filter(item=>item.passed).length;stepTestsPartial=partialTests.length;caseWarning=partialTests.length>0;
+      const requestBodyValidation=requestBodyContractTestResult(request),{proxyStatus,result}=await executeApiRequest(request),status=Number(result.status)||0,responseTests=responseResultsForRequest(request,result),tests=[...(requestBodyValidation?[requestBodyValidation]:[]),...responseTests],advisoryBodyFailure=Boolean(requestBodyValidation&&!requestBodyValidation.passed&&!requestBodyValidation.partial),failedTests=responseTests.filter(item=>!item.passed&&!item.partial),partialTests=tests.filter(item=>item.partial),hasTests=responseTests.some(item=>!item.partial);
+      stepStatus=status||null;stepTestsFailed=tests.filter(item=>!item.passed&&!item.partial).length;stepTestsPassed=tests.filter(item=>item.passed).length;stepTestsPartial=partialTests.length;caseWarning=partialTests.length>0||advisoryBodyFailure;
       responseBody=runnerBodyPreview(RunnerLogic.redactSecretValues(result.body,responseVaultSecrets));caseStatus=status?RunnerLogic.redactSecretValues(`${status} ${result.reason||''}`,responseVaultSecrets).trim():`Proxy ${proxyStatus}`;
       const details=[];const httpFailed=!!result.error||proxyStatus>=400||status<200||status>=300&&!hasTests;
       if(origins.length)details.push('Origens sem valores: '+formatInspectorOrigins(origins)+'.');
       const vaultOrigins=Object.keys(request.resolutionProvenance||{}).filter(name=>request.resolutionProvenance[name]==='vault');if(vaultOrigins.length)details.push('Cofre usado para: '+vaultOrigins.join(', ')+'.');
       if(result.error||proxyStatus>=400)details.push(RunnerLogic.redactSecretValues(result.error,responseVaultSecrets)||`Servidor local respondeu HTTP ${proxyStatus}.`);
       else if(status<200||status>=300&&!hasTests)details.push('A request não retornou status 2xx.');
+      if(advisoryBodyFailure)details.push(`Aviso não bloqueante: ${requestBodyValidation.label}. ${requestBodyValidation.message||''}`.trim());
       if(failedTests.length)details.push('Falharam: '+failedTests.map(item=>item.label).join('; '));
-      if(partialTests.length)details.push('Contrato OpenAPI parcial: '+partialTests.map(item=>item.message).filter(Boolean).join(' '));
-      if(!failedTests.length&&!partialTests.length&&hasTests)details.push(`${tests.length}/${tests.length} testes passaram.`);
+      if(partialTests.length)details.push('Validações parciais: '+partialTests.map(item=>item.message).filter(Boolean).join(' '));
+      if(!failedTests.length&&!partialTests.length&&hasTests&&!advisoryBodyFailure)details.push(`${responseTests.length}/${responseTests.length} testes de resposta passaram.`);
       if(!result.error&&proxyStatus<400&&status>=200&&status<300){
         const captured=await captureResponseVariable(request,result,true);
         if(!captured.ok){caseFailed=true;details.push(RunnerLogic.redactSecretValues(captured.error,responseVaultSecrets)||'Falha ao salvar variável de resposta.');}
@@ -2298,13 +2299,55 @@ function responseContractTestResult(request,result){
   const details=[...(validation.issues||[]),...(validation.warnings||[])].filter(Boolean);
   return{id:'openapi-response-contract',label:'Contrato OpenAPI da resposta',passed:validation.status==='passed',partial:validation.status==='partial',status:validation.status,message:details.join(' ')};
 }
+function requestBodyContractTestResult(request){
+  const contract=request?.responseContract;
+  if(!contract?.requestBody)return null;
+  let validation;
+  try{validation=RunnerLogic.validateOpenApiRequestBodyContract(contract,request);}
+  catch{validation={status:'partial',issues:[],warnings:['Não foi possível validar o body da request.']};}
+  if(validation.status==='skipped')return null;
+  const details=[...(validation.issues||[]),...(validation.warnings||[])].filter(Boolean);
+  return{id:'openapi-request-body-contract',label:'Contrato OpenAPI do body da request',passed:validation.status==='passed',partial:validation.status==='partial',status:validation.status,message:details.join(' ')};
+}
+function responseTestResultRow(result){
+  const row=document.createElement('li');row.className='response-test-result';row.dataset.kind=result.partial?'partial':result.passed?'success':'failure';
+  const name=document.createElement('span');name.className='response-test-result-name';name.textContent=result.label;
+  const state=document.createElement('span');state.className='response-test-result-state';state.textContent=result.partial?'Parcial':result.passed?'Passou':'Falhou';row.append(name,state);
+  if(result.message){const message=document.createElement('span');message.className='response-test-result-message';message.textContent=result.message;row.append(message);}
+  return row;
+}
+function renderRequestBodyContractResult(result){
+  const section=byId('request-body-contract-output'),list=byId('request-body-contract-results'),summary=byId('request-body-contract-summary');
+  list.replaceChildren();section.hidden=!result;if(!result){summary.textContent='';return;}
+  summary.textContent=result.partial?'Parcial':result.passed?'Passou':'Falhou';list.append(responseTestResultRow(result));
+}
+function clearRequestBodyContractResult(){renderRequestBodyContractResult(null);}
+function validateRequestBodyContractFromForm(){
+  if(!activeResponseContract?.requestBody){clearRequestBodyContractResult();return null;}
+  try{
+    const actions=getPreRequestActionsFromForm(),preRequestExecution=byId('pre-request-actions-enabled').checked?RunnerLogic.runPreRequestActions(actions,getEnvironment().variables||{},{},vaultResolutionInput()):{variables:{},provenance:{},vaultSecrets:{}},resolve=value=>applyEnvironment(value,preRequestExecution.variables),bodyMode=byId('body-mode').value,graphql=getGraphqlFieldsFromForm();
+    const requestBody=bodyMode==='graphql'?RunnerLogic.buildGraphqlBody(graphql.graphqlQuery,graphql.graphqlVariables,graphql.graphqlOperationName,resolve):resolve(body.value);
+    const request={method:method.value,baseUrl:byId('base-url').value.trim(),route:buildRequestRoute(),headers:resolve(byId('headers').value),body:requestBody,bodyMode,responseContract:activeResponseContract};
+    const result=requestBodyContractTestResult(request);renderRequestBodyContractResult(result);return result;
+  }catch{
+    const result={id:'openapi-request-body-contract',label:'Contrato OpenAPI do body da request',passed:false,partial:true,status:'partial',message:'Não foi possível resolver as referências para validar este body.'};
+    renderRequestBodyContractResult(result);return result;
+  }
+}
 function responseResultsForRequest(request,result){
   const tests=RunnerLogic.evaluateResponseTests(request?.responseTests,result),contract=responseContractTestResult(request,result);
   return contract?[...tests,contract]:tests;
 }
 function setActiveResponseContract(contract){
   activeResponseContract=RunnerLogic.sanitizeOpenApiResponseContract(contract);
-  updateResponseContractNote();
+  updateResponseContractNote();updateRequestBodyContractNote();clearRequestBodyContractResult();
+}
+function updateRequestBodyContractNote(){
+  const panel=byId('request-body-contract-panel'),note=byId('request-body-contract-note'),button=byId('validate-request-body');if(!panel||!note||!button)return;
+  const requestBody=activeResponseContract?.requestBody;panel.hidden=!requestBody;button.disabled=!requestBody;
+  if(!requestBody){note.textContent='';return;}
+  const types=Object.keys(requestBody.content||{}),target=`${activeResponseContract.method||''} ${activeResponseContract.pathTemplate||''}`.trim();
+  note.textContent=`${target}${types.length?' aceita '+types.join(', '):' sem mídia de body validável'}${requestBody.required?' e exige body.':' e permite body vazio.'}`+(requestBody.partialReasons?.length?' O schema importado tem regras parciais.':'');
 }
 function updateResponseContractNote(){
   const note=byId('response-contract-note');if(!note)return;
@@ -2316,7 +2359,7 @@ function updateResponseContractNote(){
 function renderResponseTestResults(results){
   const section=byId('response-tests-output'),list=byId('response-tests-results'),summary=byId('response-tests-summary');list.replaceChildren();section.hidden=!results.length;if(!results.length){summary.textContent='';return;}
   const passed=results.filter(result=>result.passed).length,partial=results.filter(result=>result.partial).length;summary.textContent=`${passed}/${results.length} passaram`+(partial?` · ${partial} parcial(is)`:'');
-  for(const result of results){const row=document.createElement('li');row.className='response-test-result';row.dataset.kind=result.partial?'partial':result.passed?'success':'failure';const name=document.createElement('span');name.className='response-test-result-name';name.textContent=result.label;const state=document.createElement('span');state.className='response-test-result-state';state.textContent=result.partial?'Parcial':result.passed?'Passou':'Falhou';row.append(name,state);if(result.message){const message=document.createElement('span');message.className='response-test-result-message';message.textContent=result.message;row.append(message);}list.append(row);}
+  for(const result of results)list.append(responseTestResultRow(result));
 }
 function applyTypography(){
   document.documentElement.style.setProperty('--app-font-family',fontFamilies.get(activeFont)||fontFamilies.get(DEFAULT_FONT));
@@ -2477,7 +2520,7 @@ function renderEnvironmentSelect(){
   if(!environments.some(x=>x.id===id))return;
   if(id===activeEnvironmentId)return;
   releaseSecretVaultMemory();
-  activeEnvironmentId=id;clearGraphqlSchema('Ambiente alterado; carregue o schema GraphQL novamente.');
+  activeEnvironmentId=id;clearGraphqlSchema('Ambiente alterado; carregue o schema GraphQL novamente.');clearRequestBodyContractResult();
   await dbWrite('settings',{key:'activeEnvironmentId',value:id});renderEnvironmentSelect();await loadSecretVaultForActiveEnvironment();
   if(baseUrlAuto)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';
   await loadTokenRequestConfig();await loadOAuth2TokenConfig();await loadOAuthPkceConfig();syncActiveWorkspaceTab(false);
@@ -2906,6 +2949,7 @@ async function executeApiRequest(request){
 }
 async function performApiRequest(request,button,save,historyRequest=request){
   clearCurrentResponseExample();
+  const requestBodyValidation=requestBodyContractTestResult(request);renderRequestBodyContractResult(requestBodyValidation);
   button.disabled=true;byId('request-note').textContent='Aguardando resposta. Credenciais não serão armazenadas automaticamente.';showResponse('Enviando…','pending','','');renderResponseTestResults([]);
   const responseVaultSecrets={...RunnerLogic.secretValuesUsedByProvenance(request.resolutionProvenance,secretVaultValues||{}),...(request.preRequestSecretValues||{})};
   const vaultOrigins=Object.keys(responseVaultSecrets);
@@ -2917,7 +2961,7 @@ async function performApiRequest(request,button,save,historyRequest=request){
     const requestStartedAt=performance.now();const {proxyStatus,result}=await executeApiRequest(request);dismissToast(toast);
     if(historyEntry)await saveHistoryResponse(historyEntry,result,performance.now()-requestStartedAt,responseVaultSecrets);
     if(result.error||proxyStatus>=400){const message=RunnerLogic.redactSecretValues(result.error||`Servidor local respondeu HTTP ${proxyStatus}.`,responseVaultSecrets);showResponse('Erro '+proxyStatus,'bad','',message);showToast('Requisição não enviada',message,'error');}
-    else{const safeReason=RunnerLogic.redactSecretValues(result.reason||'',responseVaultSecrets),status=(result.status+' '+safeReason).trim(),output=RunnerLogic.redactSecretValues(result.body??'',responseVaultSecrets),headers=RunnerLogic.redactSecretValues(JSON.stringify(result.headers??{},null,2),responseVaultSecrets);showResponse(status,result.status>=200&&result.status<300?'ok':'bad',headers,output);apiStatusToast(result.status,safeReason);const testResults=responseResultsForRequest(request,result);renderResponseTestResults(testResults);if(testResults.length){const failed=testResults.filter(item=>!item.passed&&!item.partial),partial=testResults.filter(item=>item.partial).length,passed=testResults.filter(item=>item.passed).length;showToast(failed.length?'Testes da resposta falharam':partial?'Contrato OpenAPI parcial':'Testes da resposta passaram',`${passed}/${testResults.length} verificações passaram${partial?` · ${partial} parcial(is)`:''}.`,failed.length?'error':partial?'warning':'success');}await captureResponseVariable(request,result);}
+    else{const safeReason=RunnerLogic.redactSecretValues(result.reason||'',responseVaultSecrets),status=(result.status+' '+safeReason).trim(),output=RunnerLogic.redactSecretValues(result.body??'',responseVaultSecrets),headers=RunnerLogic.redactSecretValues(JSON.stringify(result.headers??{},null,2),responseVaultSecrets);showResponse(status,result.status>=200&&result.status<300?'ok':'bad',headers,output);apiStatusToast(result.status,safeReason);const testResults=[...(requestBodyValidation?[requestBodyValidation]:[]),...responseResultsForRequest(request,result)];renderResponseTestResults(testResults);if(testResults.length){const failed=testResults.filter(item=>!item.passed&&!item.partial),partial=testResults.filter(item=>item.partial).length,passed=testResults.filter(item=>item.passed).length;showToast(failed.length?'Validações falharam':partial?'Contrato OpenAPI parcial':'Validações passaram',`${passed}/${testResults.length} verificações passaram${partial?` · ${partial} parcial(is)`:''}.`,failed.length?'error':partial?'warning':'success');}await captureResponseVariable(request,result);}
     return result;
   }catch{dismissToast(toast);const message='Servidor local indisponível. Confira se está ativo e tente novamente.';showResponse('Falha local','bad','',message);showToast('Falha de conexão',message,'error');return null;}
   finally{button.disabled=false;updateGuard();}
@@ -3066,7 +3110,7 @@ function addEventListeners(){
     if (current < 0 || !tabs.length) return;
     event.preventDefault();const direction = event.key === 'ArrowRight' ? 1 : -1;const next = tabs[(current + direction + tabs.length) % tabs.length];next.focus();void activateWorkspaceTab(next.dataset.workspaceTabId);
   });
-  const editorColumn=document.querySelector('.editor-column'),trackDraft=event=>{if(['confirm-test-data','test-data-phrase','token-client-secret','token-route','token-client-id-field','token-client-secret-field','token-credential-mode','oauth2-token-url','oauth2-client-id','oauth2-client-secret','oauth2-scope','oauth2-client-auth-method','oauth2-allow-insecure-http','oauth2-save-token-environment','oauth-pkce-authorization-url','oauth-pkce-token-url','oauth-pkce-client-id','oauth-pkce-scope','oauth-pkce-redirect-uri','oauth-pkce-save-access-token','oauth-pkce-save-refresh-token','graphql-schema-type'].includes(event.target.id))return;if(['base-url','route','headers','auth-inheritance-mode','auth-type','bearer-token','basic-username','basic-password','api-key-name','api-key-value','api-key-location'].includes(event.target.id)||event.target.matches('.query-param-row input'))clearGraphqlSchema('Endpoint, Auth ou Params alterados; carregue o schema GraphQL novamente.');syncActiveWorkspaceTab(true);};
+  const editorColumn=document.querySelector('.editor-column'),trackDraft=event=>{if(['confirm-test-data','test-data-phrase','token-client-secret','token-route','token-client-id-field','token-client-secret-field','token-credential-mode','oauth2-token-url','oauth2-client-id','oauth2-client-secret','oauth2-scope','oauth2-client-auth-method','oauth2-allow-insecure-http','oauth2-save-token-environment','oauth-pkce-authorization-url','oauth-pkce-token-url','oauth-pkce-client-id','oauth-pkce-scope','oauth-pkce-redirect-uri','oauth-pkce-save-access-token','oauth-pkce-save-refresh-token','graphql-schema-type'].includes(event.target.id))return;if(['method','base-url','route','headers','body','body-mode'].includes(event.target.id)||event.target.matches('.query-param-row input, .pre-request-action-row input, .pre-request-action-row select'))clearRequestBodyContractResult();if(['base-url','route','headers','auth-inheritance-mode','auth-type','bearer-token','basic-username','basic-password','api-key-name','api-key-value','api-key-location'].includes(event.target.id)||event.target.matches('.query-param-row input'))clearGraphqlSchema('Endpoint, Auth ou Params alterados; carregue o schema GraphQL novamente.');syncActiveWorkspaceTab(true);};
   editorColumn.addEventListener('input', trackDraft);editorColumn.addEventListener('change', trackDraft);
   document.querySelector('.editor-column').addEventListener('click', event => { if (event.target.closest('.query-param-row .button, .response-test-remove, .pre-request-action-remove')) syncActiveWorkspaceTab(true); });  byId('clear-history').onclick=clearHistory;byId('copy-headers').onclick=()=>copyOutput('response-headers','Cabeçalhos');byId('copy-body').onclick=()=>copyOutput('response-body','Body');document.querySelectorAll('[data-response-view]').forEach(button=>button.onclick=()=>setResponseView(button.dataset.responseView));byId('response-search').addEventListener('input',renderResponseBody);byId('response-tree').addEventListener('click',event=>{const button=event.target.closest('[data-copy-json-path]');if(button)copyResponsePath(button.dataset.copyJsonPath);});
   byId('save-response-example').onclick=openResponseExampleForm;
@@ -3076,7 +3120,7 @@ function addEventListeners(){
   byId('runner-history-list').addEventListener('click',event=>{const button=event.target.closest('[data-runner-history-delete]');if(button)void removeRunnerHistoryEntry(button.dataset.runnerHistoryDelete);});
   byId('clear-runner-history').onclick=()=>void clearRunnerHistory();
   window.addEventListener('resize',()=>{if(byId('runner-dialog').open)fitRunnerDialog();});
-  byId('add-query-param').onclick=()=>{addQueryParamRow();syncActiveWorkspaceTab(true);};byId('add-response-test').onclick=()=>{addResponseTest();syncActiveWorkspaceTab(true);};
+  byId('add-query-param').onclick=()=>{addQueryParamRow();syncActiveWorkspaceTab(true);};byId('add-response-test').onclick=()=>{addResponseTest();syncActiveWorkspaceTab(true);};byId('validate-request-body').onclick=validateRequestBodyContractFromForm;
   byId('add-pre-request-action').onclick=addPreRequestAction;byId('pre-request-actions-enabled').addEventListener('change',()=>{updatePreRequestActionsUi();refreshRequestInspector();syncActiveWorkspaceTab(true);});
   byId('response-tests-list').addEventListener('input',()=>renderResponseTestResults([]));byId('response-tests-list').addEventListener('change',()=>renderResponseTestResults([]));
   byId('add-collection').onclick=addCollection;byId('add-collection-heading').onclick=addCollection;byId('import-collection').onclick=openImportDialog;byId('browse-import-file').onclick=()=>{byId('import-dialog').close();byId('import-collection-file').click();};byId('close-import-dialog').onclick=()=>byId('import-dialog').close();byId('cancel-import-dialog').onclick=()=>byId('import-dialog').close();byId('command-import-format').addEventListener('change',updateCommandImportUi);byId('create-imported-request').onclick=openImportedCommandDraft;byId('import-collection-file').addEventListener('change',importCollectionFile);byId('generate-curl').onclick=openCurlExportDialog;byId('curl-format').addEventListener('change',updateCurlExportPreview);byId('curl-shell').addEventListener('change',updateCurlExportPreview);byId('curl-include-sensitive').addEventListener('change',()=>void confirmCurlSensitiveMode());byId('copy-curl-command').onclick=copyCurlCommand;byId('close-curl-export').onclick=()=>byId('curl-export-dialog').close();byId('cancel-curl-export').onclick=()=>byId('curl-export-dialog').close();byId('curl-export-dialog').addEventListener('close',()=>{byId('curl-include-sensitive').checked=false;updateCurlExportPreview();});byId('export-collection').onclick=openExportDialog;byId('export-format').addEventListener('change',updateExportFormatUi);byId('export-form').addEventListener('submit',exportCollection);byId('close-export-dialog').onclick=()=>byId('export-dialog').close();byId('cancel-export-dialog').onclick=()=>byId('export-dialog').close();byId('save-collection-request').onclick=openSaveDialog;byId('save-request-form').addEventListener('submit',saveCollectionRequest);byId('close-save-request').onclick=()=>byId('save-request-dialog').close();byId('cancel-save-request').onclick=()=>byId('save-request-dialog').close();
@@ -3098,9 +3142,9 @@ function addEventListeners(){
   byId('clear-token').onclick=()=>{byId('bearer-token').value='';byId('bearer-token').focus();showToast('Token removido','O campo Bearer foi limpo desta sessão.','info');};
   byId('new-request').onclick=createNewWorkspaceTab;
   for(const id of ['method','route','body','base-url','headers','allow-insecure-http','confirm-test-data','test-data-phrase']){
-    const change=()=>{if(['method','route','body','base-url','headers'].includes(id))byId('confirm-test-data').checked=false;if(id==='base-url')baseUrlAuto=false;updateGuard();updateTokenButton();if(id==='body'){renderBodyHighlight();updateJsonTools();}};byId(id).addEventListener('input',change);byId(id).addEventListener('change',change);
+    const change=()=>{if(['method','route','body','base-url','headers'].includes(id)){byId('confirm-test-data').checked=false;clearRequestBodyContractResult();}if(id==='base-url')baseUrlAuto=false;updateGuard();updateTokenButton();if(id==='body'){renderBodyHighlight();updateJsonTools();}};byId(id).addEventListener('input',change);byId(id).addEventListener('change',change);
   }
-  body.addEventListener('scroll',renderBodyHighlight);byId('token-client-id').addEventListener('input',updateTokenButton);byId('token-client-secret').addEventListener('input',updateTokenButton);
+  body.addEventListener('scroll',renderBodyHighlight);byId('body-mode').addEventListener('change',clearRequestBodyContractResult);byId('token-client-id').addEventListener('input',updateTokenButton);byId('token-client-secret').addEventListener('input',updateTokenButton);
   byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('auth-inheritance-mode').addEventListener('change',()=>{const authMode=authModeFromForm();applyAuthFields(authMode==='custom'?{authMode,authType:'none'}:{authMode});syncActiveWorkspaceTab(true);});byId('save-auth-default').onclick=()=>void saveAuthDefault();byId('body-mode').addEventListener('change',updateBodyModeUi);byId('multipart-add-text').onclick=()=>addMultipartField('text');byId('multipart-add-file').onclick=()=>addMultipartField('file');byId('graphql-load-schema').onclick=()=>void loadGraphqlSchema();byId('graphql-schema-type').addEventListener('change',renderGraphqlSchemaFields);const graphqlQueryField=byId('graphql-query');graphqlQueryField.addEventListener('input',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keyup',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('click',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keydown',handleGraphqlAutocompleteKeydown);byId('format-graphql-variables').onclick=formatGraphqlVariables;for(const id of ['graphql-query','graphql-variables','graphql-operation-name']){byId(id).addEventListener('input',()=>{byId('confirm-test-data').checked=false;updateGuard();});byId(id).addEventListener('change',()=>{byId('confirm-test-data').checked=false;updateGuard();});}byId('clear-cookie-jar').onclick=clearCookieJar;byId('inspect-references').onclick=refreshRequestInspector;byId('request-inspector').addEventListener('toggle',()=>{if(byId('request-inspector').open)refreshRequestInspector();});byId('runner-datasets').addEventListener('input',()=>{if(byId('runner-dialog').open)renderRunnerPlan(runnerEntries);});
   for(const id of ['token-route','token-client-id-field','token-client-secret-field','token-credential-mode']){byId(id).addEventListener('input',updateTokenButton);byId(id).addEventListener('change',()=>void persistTokenRequestConfig());}
     for(const id of ['oauth2-token-url','oauth2-client-id','oauth2-scope'])byId(id).addEventListener('input',updateOAuth2TokenButton);
