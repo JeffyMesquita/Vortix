@@ -2189,21 +2189,6 @@
     const serverBasePathDynamic = source.serverBasePathDynamic === true;
     if (Object.hasOwn(source, 'serverBasePathDynamic') && typeof source.serverBasePathDynamic !== 'boolean')
       state.partial('O contrato importado contém avisos não confiáveis e precisa de revisão manual.');
-    const serverPathVariables = [];
-    if (Object.hasOwn(source, 'serverPathVariables')) {
-      if (!Array.isArray(source.serverPathVariables) || source.serverPathVariables.length > 50) {
-        state.partial('O contrato importado contém avisos não confiáveis e precisa de revisão manual.');
-      } else {
-        for (const rawName of source.serverPathVariables) {
-          const name = typeof rawName === 'string' ? rawName.trim() : '';
-          if (!name || name.length > 128 || /[{}]/.test(name)) {
-            state.partial('O contrato importado contém avisos não confiáveis e precisa de revisão manual.');
-            continue;
-          }
-          if (!serverPathVariables.includes(name)) serverPathVariables.push(name);
-        }
-      }
-    }
     const responses = {};
     if (!source.responses || typeof source.responses !== 'object' || Array.isArray(source.responses)) {
       state.partial(openApiResponseMapPartialMessage);
@@ -2241,14 +2226,13 @@
     }
     const normalized = { method, pathTemplate, partialReasons: [...partialReasons].slice(0, 50), responses };
     if (serverBasePathDynamic) normalized.serverBasePathDynamic = true;
-    if (serverPathVariables.length) normalized.serverPathVariables = serverPathVariables;
     if (openApiVersion) normalized.openApiVersion = openApiVersion;
     if (Object.hasOwn(source, 'requestBody')) normalized.requestBody = normalizeOpenApiRequestBodyObject(source.requestBody, null, openApiVersion);
     return capOpenApiResponseContract(normalized);
   }
 
   function openApiContractPathPrefix(serverInfo) {
-    const dynamicPath = value => String(value || '').replace(/\{\{\s*([^{}]+)\s*\}\}/g, (whole, name) => '{' + name.trim() + '}');
+    const dynamicPath = value => String(value || '').replace(/\{\{\s*([^{}]+)\s*\}\}/g, (whole, name) => '{{server:' + name.trim() + '}}');
     let prefix = dynamicPath(String(serverInfo?.prefix || '').trim());
     if (prefix || serverInfo?.serverBasePathDynamic) return prefix;
     const rawBase = String(serverInfo?.baseUrl || '').trim();
@@ -2260,7 +2244,7 @@
     try {
       const pathname = new URL(base).pathname.replace(/\/+$/, '');
       if (pathname && pathname !== '/')
-        prefix = pathname.replace(/vortixpathplaceholder(\d+)vortix/g, (whole, index) => '{' + (names[Number(index)] || '') + '}');
+        prefix = pathname.replace(/vortixpathplaceholder(\d+)vortix/g, (whole, index) => '{{server:' + (names[Number(index)] || '') + '}}');
     } catch { /* templated or relative base URL */ }
     return prefix;
   }
@@ -2272,7 +2256,7 @@
     return full.startsWith('/') ? full : '/' + full;
   }
 
-  function normalizeOpenApiResponseContract(document, operation, method, pathTemplate, serverBasePathDynamic = false, serverPathVariables = []) {
+  function normalizeOpenApiResponseContract(document, operation, method, pathTemplate, serverBasePathDynamic = false) {
     const partialReasons = new Set();
     const state = {
       openApiVersion: '3.' + String(document?.openapi || '').split('.')[1],
@@ -2303,8 +2287,7 @@
       pathTemplate: String(pathTemplate || '/').slice(0, 4096),
       partialReasons: [...partialReasons].slice(0, 50),
       responses,
-      serverBasePathDynamic,
-      serverPathVariables
+      serverBasePathDynamic
     };
     if (requestBody) contract.requestBody = requestBody;
     contract.openApiVersion = state.openApiVersion;
@@ -2383,7 +2366,7 @@
     return Object.hasOwn(responses, 'default') ? responses.default : null;
   }
 
-  function openApiRouteMatchesTemplate(route, template, baseUrl = '', serverPathVariables = []) {
+  function openApiRouteMatchesTemplate(route, template, baseUrl = '') {
     const pathOf = value => {
       try { return new URL(String(value || ''), 'http://localhost').pathname; }
       catch { return String(value || '').split('?')[0]; }
@@ -2403,9 +2386,15 @@
       : routePath;
     const fullTemplate = String(template || '').split('?')[0];
     const normalized = effectivePath.startsWith('/') ? effectivePath : '/' + effectivePath;
-    const multiSegmentVariables = new Set(Array.isArray(serverPathVariables) ? serverPathVariables : []);
-    const templateSource = fullTemplate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\{([^{}]+)\\\}/g,
-      (whole, name) => multiSegmentVariables.has(name) ? '.*' : '[^/]+');
+    const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const variablePattern = /\{\{server:([^{}]+)\}\}|\{([^{}]+)\}/g;
+    let templateSource = '', offset = 0;
+    for (const match of fullTemplate.matchAll(variablePattern)) {
+      templateSource += escapeRegex(fullTemplate.slice(offset, match.index));
+      templateSource += match[1] !== undefined ? '.*' : '[^/]+';
+      offset = match.index + match[0].length;
+    }
+    templateSource += escapeRegex(fullTemplate.slice(offset));
     try { return new RegExp('^' + templateSource + '/?$').test(normalized); }
     catch { return false; }
   }
@@ -2549,7 +2538,7 @@
     if (requestMethod && contractMethod && requestMethod !== contractMethod)
       return { status: 'partial', issues, warnings: ['Método da request atual não corresponde ao contrato importado.'] };
     const routeBaseUrl = safeContract.serverBasePathDynamic ? '' : request.baseUrl;
-    if (request?.route && safeContract.pathTemplate && !openApiRouteMatchesTemplate(request.route, safeContract.pathTemplate, routeBaseUrl, safeContract.serverPathVariables))
+    if (request?.route && safeContract.pathTemplate && !openApiRouteMatchesTemplate(request.route, safeContract.pathTemplate, routeBaseUrl))
       return { status: 'partial', issues, warnings: ['Rota da request atual não corresponde ao contrato importado.'] };
     const status = Number(response?.status);
     const responses = safeContract.responses;
@@ -2601,7 +2590,7 @@
     if (requestMethod && safeContract.method && requestMethod !== safeContract.method)
       return { status: 'partial', issues, warnings: [...warnings, 'Método da request atual não corresponde ao contrato importado.'] };
     const routeBaseUrl = safeContract.serverBasePathDynamic ? '' : request.baseUrl;
-    if (request?.route && safeContract.pathTemplate && !openApiRouteMatchesTemplate(request.route, safeContract.pathTemplate, routeBaseUrl, safeContract.serverPathVariables))
+    if (request?.route && safeContract.pathTemplate && !openApiRouteMatchesTemplate(request.route, safeContract.pathTemplate, routeBaseUrl))
       return { status: 'partial', issues, warnings: [...warnings, 'Rota da request atual não corresponde ao contrato importado.'] };
 
     const body = String(request?.body ?? '');
@@ -2682,12 +2671,8 @@
       return { found: false };
     };
     const makeServer = server => {
-      if (!server || typeof server.url !== 'string' || !server.url.trim()) return { baseUrl: '{{baseUrl}}', prefix: '', serverBasePathDynamic: true, serverPathVariables: [] };
+      if (!server || typeof server.url !== 'string' || !server.url.trim()) return { baseUrl: '{{baseUrl}}', prefix: '', serverBasePathDynamic: true };
       const source = server.url.trim();
-      const schemeEnd = source.indexOf('://');
-      const pathStart = schemeEnd >= 0 ? source.indexOf('/', schemeEnd + 3) : 0;
-      const serverPath = pathStart < 0 ? '' : source.slice(pathStart);
-      const serverPathVariables = [...new Set([...serverPath.matchAll(/\{([^{}]+)\}/g)].map(match => match[1].trim()).filter(Boolean))];
       const resolved = source.replace(/\{([^{}]+)\}/g, (whole, name) => {
         const variable = server.variables?.[name];
         if (isSensitive(name)) { warn('Server variables sensiveis nao foram importadas; configure-as manualmente.'); return '{{' + name + '}}'; }
@@ -2700,16 +2685,16 @@
         return '{{' + name + '}}';
       });
       if (/[?#]/.test(source)) throw Error('URL de servidor OpenAPI com query ou fragmento nao suportada.');
-      if (/^\{\{[^{}]+\}\}\/?$/.test(resolved)) return { baseUrl: resolved.replace(/\/+$/, ''), prefix: '', serverBasePathDynamic: true, serverPathVariables: [] };
+      if (/^\{\{[^{}]+\}\}\/?$/.test(resolved)) return { baseUrl: resolved.replace(/\/+$/, ''), prefix: '', serverBasePathDynamic: true };
       const validationUrl = resolved.replace(/\{\{\s*([^{}]+)\s*\}\}/g, 'vortix');
       if (/^[a-z][a-z0-9+.-]*:\/\//i.test(validationUrl)) {
         let parsed;
         try { parsed = new URL(validationUrl); } catch { throw Error('URL de servidor OpenAPI invalida.'); }
         if (!['http:', 'https:'].includes(parsed.protocol)) throw Error('Servidor OpenAPI deve usar HTTP ou HTTPS.');
         if (parsed.username || parsed.password) throw Error('Remova credenciais embutidas no servidor OpenAPI.');
-        return { baseUrl: resolved.replace(/\/+$/, ''), prefix: '', serverPathVariables };
+        return { baseUrl: resolved.replace(/\/+$/, ''), prefix: '' };
       }
-      return { baseUrl: '{{baseUrl}}', prefix: (resolved.startsWith('/') ? resolved : '/' + resolved).replace(/\/+$/, ''), serverBasePathDynamic: true, serverPathVariables };
+      return { baseUrl: '{{baseUrl}}', prefix: (resolved.startsWith('/') ? resolved : '/' + resolved).replace(/\/+$/, ''), serverBasePathDynamic: true };
     };
     const globalServers = Array.isArray(document.servers) ? document.servers : [];
     if (globalServers.length > 1) warn('Mais de um servidor OpenAPI foi encontrado; foi selecionado o primeiro.');
@@ -2807,7 +2792,7 @@
         target.requests.push({
           name: String(operation.summary || operation.operationId || method.toUpperCase() + ' ' + path).slice(0, 100),
           method: method.toUpperCase(), baseUrl: serverInfo.baseUrl, route, headers, body,
-          responseContract: normalizeOpenApiResponseContract(document, operation, method.toUpperCase(), openApiContractPathTemplate(serverInfo, path), serverInfo.serverBasePathDynamic === true, serverInfo.serverPathVariables)
+          responseContract: normalizeOpenApiResponseContract(document, operation, method.toUpperCase(), openApiContractPathTemplate(serverInfo, path), serverInfo.serverBasePathDynamic === true)
         });
       }
     }

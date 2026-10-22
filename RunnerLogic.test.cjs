@@ -4104,15 +4104,15 @@ test('keeps OpenAPI server path variables dynamic in response contract matching'
     status: 200, headers: [['Content-Type', 'application/json']], body: '{}'
   }, { method: 'GET', baseUrl: 'https://api.example.test/v2', route: '/items' });
 
-  assert.equal(request.responseContract.pathTemplate, '/{version}/items');
+  assert.equal(request.responseContract.pathTemplate, '/{{server:version}}/items');
   assert.equal(result.status, 'passed');
   assert.deepEqual(result.issues, []);
 
   const multiSegmentServer = parseOpenApiSpec({
     openapi: '3.1.0', info: { title: 'Multi-segment server path' },
-    servers: [{ url: 'https://api.example.test/{basePath}', variables: { basePath: { default: 'api/v1' } } }],
+    servers: [{ url: 'https://api.example.test/{id}', variables: { id: { default: 'api/v1' } } }],
     paths: {
-      '/items/{itemId}': {
+      '/items/{id}': {
         get: {
           responses: {
             '200': { content: { 'application/json': { schema: { type: 'object' } } } }
@@ -4128,8 +4128,7 @@ test('keeps OpenAPI server path variables dynamic in response contract matching'
     status: 200, headers: [['Content-Type', 'application/json']], body: '{}'
   }, { method: 'GET', baseUrl: 'https://api.example.test/api/v1', route: '/items/7/extra' });
 
-  assert.equal(multiSegmentServer.responseContract.pathTemplate, '/{basePath}/items/{itemId}');
-  assert.deepEqual(multiSegmentServer.responseContract.serverPathVariables, ['basePath']);
+  assert.equal(multiSegmentServer.responseContract.pathTemplate, '/{{server:id}}/items/{id}');
   assert.equal(multiSegmentResult.status, 'passed');
   assert.equal(multiSegmentPathParameter.status, 'partial');
 
@@ -4216,7 +4215,7 @@ test('marks external and cyclic OpenAPI schema refs partial without loading remo
 test('prepared and workspace requests preserve normalized response contracts', () => {
   const { normalizeWorkspaceTabs, prepareSavedRequest } = runnerLogic();
   const responseContract = {
-    method: 'GET', pathTemplate: '/items/{itemId}', serverBasePathDynamic: true, serverPathVariables: ['basePath'], partialReasons: [],
+    method: 'GET', pathTemplate: '/items/{itemId}', serverBasePathDynamic: true, partialReasons: [],
     requestBody: {
       required: true, partialReasons: [],
       content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string' } } } } }
