@@ -14,6 +14,16 @@ function credentialedTestUrl(host = 'api.example.test') {
   return ['https://', 'user', ':', 'pass', '@', host].join('');
 }
 
+function validateOpenApiResponseSchema(schema, value) {
+  const { validateOpenApiResponseContract } = runnerLogic();
+  return validateOpenApiResponseContract({
+    method: 'GET', pathTemplate: '/items', partialReasons: [],
+    responses: { '200': { content: { 'application/json': { schema } } } }
+  }, { status: 200, headers: [['Content-Type', 'application/json']], body: JSON.stringify(value) }, {
+    method: 'GET', baseUrl: 'https://api.example.test', route: '/items'
+  });
+}
+
 test('imports OpenAPI 3 paths into tagged requests with parameters and JSON examples', () => {
   const { parseOpenApiSpec } = runnerLogic();
   const result = parseOpenApiSpec({
@@ -3423,7 +3433,8 @@ test('buildOpenApi31Export round-trips a whole server variable as baseUrl withou
   const imported = parseOpenApiSpec(exported.document);
   assert.equal(imported.collection.requests[0].baseUrl, '{{baseUrl}}');
   assert.equal(imported.collection.requests[0].route, '/status');
-  assert.equal(imported.collection.requests[0].responseContract.pathTemplate, '/v1/status');
+  assert.equal(imported.collection.requests[0].responseContract.pathTemplate, '/status');
+  assert.equal(imported.collection.requests[0].responseContract.serverBasePathDynamic, true);
   assert.equal(imported.environment.variables.baseUrl, 'https://api.example.test/v1');
 });
 
@@ -3706,6 +3717,51 @@ test('normalizes nullable, type arrays, and exclusive bounds by OpenAPI version'
   assert.equal(exclusive31Numeric.status, 'failed');
 });
 
+test('compares unique OpenAPI array items by JSON structure rather than object key order', () => {
+  const reorderedObjects = validateOpenApiResponseSchema({ type: 'array', uniqueItems: true }, [
+    { a: 1, b: 2 }, { b: 2, a: 1 }
+  ]);
+  const reorderedNestedObjects = validateOpenApiResponseSchema({ type: 'array', uniqueItems: true }, [
+    { nested: { a: 1, b: 2 } }, { nested: { b: 2, a: 1 } }
+  ]);
+  const distinctObjects = validateOpenApiResponseSchema({ type: 'array', uniqueItems: true }, [
+    { a: 1, b: 2 }, { a: 1, b: 3 }
+  ]);
+  const orderedArrays = validateOpenApiResponseSchema({ type: 'array', uniqueItems: true }, [
+    { values: [1, 2] }, { values: [2, 1] }
+  ]);
+
+  assert.equal(reorderedObjects.status, 'failed');
+  assert.ok(reorderedObjects.issues.some(issue => /itens únicos/i.test(issue)));
+  assert.equal(reorderedNestedObjects.status, 'failed');
+  assert.equal(distinctObjects.status, 'passed');
+  assert.equal(orderedArrays.status, 'passed');
+});
+
+test('uses decimal precision for OpenAPI multipleOf without epsilon false passes', () => {
+  const tinyNonMultiple = validateOpenApiResponseSchema({ type: 'number', multipleOf: 1 }, 5e-10);
+  const decimalMultiple = validateOpenApiResponseSchema({ type: 'number', multipleOf: 0.1 }, 0.3);
+  const nearbyNonMultiple = validateOpenApiResponseSchema({ type: 'number', multipleOf: 0.1 }, 0.30000000000000004);
+
+  assert.equal(tinyNonMultiple.status, 'failed');
+  assert.equal(decimalMultiple.status, 'passed');
+  assert.equal(nearbyNonMultiple.status, 'failed');
+});
+
+test('marks truncated OpenAPI property bounds partial unless the lower bound proves a violation', () => {
+  const object = Object.fromEntries(Array.from({ length: 2000 }, (_, index) => ['property' + index, index]));
+  const uncertainMinimum = validateOpenApiResponseSchema({ type: 'object', minProperties: 1500 }, object);
+  const uncertainMaximum = validateOpenApiResponseSchema({ type: 'object', maxProperties: 1500 }, object);
+  const provenMaximumViolation = validateOpenApiResponseSchema({ type: 'object', maxProperties: 1000 }, object);
+
+  assert.equal(uncertainMinimum.status, 'partial');
+  assert.deepEqual(uncertainMinimum.issues, []);
+  assert.equal(uncertainMaximum.status, 'partial');
+  assert.deepEqual(uncertainMaximum.issues, []);
+  assert.equal(provenMaximumViolation.status, 'failed');
+  assert.ok(provenMaximumViolation.issues.some(issue => /no máximo 1000/i.test(issue)));
+});
+
 test('marks malformed schema keyword shapes partial instead of treating them as empty schemas', () => {
   const { parseOpenApiSpec, validateOpenApiResponseContract } = runnerLogic();
   const malformedSchemas = [
@@ -3909,6 +3965,54 @@ test('checks required request bodies and media types while leaving non-JSON stru
   assert.deepEqual(xmlBody.issues, []);
 });
 
+test('infers the proxy default Content-Type when the request editor has no explicit header', () => {
+  const { parseOpenApiSpec, validateOpenApiRequestBodyContract } = runnerLogic();
+  const contract = parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'Default request media' },
+    paths: { '/items': { post: {
+      requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
+      responses: { '201': { description: 'Created' } }
+    } } }
+  }).collection.requests[0].responseContract;
+  const request = { method: 'POST', route: '/items', bodyMode: 'json', body: '{"name":"Ava"}', headers: '' };
+  const inferred = validateOpenApiRequestBodyContract(contract, request);
+  const blankHeader = validateOpenApiRequestBodyContract(contract, { ...request, headers: 'Content-Type: ' });
+  const explicitMismatch = validateOpenApiRequestBodyContract(contract, { ...request, headers: 'Content-Type: text/plain' });
+
+  assert.equal(inferred.status, 'passed');
+  assert.equal(blankHeader.status, 'failed');
+  assert.ok(blankHeader.issues.some(issue => /Content-Type/i.test(issue)));
+  assert.equal(explicitMismatch.status, 'failed');
+});
+
+test('treats populated multipart fields as a present non-JSON request body', () => {
+  const { parseOpenApiSpec, validateOpenApiRequestBodyContract } = runnerLogic();
+  const contract = parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'Multipart request body' },
+    paths: { '/upload': { post: {
+      requestBody: { required: true, content: { 'multipart/form-data': { schema: { type: 'object' } } } },
+      responses: { '201': { description: 'Created' } }
+    } } }
+  }).collection.requests[0].responseContract;
+  const request = { method: 'POST', route: '/upload', bodyMode: 'multipart', body: '', headers: '', multipartFields: [{ name: 'caption', type: 'text', value: 'sample' }] };
+  const populated = validateOpenApiRequestBodyContract(contract, request);
+  const empty = validateOpenApiRequestBodyContract(contract, { ...request, multipartFields: [] });
+  const staleTextWithoutFields = validateOpenApiRequestBodyContract(contract, { ...request, body: '{"caption":"stale"}', multipartFields: [] });
+  const manualContentType = validateOpenApiRequestBodyContract(contract, { ...request, headers: 'Content-Type: multipart/form-data' });
+  const fieldsIgnoredByProxy = validateOpenApiRequestBodyContract(contract, { ...request, bodyMode: 'json' });
+
+  assert.equal(populated.status, 'partial');
+  assert.deepEqual(populated.issues, []);
+  assert.ok(populated.warnings.some(warning => /não JSON/i.test(warning)));
+  assert.equal(empty.status, 'failed');
+  assert.ok(empty.issues.some(issue => /obrigat.rio/i.test(issue)));
+  assert.equal(staleTextWithoutFields.status, 'failed');
+  assert.ok(staleTextWithoutFields.issues.some(issue => /obrigat.rio/i.test(issue)));
+  assert.equal(manualContentType.status, 'failed');
+  assert.ok(manualContentType.issues.some(issue => /Content-Type/i.test(issue)));
+  assert.equal(fieldsIgnoredByProxy.status, 'failed');
+});
+
 test('caps oversized request body schemas and reports partial instead of failing media type', () => {
   const { parseOpenApiSpec, validateOpenApiRequestBodyContract } = runnerLogic();
   let schema = { type: 'string' };
@@ -3981,6 +4085,95 @@ test('marks a response contract partial when its OpenAPI server path differs fro
   assert.ok(result.warnings.some(warning => /rota/i.test(warning)));
 });
 
+test('keeps OpenAPI server path variables dynamic in response contract matching', () => {
+  const { parseOpenApiSpec, validateOpenApiResponseContract } = runnerLogic();
+  const request = parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'Dynamic server path' },
+    servers: [{ url: 'https://api.example.test/{version}', variables: { version: { default: 'v1', enum: ['v1', 'v2'] } } }],
+    paths: {
+      '/items': {
+        get: {
+          responses: {
+            '200': { content: { 'application/json': { schema: { type: 'object' } } } }
+          }
+        }
+      }
+    }
+  }).collection.requests[0];
+  const result = validateOpenApiResponseContract(request.responseContract, {
+    status: 200, headers: [['Content-Type', 'application/json']], body: '{}'
+  }, { method: 'GET', baseUrl: 'https://api.example.test/v2', route: '/items' });
+
+  assert.equal(request.responseContract.pathTemplate, '/{{server:version}}/items');
+  assert.equal(result.status, 'passed');
+  assert.deepEqual(result.issues, []);
+
+  const multiSegmentServer = parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'Multi-segment server path' },
+    servers: [{ url: 'https://api.example.test/{id}', variables: { id: { default: 'api/v1' } } }],
+    paths: {
+      '/items/{id}': {
+        get: {
+          responses: {
+            '200': { content: { 'application/json': { schema: { type: 'object' } } } }
+          }
+        }
+      }
+    }
+  }).collection.requests[0];
+  const multiSegmentResult = validateOpenApiResponseContract(multiSegmentServer.responseContract, {
+    status: 200, headers: [['Content-Type', 'application/json']], body: '{}'
+  }, { method: 'GET', baseUrl: 'https://api.example.test/api/v1', route: '/items/7' });
+  const multiSegmentPathParameter = validateOpenApiResponseContract(multiSegmentServer.responseContract, {
+    status: 200, headers: [['Content-Type', 'application/json']], body: '{}'
+  }, { method: 'GET', baseUrl: 'https://api.example.test/api/v1', route: '/items/7/extra' });
+
+  assert.equal(multiSegmentServer.responseContract.pathTemplate, '/{{server:id}}/items/{id}');
+  assert.equal(multiSegmentResult.status, 'passed');
+  assert.equal(multiSegmentPathParameter.status, 'partial');
+
+  const fullUrlVariable = parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'Dynamic full server URL' },
+    servers: [{ url: '{apiUrl}', variables: { apiUrl: { default: 'https://api.example.test/v1' } } }],
+    paths: {
+      '/items': {
+        get: {
+          responses: {
+            '200': { content: { 'application/json': { schema: { type: 'object' } } } }
+          }
+        }
+      }
+    }
+  }).collection.requests[0];
+  const fullUrlResult = validateOpenApiResponseContract(fullUrlVariable.responseContract, {
+    status: 200, headers: [['Content-Type', 'application/json']], body: '{}'
+  }, { method: 'GET', baseUrl: 'https://api.example.test/v2', route: '/items' });
+
+  assert.equal(fullUrlVariable.responseContract.pathTemplate, '/items');
+  assert.equal(fullUrlVariable.responseContract.serverBasePathDynamic, true);
+  assert.equal(fullUrlResult.status, 'passed');
+
+  const relativeServer = parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'Relative server path' },
+    servers: [{ url: '/v1' }],
+    paths: {
+      '/items': {
+        get: {
+          responses: {
+            '200': { content: { 'application/json': { schema: { type: 'object' } } } }
+          }
+        }
+      }
+    }
+  }).collection.requests[0];
+  const relativeResult = validateOpenApiResponseContract(relativeServer.responseContract, {
+    status: 200, headers: [['Content-Type', 'application/json']], body: '{}'
+  }, { method: 'GET', baseUrl: 'https://api.example.test/v2', route: '/v1/items' });
+
+  assert.equal(relativeServer.responseContract.serverBasePathDynamic, true);
+  assert.equal(relativeResult.status, 'passed');
+});
+
 test('matches response contracts against the full effective path, not the route alone', () => {
   const { validateOpenApiResponseContract } = runnerLogic();
   const result = validateOpenApiResponseContract({
@@ -4022,7 +4215,7 @@ test('marks external and cyclic OpenAPI schema refs partial without loading remo
 test('prepared and workspace requests preserve normalized response contracts', () => {
   const { normalizeWorkspaceTabs, prepareSavedRequest } = runnerLogic();
   const responseContract = {
-    method: 'GET', pathTemplate: '/items/{itemId}', partialReasons: [],
+    method: 'GET', pathTemplate: '/items/{itemId}', serverBasePathDynamic: true, partialReasons: [],
     requestBody: {
       required: true, partialReasons: [],
       content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string' } } } } }

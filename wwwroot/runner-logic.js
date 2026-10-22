@@ -2186,6 +2186,9 @@
     if (!methods.has(method)) return null;
     const pathTemplate = String(source.pathTemplate || '').trim();
     if (!pathTemplate.startsWith('/') || pathTemplate.length > 4096 || /[?#\\\r\n]/.test(pathTemplate)) return null;
+    const serverBasePathDynamic = source.serverBasePathDynamic === true;
+    if (Object.hasOwn(source, 'serverBasePathDynamic') && typeof source.serverBasePathDynamic !== 'boolean')
+      state.partial('O contrato importado contém avisos não confiáveis e precisa de revisão manual.');
     const responses = {};
     if (!source.responses || typeof source.responses !== 'object' || Array.isArray(source.responses)) {
       state.partial(openApiResponseMapPartialMessage);
@@ -2222,27 +2225,38 @@
       if (!responseCount) state.partial(openApiResponseMapPartialMessage);
     }
     const normalized = { method, pathTemplate, partialReasons: [...partialReasons].slice(0, 50), responses };
+    if (serverBasePathDynamic) normalized.serverBasePathDynamic = true;
     if (openApiVersion) normalized.openApiVersion = openApiVersion;
     if (Object.hasOwn(source, 'requestBody')) normalized.requestBody = normalizeOpenApiRequestBodyObject(source.requestBody, null, openApiVersion);
     return capOpenApiResponseContract(normalized);
   }
 
-  function openApiContractPathTemplate(serverInfo, path, environmentVariables = {}) {
-    let prefix = String(serverInfo?.prefix || '').trim();
-    if (!prefix) {
-      const base = String(serverInfo?.baseUrl || '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, name) =>
-        Object.hasOwn(environmentVariables, name) ? String(environmentVariables[name]) : 'vortix');
-      try {
-        const pathname = new URL(base).pathname.replace(/\/+$/, '');
-        if (pathname && pathname !== '/') prefix = pathname;
-      } catch { /* templated or relative base URL */ }
-    }
+  function openApiContractPathPrefix(serverInfo) {
+    const dynamicPath = value => String(value || '').replace(/\{\{\s*([^{}]+)\s*\}\}/g, (whole, name) => '{{server:' + name.trim() + '}}');
+    let prefix = dynamicPath(String(serverInfo?.prefix || '').trim());
+    if (prefix || serverInfo?.serverBasePathDynamic) return prefix;
+    const rawBase = String(serverInfo?.baseUrl || '').trim();
+    const names = [];
+    const base = rawBase.replace(/\{\{\s*([^{}]+)\s*\}\}/g, (whole, name) => {
+      names.push(name.trim());
+      return 'vortixpathplaceholder' + (names.length - 1) + 'vortix';
+    });
+    try {
+      const pathname = new URL(base).pathname.replace(/\/+$/, '');
+      if (pathname && pathname !== '/')
+        prefix = pathname.replace(/vortixpathplaceholder(\d+)vortix/g, (whole, index) => '{{server:' + (names[Number(index)] || '') + '}}');
+    } catch { /* templated or relative base URL */ }
+    return prefix;
+  }
+
+  function openApiContractPathTemplate(serverInfo, path) {
+    const prefix = openApiContractPathPrefix(serverInfo);
     const route = String(path || '/').split('?')[0];
     const full = (prefix + '/' + route.replace(/^\/+/, '')).replace(/\/{2,}/g, '/');
     return full.startsWith('/') ? full : '/' + full;
   }
 
-  function normalizeOpenApiResponseContract(document, operation, method, pathTemplate) {
+  function normalizeOpenApiResponseContract(document, operation, method, pathTemplate, serverBasePathDynamic = false) {
     const partialReasons = new Set();
     const state = {
       openApiVersion: '3.' + String(document?.openapi || '').split('.')[1],
@@ -2272,7 +2286,8 @@
       method: String(method || 'GET').toUpperCase().slice(0, 16),
       pathTemplate: String(pathTemplate || '/').slice(0, 4096),
       partialReasons: [...partialReasons].slice(0, 50),
-      responses
+      responses,
+      serverBasePathDynamic
     };
     if (requestBody) contract.requestBody = requestBody;
     contract.openApiVersion = state.openApiVersion;
@@ -2307,6 +2322,19 @@
       return '';
     }
     return openApiResponseHeader(headers, target);
+  }
+
+  function openApiRequestHeaderPresent(headers, name) {
+    const target = String(name || '').toLowerCase();
+    if (typeof headers === 'string') {
+      return headers.split(/\r?\n/).some(line => {
+        const separator = line.indexOf(':');
+        return separator >= 0 && line.slice(0, separator).trim().toLowerCase() === target;
+      });
+    }
+    if (Array.isArray(headers))
+      return headers.some(entry => Array.isArray(entry) && String(entry[0] || '').toLowerCase() === target);
+    return !!headers && typeof headers === 'object' && Object.keys(headers).some(key => key.toLowerCase() === target);
   }
 
   function openApiMediaMatches(declared, actual) {
@@ -2358,7 +2386,15 @@
       : routePath;
     const fullTemplate = String(template || '').split('?')[0];
     const normalized = effectivePath.startsWith('/') ? effectivePath : '/' + effectivePath;
-    const templateSource = fullTemplate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\{[^{}]+\\\}/g, '[^/]+');
+    const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const variablePattern = /\{\{server:([^{}]+)\}\}|\{([^{}]+)\}/g;
+    let templateSource = '', offset = 0;
+    for (const match of fullTemplate.matchAll(variablePattern)) {
+      templateSource += escapeRegex(fullTemplate.slice(offset, match.index));
+      templateSource += match[1] !== undefined ? '.*' : '[^/]+';
+      offset = match.index + match[0].length;
+    }
+    templateSource += escapeRegex(fullTemplate.slice(offset));
     try { return new RegExp('^' + templateSource + '/?$').test(normalized); }
     catch { return false; }
   }
@@ -2372,6 +2408,39 @@
     if (type === 'object') return !!value && typeof value === 'object' && !Array.isArray(value);
     if (type === 'null') return value === null;
     return false;
+  }
+
+  function openApiUniqueItemKey(value) {
+    if (Array.isArray(value)) return '[' + value.map(openApiUniqueItemKey).join(',') + ']';
+    if (value && typeof value === 'object') {
+      const entries = Object.keys(value).sort((left, right) => {
+        const alphabetical = left.localeCompare(right, 'en', { sensitivity: 'variant' });
+        return alphabetical || (left < right ? -1 : left > right ? 1 : 0);
+      }).map(key => JSON.stringify(key) + ':' + openApiUniqueItemKey(value[key]));
+      return '{' + entries.join(',') + '}';
+    }
+    return JSON.stringify(value);
+  }
+
+  function openApiDecimalParts(value) {
+    let text = String(value);
+    let sign = '';
+    if (text.startsWith('-')) { sign = '-'; text = text.slice(1); }
+    const exponentMatch = /e([+-]?\d+)$/i.exec(text);
+    const exponent = exponentMatch ? Number(exponentMatch[1]) : 0;
+    if (exponentMatch) text = text.slice(0, exponentMatch.index);
+    const point = text.indexOf('.');
+    const scale = point >= 0 ? text.length - point - 1 : 0;
+    return { digits: BigInt(sign + (text.replace('.', '') || '0')), exponent: exponent - scale };
+  }
+
+  function openApiIsMultipleOf(value, multipleOf) {
+    const left = openApiDecimalParts(value), right = openApiDecimalParts(multipleOf);
+    if (right.digits === 0n) return false;
+    const difference = left.exponent - right.exponent;
+    const divisor = difference < 0 ? right.digits * (10n ** BigInt(-difference)) : right.digits;
+    const numerator = difference > 0 ? left.digits * (10n ** BigInt(difference)) : left.digits;
+    return numerator % divisor === 0n;
   }
 
   function validateOpenApiSchemaValue(schema, value, location, issues, warnings, depth = 0) {
@@ -2425,7 +2494,7 @@
       if (typeof schema.maximum === 'number' && value > schema.maximum) issues.push('Campo ' + location + ' deve ser menor ou igual a ' + schema.maximum + '.');
       if (typeof schema.exclusiveMinimum === 'number' && value <= schema.exclusiveMinimum) issues.push('Campo ' + location + ' deve ser maior que ' + schema.exclusiveMinimum + '.');
       if (typeof schema.exclusiveMaximum === 'number' && value >= schema.exclusiveMaximum) issues.push('Campo ' + location + ' deve ser menor que ' + schema.exclusiveMaximum + '.');
-      if (typeof schema.multipleOf === 'number' && schema.multipleOf > 0 && Math.abs(value / schema.multipleOf - Math.round(value / schema.multipleOf)) > 1e-9)
+      if (typeof schema.multipleOf === 'number' && schema.multipleOf > 0 && !openApiIsMultipleOf(value, schema.multipleOf))
         issues.push('Campo ' + location + ' deve ser múltiplo de ' + schema.multipleOf + '.');
     }
     if (typeof value === 'string') {
@@ -2439,7 +2508,7 @@
       if (schema.uniqueItems === true) {
         const seen = new Set();
         for (const item of value.slice(0, 1000)) {
-          const key = JSON.stringify(item);
+          const key = openApiUniqueItemKey(item);
           if (seen.has(key)) { issues.push('Campo ' + location + ' deve conter itens únicos.'); break; }
           seen.add(key);
         }
@@ -2447,10 +2516,13 @@
       }
     }
     if (isObject) {
-      let count = 0;
-      for (const name in value) if (Object.hasOwn(value, name) && ++count > 1000) break;
-      if (count > 1000) warnings.push('A resposta excede o limite de propriedades validadas.');
-      if (Number.isInteger(schema.minProperties) && count < schema.minProperties) issues.push('Campo ' + location + ' deve ter pelo menos ' + schema.minProperties + ' propriedades.');
+      let count = 0, capped = false;
+      for (const name in value) {
+        if (!Object.hasOwn(value, name)) continue;
+        if (++count > 1000) { capped = true; break; }
+      }
+      if (capped) warnings.push('A resposta excede o limite de propriedades validadas.');
+      if (!capped && Number.isInteger(schema.minProperties) && count < schema.minProperties) issues.push('Campo ' + location + ' deve ter pelo menos ' + schema.minProperties + ' propriedades.');
       if (Number.isInteger(schema.maxProperties) && count > schema.maxProperties) issues.push('Campo ' + location + ' deve ter no máximo ' + schema.maxProperties + ' propriedades.');
     }
   }
@@ -2465,7 +2537,8 @@
     const requestMethod = String(request?.method || '').toUpperCase();
     if (requestMethod && contractMethod && requestMethod !== contractMethod)
       return { status: 'partial', issues, warnings: ['Método da request atual não corresponde ao contrato importado.'] };
-    if (request?.route && safeContract.pathTemplate && !openApiRouteMatchesTemplate(request.route, safeContract.pathTemplate, request.baseUrl))
+    const routeBaseUrl = safeContract.serverBasePathDynamic ? '' : request.baseUrl;
+    if (request?.route && safeContract.pathTemplate && !openApiRouteMatchesTemplate(request.route, safeContract.pathTemplate, routeBaseUrl))
       return { status: 'partial', issues, warnings: ['Rota da request atual não corresponde ao contrato importado.'] };
     const status = Number(response?.status);
     const responses = safeContract.responses;
@@ -2516,11 +2589,26 @@
     const requestMethod = String(request?.method || '').toUpperCase();
     if (requestMethod && safeContract.method && requestMethod !== safeContract.method)
       return { status: 'partial', issues, warnings: [...warnings, 'Método da request atual não corresponde ao contrato importado.'] };
-    if (request?.route && safeContract.pathTemplate && !openApiRouteMatchesTemplate(request.route, safeContract.pathTemplate, request.baseUrl))
+    const routeBaseUrl = safeContract.serverBasePathDynamic ? '' : request.baseUrl;
+    if (request?.route && safeContract.pathTemplate && !openApiRouteMatchesTemplate(request.route, safeContract.pathTemplate, routeBaseUrl))
       return { status: 'partial', issues, warnings: [...warnings, 'Rota da request atual não corresponde ao contrato importado.'] };
 
     const body = String(request?.body ?? '');
-    if (!body.trim()) {
+    const bodyMode = normalizeBodyMode(request?.bodyMode);
+    const multipartFields = Array.isArray(request?.multipartFields) ? request.multipartFields : [];
+    const hasMultipartFields = bodyMode === 'multipart' && multipartFields.length > 0;
+    const contentTypeHeaderPresent = openApiRequestHeaderPresent(request.headers, 'content-type');
+    const declaredContentType = openApiRequestHeader(request.headers, 'content-type');
+    if (contentTypeHeaderPresent && !declaredContentType) {
+      issues.push('Content-Type declarado está vazio e será rejeitado pelo proxy.');
+      return { status: 'failed', issues, warnings };
+    }
+    if (bodyMode === 'multipart' && contentTypeHeaderPresent) {
+      issues.push('Remova o Content-Type manual; o proxy gera o boundary do multipart.');
+      return { status: 'failed', issues, warnings };
+    }
+    const hasBody = bodyMode === 'multipart' ? hasMultipartFields : body.trim().length > 0;
+    if (!hasBody) {
       if (requestBody.required) issues.push('O body da request é obrigatório.');
       if (issues.length) return { status: 'failed', issues, warnings };
       return { status: warnings.length ? 'partial' : 'passed', issues, warnings };
@@ -2532,13 +2620,13 @@
     const declaredTypes = Object.keys(content);
     if (!declaredTypes.length && requestBody.partialReasons.includes(openApiRequestBodyMapPartialMessage))
       return { status: 'partial', issues, warnings };
-    const actualType = openApiRequestHeader(request.headers, 'content-type');
+    const actualType = declaredContentType || (hasMultipartFields ? 'multipart/form-data' : openApiDefaultContentType(bodyMode));
     const mediaType = declaredTypes.find(type => openApiMediaMatches(type, actualType)) || '';
-    if (!actualType || !mediaType) {
+    if (!mediaType) {
       if (requestBody.partialReasons.includes(openApiRequestBodyMapPartialMessage))
         return { status: 'partial', issues, warnings };
       issues.push('Content-Type da request não corresponde ao contrato importado.');
-    } else if (!openApiJsonMediaType(mediaType) || !openApiJsonMediaType(actualType) || request.bodyMode === 'multipart' || request.bodyMode === 'urlencoded' || request.bodyMode === 'xml' || request.bodyMode === 'text') {
+    } else if (!openApiJsonMediaType(mediaType) || !openApiJsonMediaType(actualType) || bodyMode === 'multipart' || bodyMode === 'urlencoded' || bodyMode === 'xml' || bodyMode === 'text') {
       warnings.push('A validação estrutural de body não JSON não é suportada.');
     } else {
       let value;
@@ -2583,7 +2671,7 @@
       return { found: false };
     };
     const makeServer = server => {
-      if (!server || typeof server.url !== 'string' || !server.url.trim()) return { baseUrl: '{{baseUrl}}', prefix: '' };
+      if (!server || typeof server.url !== 'string' || !server.url.trim()) return { baseUrl: '{{baseUrl}}', prefix: '', serverBasePathDynamic: true };
       const source = server.url.trim();
       const resolved = source.replace(/\{([^{}]+)\}/g, (whole, name) => {
         const variable = server.variables?.[name];
@@ -2597,7 +2685,7 @@
         return '{{' + name + '}}';
       });
       if (/[?#]/.test(source)) throw Error('URL de servidor OpenAPI com query ou fragmento nao suportada.');
-      if (/^\{\{[^{}]+\}\}\/?$/.test(resolved)) return { baseUrl: resolved.replace(/\/+$/, ''), prefix: '' };
+      if (/^\{\{[^{}]+\}\}\/?$/.test(resolved)) return { baseUrl: resolved.replace(/\/+$/, ''), prefix: '', serverBasePathDynamic: true };
       const validationUrl = resolved.replace(/\{\{\s*([^{}]+)\s*\}\}/g, 'vortix');
       if (/^[a-z][a-z0-9+.-]*:\/\//i.test(validationUrl)) {
         let parsed;
@@ -2606,7 +2694,7 @@
         if (parsed.username || parsed.password) throw Error('Remova credenciais embutidas no servidor OpenAPI.');
         return { baseUrl: resolved.replace(/\/+$/, ''), prefix: '' };
       }
-      return { baseUrl: '{{baseUrl}}', prefix: (resolved.startsWith('/') ? resolved : '/' + resolved).replace(/\/+$/, '') };
+      return { baseUrl: '{{baseUrl}}', prefix: (resolved.startsWith('/') ? resolved : '/' + resolved).replace(/\/+$/, ''), serverBasePathDynamic: true };
     };
     const globalServers = Array.isArray(document.servers) ? document.servers : [];
     if (globalServers.length > 1) warn('Mais de um servidor OpenAPI foi encontrado; foi selecionado o primeiro.');
@@ -2634,15 +2722,15 @@
           if (parameter.name && ['path', 'query', 'header', 'cookie'].includes(parameter.in)) parameters.set(parameter.in + ':' + parameter.name, parameter);
         }
         const pathParameters = new Map([...parameters].filter(([key]) => key.startsWith('path:')).map(([key, value]) => [key.slice(5), value]));
-        let route = serverInfo.prefix + path;
-        if (!route.startsWith('/')) route = '/' + route;
-        route = route.replace(/\{([^{}]+)\}/g, (whole, name) => {
+        const resolvedPath = path.replace(/\{([^{}]+)\}/g, (whole, name) => {
           const parameter = pathParameters.get(name);
           if (isSensitive(name)) { warn('Parametros de caminho sensiveis foram deixados como template.'); return '{{' + name + '}}'; }
           const value = parameter ? sample(parameter) : { found: false };
           if (!parameter) warn('Parametro de caminho sem definicao inline foi deixado como template.');
           return value.found ? encodeURIComponent(scalar(value.value)) : '{{' + name + '}}';
         });
+        let route = serverInfo.prefix + resolvedPath;
+        if (!route.startsWith('/')) route = '/' + route;
         const query = [], headerMap = new Map();
         const addHeader = (name, value) => headerMap.set(String(name).toLowerCase(), [String(name), scalar(value)]);
         for (const parameter of parameters.values()) {
@@ -2704,7 +2792,7 @@
         target.requests.push({
           name: String(operation.summary || operation.operationId || method.toUpperCase() + ' ' + path).slice(0, 100),
           method: method.toUpperCase(), baseUrl: serverInfo.baseUrl, route, headers, body,
-          responseContract: normalizeOpenApiResponseContract(document, operation, method.toUpperCase(), openApiContractPathTemplate(serverInfo, path, environmentVariables))
+          responseContract: normalizeOpenApiResponseContract(document, operation, method.toUpperCase(), openApiContractPathTemplate(serverInfo, path), serverInfo.serverBasePathDynamic === true)
         });
       }
     }
