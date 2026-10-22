@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="380" viewBox="0 0 1200 380" role="img" aria-labelledby="title desc">
+  <title id="title">Validar respostas com contrato OpenAPI no Vortix</title>
+  <desc id="desc">Importe um schema seguro, salve-o com a request e compare a resposta no envio manual ou Runner. Resultados podem passar, falhar ou ficar parciais.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1b2028"/><stop offset="1" stop-color="#15191f"/></linearGradient>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#82d9bd"/></marker>
+  </defs>
+  <rect width="1200" height="380" rx="24" fill="url(#bg)"/>
+  <circle cx="1085" cy="48" r="150" fill="#b799ff" opacity=".07"/>
+  <text x="44" y="42" fill="#82d9bd" font-family="Segoe UI,Arial,sans-serif" font-size="13" font-weight="700" letter-spacing="2">CONTRATOS DE RESPOSTA · OPENAPI 3</text>
+  <text x="44" y="91" fill="#f0f4f8" font-family="Segoe UI,Arial,sans-serif" font-size="34" font-weight="700">Confira o contrato junto com a resposta</text>
+  <text x="44" y="121" fill="#aeb8c4" font-family="Segoe UI,Arial,sans-serif" font-size="16">A mesma validação acompanha o envio manual e cada etapa do Runner.</text>
+  <g font-family="Segoe UI,Arial,sans-serif">
+    <rect x="44" y="158" width="254" height="142" rx="14" fill="#222832" stroke="#3a4654"/>
+    <circle cx="72" cy="188" r="15" fill="#302b40"/><text x="67" y="193" fill="#c8b4ff" font-size="14" font-weight="700">1</text>
+    <text x="98" y="193" fill="#e8edf2" font-size="16" font-weight="700">Importe a operação</text>
+    <text x="66" y="235" fill="#82d9bd" font-family="Consolas,monospace" font-size="15" font-weight="700">GET /users/{id}</text>
+    <text x="66" y="263" fill="#b7c1cc" font-family="Consolas,monospace" font-size="13">200 · application/json</text>
+    <text x="66" y="283" fill="#8793a0" font-size="12">schema estrutural</text>
+    <path d="M312 228h42" stroke="#82d9bd" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="372" y="158" width="254" height="142" rx="14" fill="#222832" stroke="#3a4654"/>
+    <circle cx="400" cy="188" r="15" fill="#302b40"/><text x="395" y="193" fill="#c8b4ff" font-size="14" font-weight="700">2</text>
+    <text x="426" y="193" fill="#e8edf2" font-size="16" font-weight="700">Guarde na request</text>
+    <rect x="396" y="219" width="202" height="54" rx="8" fill="#1a2027" stroke="#394451"/>
+    <text x="410" y="242" fill="#82d9bd" font-family="Consolas,monospace" font-size="13">id: integer</text>
+    <text x="410" y="261" fill="#d6bd75" font-family="Consolas,monospace" font-size="13">name: string</text>
+    <text x="396" y="290" fill="#8793a0" font-size="12">coleção · workspace · export Vortix</text>
+    <path d="M640 228h42" stroke="#82d9bd" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="700" y="158" width="196" height="142" rx="14" fill="#222832" stroke="#3a4654"/>
+    <circle cx="728" cy="188" r="15" fill="#302b40"/><text x="723" y="193" fill="#c8b4ff" font-size="14" font-weight="700">3</text>
+    <text x="754" y="193" fill="#e8edf2" font-size="16" font-weight="700">Envie e compare</text>
+    <rect x="724" y="220" width="148" height="32" rx="8" fill="#173b34"/><text x="746" y="241" fill="#82d9bd" font-family="Consolas,monospace" font-size="14" font-weight="700">Enviar</text>
+    <text x="724" y="278" fill="#b7c1cc" font-size="13">manual ou Runner</text>
+    <path d="M910 228h42" stroke="#82d9bd" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="970" y="158" width="186" height="142" rx="14" fill="#222832" stroke="#3a4654"/>
+    <text x="990" y="189" fill="#e8edf2" font-size="15" font-weight="700">Resultado</text>
+    <rect x="990" y="204" width="144" height="24" rx="12" fill="#173b34"/><text x="1007" y="221" fill="#82d9bd" font-size="12" font-weight="700">Passou</text>
+    <rect x="990" y="235" width="144" height="24" rx="12" fill="#40242a"/><text x="1007" y="252" fill="#ff9ca7" font-size="12" font-weight="700">Falhou</text>
+    <rect x="990" y="266" width="144" height="24" rx="12" fill="#41351d"/><text x="1007" y="283" fill="#e7c879" font-size="12" font-weight="700">Parcial</text>
+  </g>
+  <text x="44" y="343" fill="#8793a0" font-family="Segoe UI,Arial,sans-serif" font-size="13">Sem chamadas automáticas extras · sem valores de exemplo no contrato · referências externas nunca são carregadas</text>
+</svg>

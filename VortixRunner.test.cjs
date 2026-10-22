@@ -89,6 +89,76 @@ test('README and ROADMAP document OpenAPI 3.1 export scope and limitations', asy
   assert.match(roadmap, /credenciais/i);
 });
 
+test('OpenAPI response contracts persist with Vortix requests and stay out of API proxy payloads', async () => {
+  const app = await fs.readFile(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const functionBody = name => {
+    const start = app.indexOf(`function ${name}(`);
+    const nextSync = app.indexOf('\nfunction ', start + 1), nextAsync = app.indexOf('\nasync function ', start + 1);
+    const end = [nextSync, nextAsync].filter(index => index >= 0).reduce((first, index) => Math.min(first, index), app.length);
+    assert.ok(start >= 0 && end > start, `${name} should be present`);
+    return app.slice(start, end);
+  };
+
+  assert.match(functionBody('normalizeImportedNode'), /responseContract/);
+  assert.match(functionBody('normalizeImportedNode'), /sanitizeOpenApiResponseContract\(request\.responseContract\)/);
+  assert.match(functionBody('saveHistory'), /sanitizeOpenApiResponseContract/);
+  assert.match(functionBody('captureWorkspaceDraft'), /responseContract/);
+  assert.match(functionBody('getSnapshot'), /responseContract/);
+  assert.match(functionBody('loadCollectionRequest'), /responseContract/);
+  assert.match(functionBody('exportCollectionNode'), /responseContract/);
+  assert.match(functionBody('executeApiRequest'), /delete proxyRequest\.responseContract/);
+});
+
+test('manual sends and collection Runner evaluate OpenAPI contracts and show partial status distinctly', async () => {
+  const app = await fs.readFile(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const html = await fs.readFile(path.join(__dirname, 'wwwroot', 'index.html'), 'utf8');
+  const functionBody = name => {
+    const start = app.indexOf(`function ${name}(`);
+    const nextSync = app.indexOf('\nfunction ', start + 1), nextAsync = app.indexOf('\nasync function ', start + 1);
+    const end = [nextSync, nextAsync].filter(index => index >= 0).reduce((first, index) => Math.min(first, index), app.length);
+    assert.ok(start >= 0 && end > start, `${name} should be present`);
+    return app.slice(start, end);
+  };
+
+  assert.match(functionBody('performApiRequest'), /responseResultsForRequest/);
+  assert.match(functionBody('runRunnerCases'), /responseResultsForRequest/);
+  assert.match(functionBody('responseContractTestResult'), /validateOpenApiResponseContract/);
+  assert.match(functionBody('renderResponseTestResults'), /partial/);
+  assert.match(functionBody('runRunnerCases'), /partialTests[\s\S]*?setRunnerCase\([^)]*warning/);
+  assert.match(functionBody('runRunnerCases'), /partialTests[\s\S]*?showToast\([^;]*warning/);
+  assert.match(html, /data-editor-panel="tests"[\s\S]*?(?:Contrato OpenAPI|contrato da resposta)/i);
+});
+
+test('local response examples validate imported contracts against the active resolved base URL', async () => {
+  const app = await fs.readFile(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const start = app.indexOf('async function simulateSavedResponseExample('), next = app.indexOf('\nfunction updateCopyButtons(', start);
+  assert.ok(start >= 0 && next > start);
+  const mockFlow = app.slice(start, next);
+  assert.match(mockFlow, /resolvedBaseUrl=applyEnvironment\(rawBaseUrl\)/);
+  assert.match(mockFlow, /responseResultsForRequest\(\{[^}]*baseUrl:current\.baseUrl/);
+});
+
+test('README explains response contract results, supported schema, and safe reference limits', async () => {
+  const readme = await fs.readFile(path.join(__dirname, 'README.md'), 'utf8');
+  const image = await fs.readFile(path.join(__dirname, 'docs', 'images', 'openapi-response-contract.svg'), 'utf8');
+  assert.match(readme, /### Validar respostas com contrato OpenAPI/);
+  assert.match(readme, /Passou[\s\S]*Falhou[\s\S]*Parcial/);
+  assert.match(readme, /additionalProperties/);
+  assert.match(readme, /referências externas nunca são carregadas/i);
+  assert.match(readme, /valores do body da resposta/i);
+  assert.match(readme, /docs\/images\/openapi-response-contract\.svg/);
+  assert.match(image, /<title[^>]*>Validar respostas com contrato OpenAPI/);
+});
+
+test('Runner history labels partial contract outcomes without classifying them as completed', async () => {
+  const app = await fs.readFile(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
+  const start = app.indexOf('function runnerHistoryOutcomeLabel('), end = app.indexOf('\nfunction runnerHistoryNotice(', start);
+  assert.ok(start >= 0 && end > start);
+  const labeler = app.slice(start, end);
+  assert.match(labeler, /partial/);
+  assert.match(labeler, /parcial/i);
+});
+
 function runCli(args, extraEnv = {}) {
   return new Promise(resolve => {
     const child = spawn(process.execPath, [cliPath, ...args], { cwd: __dirname, env: { ...process.env, ...extraEnv } });

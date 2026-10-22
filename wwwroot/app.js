@@ -30,7 +30,7 @@ const WORKSPACE_TABS_KEY = 'workspaceTabs', MAX_WORKSPACE_TABS = RunnerLogic.max
 const RUNNER_HISTORY_LIMIT = RunnerLogic.runnerHistoryLimit || 30;
 let workspaceTabs = [], activeWorkspaceTabId = '', workspaceTabsSaveTimer = 0, workspaceTabsStorageWarning = false, workspaceTabsLoading = false;
 let responseBodyState = RunnerLogic.parseResponseBody(''), responseBodyView = 'pretty', responseTreeSource = null;
-let currentResponseExample = null;
+let currentResponseExample = null, activeResponseContract = null;
 let graphqlSchema = null, graphqlSchemaEndpointKey = '', graphqlSchemaLoading = false, graphqlAutocompleteSuggestions = [], graphqlAutocompleteIndex = 0;
 let tokenRequestConfig = RunnerLogic.normalizeTokenRequestConfig(), oauth2TokenConfig = RunnerLogic.normalizeOAuthClientCredentialsConfig();
 let oauthPkceConfig = RunnerLogic.normalizeOAuthPkceConfig(), oauthPkceBusy = false, oauthPkceCancelRequested = false, oauthPkcePopup = null, oauthPkcePreviewTimer = 0;
@@ -938,7 +938,7 @@ async function saveHistory(request){
   const {authOmitted:storedAuthOmitted,...authFields}=storedAuth,bearerToken=authFields.bearerToken,basicUsername=authFields.basicUsername,basicPassword=authFields.basicPassword,apiKeyName=authFields.apiKeyName,apiKeyLocation=authFields.apiKeyLocation,apiKeyValue=authFields.apiKeyValue,authMode=authFields.authMode;
   const authOmitted=!!request.authOmitted||storedAuthOmitted;
   if(!base.value||!path.value)return null;
-  const tokenRequest=!!request.tokenRequest,entry={
+  const tokenRequest=!!request.tokenRequest,responseContract=RunnerLogic.sanitizeOpenApiResponseContract(request.responseContract),entry={
     id:newId(),savedAt:new Date().toISOString(),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET',
     baseUrl:base.value,route:path.value,headers:bodyModeHeaders(headers.value,request.bodyMode),body:payload.value,bodyMode:normalizeBodyMode(request.bodyMode),multipartFields:multipart.fields,graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,authType,bearerToken,basicUsername,basicPassword,apiKeyName,apiKeyLocation,apiKeyValue,authMode,collectionId:String(request.collectionId||""),folderId:String(request.folderId||""),environmentId:String(request.environmentId||'default'),authOmitted,tokenRequest,allowInsecureHttp:request.allowInsecureHttp===true,
     tokenCredentialMode:tokenRequest?(request.tokenCredentialMode==='query'?'query':'body'):'',tokenClientId:tokenRequest?String(request.tokenClientId||'').trim():'',
@@ -947,7 +947,8 @@ async function saveHistory(request){
      redacted:base.redacted||path.redacted||headers.redacted||payload.redacted||authOmitted||multipart.redacted||graphql.redacted||preRequest.actions.length!==RunnerLogic.normalizePreRequestActions(request.preRequestActions).length,
      preRequestActions:preRequest.actions,preRequestActionsEnabled:preRequest.enabled,preRequestActionsLiteralConsent:preRequest.literalConsent,
     captureResponseVariable:!!request.captureResponseVariable,responseVariableName:String(request.responseVariableName||''),responseValueSource:request.responseValueSource==='text'?'text':'json',responseJsonPath:String(request.responseJsonPath||''),responseSuccessOnly:request.responseSuccessOnly!==false,responseCaptureTarget:request.responseCaptureTarget==='vault'?'vault':'environment',
-    responseTests:RunnerLogic.normalizeResponseTests(request.responseTests)
+    responseTests:RunnerLogic.normalizeResponseTests(request.responseTests),
+    ...(responseContract?{responseContract}:{})
   };
   try{
     const retention=await dbWrite('history',entry);byId('history-panel').open=true;
@@ -976,7 +977,7 @@ function applyHistoryEntry(entry,notify=true){
 byId('token-helper').open=!!entry.tokenRequest&&!isOAuth2;byId('oauth2-helper').open=isOAuth2;
 if(isOAuth2){byId('oauth2-token-url').value=entry.oauthTokenUrl||((entry.baseUrl||'')+(entry.route||''));byId('oauth2-client-id').value=entry.oauthClientId||'';byId('oauth2-client-secret').value='';byId('oauth2-scope').value=entry.oauthScope||'';byId('oauth2-client-auth-method').value=entry.oauthClientAuthMethod==='client_secret_post'?'client_secret_post':'client_secret_basic';byId('oauth2-allow-insecure-http').checked=entry.allowInsecureHttp===true;}
 updateOAuth2TokenButton();void renderOAuth2TokenStatus();clearWriteConfirmation();updateGuard();updateCopyButtons();renderBodyHighlight();updateJsonTools();
-   renderPreRequestActions(entry.preRequestActions||[]);byId('pre-request-actions-enabled').checked=entry.preRequestActionsEnabled!==false;byId('pre-request-literal-consent').checked=entry.preRequestActionsLiteralConsent===true;updatePreRequestActionsUi();byId('capture-response-variable').checked=!!entry.captureResponseVariable;byId('response-variable-name').value=entry.responseVariableName||'token';byId('response-value-source').value=entry.responseValueSource==='text'?'text':'json';byId('response-json-path').value=entry.responseJsonPath||'access_token';byId('response-success-only').checked=entry.responseSuccessOnly!==false;byId('response-capture-target').value=entry.responseCaptureTarget==='vault'?'vault':'environment';byId('response-variable-result').hidden=true;updateResponseCaptureUi();setResponseTests(entry.responseTests||[]);
+   renderPreRequestActions(entry.preRequestActions||[]);byId('pre-request-actions-enabled').checked=entry.preRequestActionsEnabled!==false;byId('pre-request-literal-consent').checked=entry.preRequestActionsLiteralConsent===true;updatePreRequestActionsUi();byId('capture-response-variable').checked=!!entry.captureResponseVariable;byId('response-variable-name').value=entry.responseVariableName||'token';byId('response-value-source').value=entry.responseValueSource==='text'?'text':'json';byId('response-json-path').value=entry.responseJsonPath||'access_token';byId('response-success-only').checked=entry.responseSuccessOnly!==false;byId('response-capture-target').value=entry.responseCaptureTarget==='vault'?'vault':'environment';byId('response-variable-result').hidden=true;updateResponseCaptureUi();setResponseTests(entry.responseTests||[]);setActiveResponseContract(entry.responseContract||null);
   activeSaved=null;byId('request-title').textContent='Histórico · '+(entry.route||'request');setEditorTab('params');
   if(notify)showToast('Requisição carregada',hasAuthCredentials(entry)?authTypeLabel(entry)+' recuperada; credenciais podem expirar.':'Params, headers e body recuperados. Credenciais foram omitidas ou precisam ser informadas.','info');
 }
@@ -1094,7 +1095,7 @@ function runnerHistoryDate(value){
   return Number.isFinite(time)?new Date(time).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):'Data indisponível';
 }
 function runnerHistoryOutcomeLabel(outcome){
-  return outcome==='passed'?'concluída':outcome==='failed'?'falhou':'não executada';
+  return outcome==='passed'?'concluída':outcome==='failed'?'falhou':outcome==='partial'?'parcial':'não executada';
 }
 function runnerHistoryNotice(text,warning=false){
   const item=document.createElement('li');item.className=warning?'runner-history-warning':'runner-history-empty';item.setAttribute('role','note');item.textContent=text;return item;
@@ -1113,14 +1114,14 @@ function renderRunnerHistory(entries,warning=''){
     const item=document.createElement('li'),header=document.createElement('div'),meta=document.createElement('div');
     item.className='runner-history-item';header.className='runner-history-header';meta.className='runner-history-meta';
     const title=document.createElement('strong');title.textContent=runnerHistoryDate(entry.startedAt);
-    const summary=document.createElement('small');summary.textContent=`${entry.passed} concluídas · ${entry.failed} falhas · ${entry.skipped} não executadas · ${entry.durationMs} ms${entry.stopped?' · rodada interrompida':''}`;
+    const summary=document.createElement('small');summary.textContent=`${entry.passed} concluídas · ${entry.failed} falhas${entry.partial?` · ${entry.partial} parciais`:''} · ${entry.skipped} não executadas · ${entry.durationMs} ms${entry.stopped?' · rodada interrompida':''}`;
     meta.append(title,summary);
-    const remove=document.createElement('button');remove.type='button';remove.className='runner-history-delete';remove.dataset.runnerHistoryDelete=entry.id;remove.textContent='Excluir';remove.disabled=runnerBusy||runnerHistoryMutating;remove.setAttribute('aria-label',`Excluir execução ${historyIndex+1}, de ${runnerHistoryDate(entry.startedAt)}, com ${entry.passed} concluídas e ${entry.failed} falhas`);
+    const remove=document.createElement('button');remove.type='button';remove.className='runner-history-delete';remove.dataset.runnerHistoryDelete=entry.id;remove.textContent='Excluir';remove.disabled=runnerBusy||runnerHistoryMutating;remove.setAttribute('aria-label',`Excluir execução ${historyIndex+1}, de ${runnerHistoryDate(entry.startedAt)}, com ${entry.passed} concluídas, ${entry.failed} falhas e ${entry.partial||0} parciais`);
     header.append(meta,remove);
     const steps=document.createElement('ol');steps.className='runner-history-steps';steps.setAttribute('aria-label','Etapas da execução');
     const appendSteps=(target,stepEntries)=>{for(const step of stepEntries){
       const stepItem=document.createElement('li');stepItem.className='runner-history-step';stepItem.dataset.outcome=step.outcome;
-      const tests=step.testsPassed||step.testsFailed?` · testes ${step.testsPassed}/${step.testsPassed+step.testsFailed}`:'';
+      const tests=step.testsPassed||step.testsFailed||step.testsPartial?` · testes ${step.testsPassed}/${step.testsPassed+step.testsFailed}${step.testsPartial?` · ${step.testsPartial} parcial(is)`:''}`:'';
       const status=step.status==null?'':` · HTTP ${step.status}`;
       stepItem.textContent=`Etapa ${step.ordinal}: ${runnerHistoryOutcomeLabel(step.outcome)}${status} · ${step.durationMs} ms${tests}`;
       target.append(stepItem);
@@ -1250,13 +1251,13 @@ function updateRunnerOptionsDisabled(disabled){const locked=disabled||runnerBusy
 async function runRunnerCases(cases,options,allowWrites){
   const runCases=[...cases];runnerBusy=true;runnerStopRequested=false;runnerFailedCases=[];clearRunnerError();renderRunnerCases(runCases);
   const progress=byId('runner-progress');progress.hidden=false;progress.max=Math.max(1,runCases.length);progress.value=0;byId('runner-progress-label').textContent=`0 / ${runCases.length}`;byId('runner-summary').hidden=true;byId('rerun-failed').hidden=true;byId('stop-runner').hidden=false;byId('stop-runner').disabled=false;byId('stop-runner').textContent='Parar após esta request';updateRunnerOptionsDisabled(true);
-  const started=performance.now(),startedAt=new Date().toISOString();let passed=0,failed=0,skipped=0,processed=0,stoppedByFailure=false;
-  const historySteps=[],skippedStep=ordinal=>({ordinal,outcome:'skipped',status:null,durationMs:0,tests:{passed:0,failed:0}});
+  const started=performance.now(),startedAt=new Date().toISOString();let passed=0,failed=0,partial=0,skipped=0,processed=0,stoppedByFailure=false;
+  const historySteps=[],skippedStep=ordinal=>({ordinal,outcome:'skipped',status:null,durationMs:0,tests:{passed:0,failed:0,partial:0}});
   for(let index=0;index<runCases.length;index++){
     const item=runCases[index];
     if(runnerStopRequested){for(let rest=index;rest<runCases.length;rest++){setRunnerCase(runCases[rest],'skipped','Parada solicitada');skipped++;historySteps.push(skippedStep(rest+1));}break;}
     byId('runner-progress-label').textContent=`${index+1} / ${runCases.length} · Conjunto ${item.datasetNumber}`;setRunnerCase(item,'running','Executando…');
-    const requestStarted=performance.now();let caseFailed=false,caseStatus='Falha',caseDetail='',responseBody='',responseVaultSecrets={},stepStatus=null,stepTestsPassed=0,stepTestsFailed=0;
+    const requestStarted=performance.now();let caseFailed=false,caseWarning=false,caseStatus='Falha',caseDetail='',responseBody='',responseVaultSecrets={},stepStatus=null,stepTestsPassed=0,stepTestsFailed=0,stepTestsPartial=0;
     const origins=inspectSavedRequestOrigins(item.request,item.dataset||{},item.authScopes);
     try{
       const preRequestExecution=item.request.preRequestActionsEnabled===false?{variables:{},provenance:{},vaultSecrets:{}}:RunnerLogic.runPreRequestActions(item.request.preRequestActions,getEnvironment().variables||{},item.dataset||{},vaultResolutionInput());
@@ -1264,8 +1265,8 @@ async function runRunnerCases(cases,options,allowWrites){
       responseVaultSecrets={...RunnerLogic.secretValuesUsedByProvenance(request.resolutionProvenance,secretVaultValues||{}),...preRequestExecution.vaultSecrets};
       if(RunnerLogic.remoteHttpOrigin(request.baseUrl)&&request.allowInsecureHttp!==true)throw Error('HTTP remoto exige habilitação explícita na request.');
       if(request.captureResponseVariable&&request.responseCaptureTarget==='vault')assertVaultCaptureAvailable(request);
-      const {proxyStatus,result}=await executeApiRequest(request),status=Number(result.status)||0,tests=RunnerLogic.evaluateResponseTests(request.responseTests,result),failedTests=tests.filter(item=>!item.passed),hasTests=tests.length>0;
-      stepStatus=status||null;stepTestsFailed=failedTests.length;stepTestsPassed=tests.length-failedTests.length;
+      const {proxyStatus,result}=await executeApiRequest(request),status=Number(result.status)||0,tests=responseResultsForRequest(request,result),failedTests=tests.filter(item=>!item.passed&&!item.partial),partialTests=tests.filter(item=>item.partial),hasTests=tests.some(item=>!item.partial);
+      stepStatus=status||null;stepTestsFailed=failedTests.length;stepTestsPassed=tests.filter(item=>item.passed).length;stepTestsPartial=partialTests.length;caseWarning=partialTests.length>0;
       responseBody=runnerBodyPreview(RunnerLogic.redactSecretValues(result.body,responseVaultSecrets));caseStatus=status?RunnerLogic.redactSecretValues(`${status} ${result.reason||''}`,responseVaultSecrets).trim():`Proxy ${proxyStatus}`;
       const details=[];const httpFailed=!!result.error||proxyStatus>=400||status<200||status>=300&&!hasTests;
       if(origins.length)details.push('Origens sem valores: '+formatInspectorOrigins(origins)+'.');
@@ -1273,7 +1274,8 @@ async function runRunnerCases(cases,options,allowWrites){
       if(result.error||proxyStatus>=400)details.push(RunnerLogic.redactSecretValues(result.error,responseVaultSecrets)||`Servidor local respondeu HTTP ${proxyStatus}.`);
       else if(status<200||status>=300&&!hasTests)details.push('A request não retornou status 2xx.');
       if(failedTests.length)details.push('Falharam: '+failedTests.map(item=>item.label).join('; '));
-      else if(hasTests)details.push(`${tests.length}/${tests.length} testes passaram.`);
+      if(partialTests.length)details.push('Contrato OpenAPI parcial: '+partialTests.map(item=>item.message).filter(Boolean).join(' '));
+      if(!failedTests.length&&!partialTests.length&&hasTests)details.push(`${tests.length}/${tests.length} testes passaram.`);
       if(!result.error&&proxyStatus<400&&status>=200&&status<300){
         const captured=await captureResponseVariable(request,result,true);
         if(!captured.ok){caseFailed=true;details.push(RunnerLogic.redactSecretValues(captured.error,responseVaultSecrets)||'Falha ao salvar variável de resposta.');}
@@ -1285,16 +1287,17 @@ async function runRunnerCases(cases,options,allowWrites){
     caseStatus+=` · ${caseDurationMs} ms`;
     processed++;progress.value=processed;
     if(caseFailed){failed++;runnerFailedCases.push(item);setRunnerCase(item,'failure',caseStatus,caseDetail,responseBody);}
+    else if(caseWarning){partial++;setRunnerCase(item,'warning',caseStatus,caseDetail,responseBody);}
     else{passed++;setRunnerCase(item,'success',caseStatus,caseDetail,responseBody);}
-    historySteps.push({ordinal:index+1,outcome:caseFailed?'failed':'passed',status:stepStatus,durationMs:caseDurationMs,tests:{passed:stepTestsPassed,failed:stepTestsFailed}});
+    historySteps.push({ordinal:index+1,outcome:caseFailed?'failed':caseWarning?'partial':'passed',status:stepStatus,durationMs:caseDurationMs,tests:{passed:stepTestsPassed,failed:stepTestsFailed,partial:stepTestsPartial}});
     if(caseFailed&&options.stopOnError){stoppedByFailure=true;for(let rest=index+1;rest<runCases.length;rest++){setRunnerCase(runCases[rest],'skipped','Parada após falha');skipped++;historySteps.push(skippedStep(rest+1));}break;}
     if(options.delay>0&&index<runCases.length-1){byId('runner-progress-label').textContent=`${processed} / ${runCases.length} · aguardando ${options.delay} ms`;await new Promise(resolve=>setTimeout(resolve,options.delay));}
   }
-  const durationMs=Math.round(performance.now()-started),elapsed=(durationMs/1000).toFixed(1),summary=`${passed} concluídas · ${failed} falhas · ${skipped} não executadas · ${elapsed}s`+(stoppedByFailure?' · parada na primeira falha':'')+(runnerStopRequested?' · parada solicitada':'');
+  const durationMs=Math.round(performance.now()-started),elapsed=(durationMs/1000).toFixed(1),summary=`${passed} concluídas · ${failed} falhas · ${partial} parciais · ${skipped} não executadas · ${elapsed}s`+(stoppedByFailure?' · parada na primeira falha':'')+(runnerStopRequested?' · parada solicitada':'');
   byId('runner-progress-label').textContent=`${processed} / ${runCases.length}`;byId('runner-summary').textContent=summary;byId('runner-summary').hidden=false;byId('stop-runner').hidden=true;byId('stop-runner').disabled=false;byId('stop-runner').textContent='Parar após esta request';
   byId('rerun-failed').hidden=runnerFailedCases.length===0;
-  showToast(failed?'Runner finalizado com falhas':'Runner finalizado',summary,failed?'warning':'success');
-  await saveRunnerRunHistory({id:newId(),startedAt,durationMs,total:runCases.length,passed,failed,skipped,stopped:runnerStopRequested||stoppedByFailure,steps:historySteps});
+  showToast(failed?'Runner finalizado com falhas':partial?'Runner finalizado com avisos':'Runner finalizado',summary,failed||partial?'warning':'success');
+  await saveRunnerRunHistory({id:newId(),startedAt,durationMs,total:runCases.length,passed,failed,partial,skipped,stopped:runnerStopRequested||stoppedByFailure,steps:historySteps});
   runnerBusy=false;updateRunnerOptionsDisabled(false);
 }
 async function startRunnerFromForm(event){
@@ -1334,7 +1337,7 @@ function createPreRequestActionRow(action={type:'uuid',name:'request_id'}){
 function renderPreRequestActions(actions){const list=byId('pre-request-actions'),normalized=RunnerLogic.normalizePreRequestActions(actions||[]);list.replaceChildren(...normalized.map(createPreRequestActionRow));updatePreRequestActionsUi();}
 function addPreRequestAction(){const list=byId('pre-request-actions');if(list.children.length>=10){showToast('Limite de ações','Cada request aceita até 10 ações pré-request.','warning');return;}const row=createPreRequestActionRow();list.append(row);updatePreRequestActionsUi();row.querySelector('[data-pre-request-name]').focus();syncActiveWorkspaceTab(true);}
 function captureWorkspaceDraft(){
-  return{title:byId('request-title').textContent||'Nova requisição',method:method.value,baseUrl:byId('base-url').value,baseUrlAuto,allowInsecureHttp:byId('allow-insecure-http').checked,route:route.value,params:[...queryParams.children].map(row=>[row.querySelector('[data-query-name]').value,row.querySelector('[data-query-value]').value]),headers:byId('headers').value,body:byId('body-mode').value==='graphql'?'':body.value,bodyMode:byId('body-mode').value,multipartFields:getPersistableMultipartFields(true).fields,...normalizePersistableGraphqlFields(getGraphqlFieldsFromForm()),authMode:authModeFromForm(),...authFieldsFromForm(value=>value,true),saveBearerToken:byId('save-token-history').checked,tokenClientId:byId('token-client-id').value,tokenCredentialMode:byId('token-credential-mode').value,tokenHelperOpen:byId('token-helper').open,preRequestActions:capturePreRequestActionsDraft(),preRequestActionsEnabled:byId('pre-request-actions-enabled').checked,preRequestActionsLiteralConsent:byId('pre-request-literal-consent').checked,captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value,responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value,responseSuccessOnly:byId('response-success-only').checked,responseCaptureTarget:byId('response-capture-target').value==='vault'?'vault':'environment',responseTests:captureResponseTestDraft(),activeSaved:activeSaved?{...activeSaved}:null,collectionId:selectedContainer.collectionId,folderId:selectedContainer.folderId,editorSection:document.querySelector('[data-editor-tab][aria-selected="true"]')?.dataset.editorTab||'params'};
+  return{title:byId('request-title').textContent||'Nova requisição',method:method.value,baseUrl:byId('base-url').value,baseUrlAuto,allowInsecureHttp:byId('allow-insecure-http').checked,route:route.value,params:[...queryParams.children].map(row=>[row.querySelector('[data-query-name]').value,row.querySelector('[data-query-value]').value]),headers:byId('headers').value,body:byId('body-mode').value==='graphql'?'':body.value,bodyMode:byId('body-mode').value,multipartFields:getPersistableMultipartFields(true).fields,...normalizePersistableGraphqlFields(getGraphqlFieldsFromForm()),authMode:authModeFromForm(),...authFieldsFromForm(value=>value,true),saveBearerToken:byId('save-token-history').checked,tokenClientId:byId('token-client-id').value,tokenCredentialMode:byId('token-credential-mode').value,tokenHelperOpen:byId('token-helper').open,preRequestActions:capturePreRequestActionsDraft(),preRequestActionsEnabled:byId('pre-request-actions-enabled').checked,preRequestActionsLiteralConsent:byId('pre-request-literal-consent').checked,captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value,responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value,responseSuccessOnly:byId('response-success-only').checked,responseCaptureTarget:byId('response-capture-target').value==='vault'?'vault':'environment',responseTests:captureResponseTestDraft(),responseContract:activeResponseContract,activeSaved:activeSaved?{...activeSaved}:null,collectionId:selectedContainer.collectionId,folderId:selectedContainer.folderId,editorSection:document.querySelector('[data-editor-tab][aria-selected="true"]')?.dataset.editorTab||'params'};
 }
 function restoreResponseTestDraft(tests){
   const list=byId('response-tests-list');list.replaceChildren();
@@ -1376,7 +1379,7 @@ function clearWorkspaceResponse(){clearCurrentResponseExample();showResponse('Ag
 function applyWorkspaceDraft(draft){
   method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(draft.method)?draft.method:'GET';byId('base-url').value=draft.baseUrl||'';baseUrlAuto=!!draft.baseUrlAuto;byId('allow-insecure-http').checked=draft.allowInsecureHttp===true;route.value=String(draft.route??'');renderQueryParams(Array.isArray(draft.params)?draft.params:[]);byId('headers').value=draft.headers||'';body.value=draft.body||'';applyBodyMode(draft.bodyMode);renderMultipartFields(draft.multipartFields||[]);renderGraphqlFields(draft);selectedContainer={collectionId:draft.collectionId||'',folderId:draft.folderId||''};byId('save-token-history').checked=draft.saveBearerToken!==false;applyAuthFields(draft);byId('token-client-id').value=draft.tokenClientId||'';byId('token-client-secret').value='';byId('token-helper').open=!!draft.tokenHelperOpen;
   renderPreRequestActions(draft.preRequestActions||[]);byId('pre-request-actions-enabled').checked=draft.preRequestActionsEnabled!==false;byId('pre-request-literal-consent').checked=draft.preRequestActionsLiteralConsent===true;updatePreRequestActionsUi();byId('capture-response-variable').checked=!!draft.captureResponseVariable;byId('response-variable-name').value=draft.responseVariableName||'token';byId('response-value-source').value=draft.responseValueSource==='text'?'text':'json';byId('response-json-path').value=draft.responseJsonPath||'access_token';byId('response-success-only').checked=draft.responseSuccessOnly!==false;byId('response-capture-target').value=draft.responseCaptureTarget==='vault'?'vault':'environment';byId('response-variable-result').hidden=true;restoreResponseTestDraft(draft.responseTests);
-  clearCurrentResponseExample();activeSaved=draft.activeSaved||null;byId('request-title').textContent=draft.title||'Nova requisição';clearWriteConfirmation();updateGuard();updateTokenButton();updateCopyButtons();updateResponseCaptureUi();renderBodyHighlight();updateJsonTools();renderCollectionTree();setEditorTab(draft.editorSection||'params');
+  setActiveResponseContract(draft.responseContract||null);clearCurrentResponseExample();activeSaved=draft.activeSaved||null;byId('request-title').textContent=draft.title||'Nova requisição';clearWriteConfirmation();updateGuard();updateTokenButton();updateCopyButtons();updateResponseCaptureUi();renderBodyHighlight();updateJsonTools();renderCollectionTree();setEditorTab(draft.editorSection||'params');
 }
 function applyWorkspaceTab(tab){
   workspaceTabsLoading=true;
@@ -1402,7 +1405,7 @@ function createWorkspaceTabFromCurrent(title){
 function nextWorkspaceDraftTitle(){let index=1,title='Nova requisição';while(workspaceTabs.some(tab=>tab.title===title)){index++;title=`Nova requisição ${index}`;}return title;}
 function resetEditorForNewWorkspaceTab(title){
   method.value='GET';byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';baseUrlAuto=true;route.value='';byId('allow-insecure-http').checked=false;byId('headers').value='Accept: application/json';body.value='';applyBodyMode('json');byId('save-token-history').checked=true;selectedContainer={collectionId:collections[0]?.id||'',folderId:''};applyAuthFields({authMode:'inherit'});
-  byId('token-client-id').value='';byId('token-client-secret').value='';byId('token-helper').open=false;renderPreRequestActions([]);byId('pre-request-actions-enabled').checked=true;byId('pre-request-literal-consent').checked=false;byId('capture-response-variable').checked=false;byId('response-variable-name').value='token';byId('response-value-source').value='json';byId('response-json-path').value='access_token';byId('response-success-only').checked=true;setResponseTests([]);updateResponseCaptureUi();
+  byId('token-client-id').value='';byId('token-client-secret').value='';byId('token-helper').open=false;renderPreRequestActions([]);byId('pre-request-actions-enabled').checked=true;byId('pre-request-literal-consent').checked=false;byId('capture-response-variable').checked=false;byId('response-variable-name').value='token';byId('response-value-source').value='json';byId('response-json-path').value='access_token';byId('response-success-only').checked=true;setResponseTests([]);setActiveResponseContract(null);updateResponseCaptureUi();
   activeSaved=null;byId('request-title').textContent=title;renderQueryParams([]);clearWriteConfirmation();updateGuard();renderBodyHighlight();updateJsonTools();setEditorTab('params');
 }
 function createNewWorkspaceTab(notify=true){
@@ -1615,12 +1618,13 @@ function exportCollectionNode(node,includeBearer,depth=0){
     id:node.id,name:String(node.name||'Coleção').slice(0,100),
     ...(node.auth?{auth:exportAuthConfig(node.auth,includeBearer)}:{}),
     requests:(node.requests||[]).map(request=>{
-      const base=sanitizeBase(String(request.baseUrl||'')),route=sanitizeRoute(String(request.route||'')),headers=sanitizeHeaders(String(request.headers||'')),payload=sanitizeBody(String(request.body||'')),multipart=normalizePersistableMultipartFields(request.multipartFields,true),graphql=normalizePersistableGraphqlFields(request),preRequest=exportPreRequestActions(request,includeBearer);
+      const base=sanitizeBase(String(request.baseUrl||'')),route=sanitizeRoute(String(request.route||'')),headers=sanitizeHeaders(String(request.headers||'')),payload=sanitizeBody(String(request.body||'')),multipart=normalizePersistableMultipartFields(request.multipartFields,true),graphql=normalizePersistableGraphqlFields(request),preRequest=exportPreRequestActions(request,includeBearer),responseContract=RunnerLogic.sanitizeOpenApiResponseContract(request.responseContract);
       return{id:request.id,name:String(request.name||'Request').slice(0,100),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET',
         baseUrl:base.value,route:route.value,headers:bodyModeHeaders(headers.value,request.bodyMode),body:payload.value,bodyMode:normalizeBodyMode(request.bodyMode),multipartFields:multipart.fields,graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,...exportAuthConfig(request,includeBearer,true),
         allowInsecureHttp:request.allowInsecureHttp===true,tokenRequest:!!request.tokenRequest,tokenClientId:String(request.tokenClientId||''),tokenCredentialMode:request.tokenCredentialMode==='query'?'query':'body',
          preRequestActions:preRequest.actions,preRequestActionsEnabled:preRequest.enabled,preRequestActionsLiteralConsent:preRequest.literalConsent,
-         captureResponseVariable:!!request.captureResponseVariable,responseVariableName:String(request.responseVariableName||'token'),responseValueSource:request.responseValueSource==='text'?'text':'json',responseJsonPath:String(request.responseJsonPath||'access_token'),responseSuccessOnly:request.responseSuccessOnly!==false,responseCaptureTarget:request.responseCaptureTarget==='vault'?'vault':'environment',responseTests:RunnerLogic.normalizeResponseTests(request.responseTests),responseExamples:RunnerLogic.normalizeResponseExamples(request.responseExamples)};
+         captureResponseVariable:!!request.captureResponseVariable,responseVariableName:String(request.responseVariableName||'token'),responseValueSource:request.responseValueSource==='text'?'text':'json',responseJsonPath:String(request.responseJsonPath||'access_token'),responseSuccessOnly:request.responseSuccessOnly!==false,responseCaptureTarget:request.responseCaptureTarget==='vault'?'vault':'environment',responseTests:RunnerLogic.normalizeResponseTests(request.responseTests),responseExamples:RunnerLogic.normalizeResponseExamples(request.responseExamples),
+         ...(responseContract?{responseContract}:{})};
     }),
     folders:(node.folders||[]).map(folder=>exportCollectionNode(folder,includeBearer,depth+1))
   };
@@ -1979,14 +1983,15 @@ function normalizeImportedNode(source,keepAuth,depth=0,isRoot=false,enableCaptur
   if(source.requests.length>2000||source.folders.length>500)throw Error('A coleção ultrapassa o limite de itens por nível.');
   safe.requests=source.requests.map(request=>{
     if(!request||typeof request!=='object'||Array.isArray(request))throw Error('Uma request do arquivo está inválida.');
-    const base=sanitizeBase(String(request.baseUrl||'')),route=sanitizeRoute(String(request.route||'')),headers=sanitizeHeaders(String(request.headers||'')),payload=sanitizeBody(String(request.body||'')),multipart=normalizePersistableMultipartFields(request.multipartFields,true),graphql=normalizePersistableGraphqlFields(request),savedAuth=RunnerLogic.persistAuthFields(request,keepAuth),literalConsent=keepAuth&&(request.preRequestActionsLiteralConsent===true||RunnerLogic.normalizePreRequestActions(request.preRequestActions).some(RunnerLogic.preRequestActionHasLiteralText)),preRequest=exportPreRequestActions(request,literalConsent);
+    const base=sanitizeBase(String(request.baseUrl||'')),route=sanitizeRoute(String(request.route||'')),headers=sanitizeHeaders(String(request.headers||'')),payload=sanitizeBody(String(request.body||'')),multipart=normalizePersistableMultipartFields(request.multipartFields,true),graphql=normalizePersistableGraphqlFields(request),savedAuth=RunnerLogic.persistAuthFields(request,keepAuth),literalConsent=keepAuth&&(request.preRequestActionsLiteralConsent===true||RunnerLogic.normalizePreRequestActions(request.preRequestActions).some(RunnerLogic.preRequestActionHasLiteralText)),preRequest=exportPreRequestActions(request,literalConsent),responseContract=RunnerLogic.sanitizeOpenApiResponseContract(request.responseContract);
     delete savedAuth.authOmitted;if(savedAuth.authType==='bearer')savedAuth.bearerToken=sanitizeBearer(savedAuth.bearerToken);
     return{id:newId(),name:String(request.name||'Request').slice(0,100),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET',
       baseUrl:base.value,route:route.value,headers:bodyModeHeaders(headers.value,request.bodyMode),body:payload.value,bodyMode:normalizeBodyMode(request.bodyMode),multipartFields:multipart.fields,graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,...savedAuth,
       allowInsecureHttp:allowInsecureHttp&&request.allowInsecureHttp===true,tokenRequest:!!request.tokenRequest,tokenClientId:String(request.tokenClientId||'').slice(0,512),tokenCredentialMode:request.tokenCredentialMode==='query'?'query':'body',
        preRequestActions:preRequest.actions,preRequestActionsEnabled:enableCapture&&preRequest.enabled,preRequestActionsLiteralConsent:preRequest.literalConsent,
        captureResponseVariable:enableCapture&&!!request.captureResponseVariable,responseVariableName:String(request.responseVariableName||'token').slice(0,80),responseValueSource:request.responseValueSource==='text'?'text':'json',responseJsonPath:String(request.responseJsonPath||'access_token').slice(0,1000),responseSuccessOnly:request.responseSuccessOnly!==false,responseCaptureTarget:request.responseCaptureTarget==='vault'?'vault':'environment',
-      responseTests:enableCapture?RunnerLogic.normalizeResponseTests(request.responseTests).map(rule=>({...rule,id:newId()})):[],responseExamples:RunnerLogic.normalizeResponseExamples(request.responseExamples).map(example=>({...example,id:newId()}))};
+      responseTests:enableCapture?RunnerLogic.normalizeResponseTests(request.responseTests).map(rule=>({...rule,id:newId()})):[],responseExamples:RunnerLogic.normalizeResponseExamples(request.responseExamples).map(example=>({...example,id:newId()})),
+      ...(responseContract?{responseContract}:{})};
   });
   safe.folders=source.folders.map(folder=>normalizeImportedNode(folder,keepAuth,depth+1,false,enableCapture,allowInsecureHttp));return safe;
 }
@@ -2094,10 +2099,11 @@ function openSaveDialog(){
 function getSnapshot(){
   validateResponseCaptureForm();const responseTests=getResponseTestsFromForm(),preRequestInput=getPreRequestActionsFromForm(),rawRoute=buildRequestRoute(false,true),base=sanitizeBase(byId('base-url').value.trim()),path=rawRoute?sanitizeRoute(rawRoute):{value:'',redacted:false},headers=sanitizeHeaders(byId('headers').value),payload=sanitizeBody(body.value),bodyMode=byId('body-mode').value,graphqlInput=getGraphqlFieldsFromForm();
   if(bodyMode==='graphql'){if(method.value!=='POST')throw Error('GraphQL usa POST no Vortix.');RunnerLogic.buildGraphqlBody(graphqlInput.graphqlQuery,graphqlInput.graphqlVariables,graphqlInput.graphqlOperationName);}
-  const saveAuth=byId('save-token-history').checked,auth=RunnerLogic.persistAuthFields({...authFieldsFromForm(value=>value,true),authMode:authModeFromForm()},saveAuth),authOmitted=auth.authOmitted,preRequest=exportPreRequestActions({preRequestActions:preRequestInput,preRequestActionsEnabled:byId('pre-request-actions-enabled').checked},byId('pre-request-literal-consent').checked);delete auth.authOmitted;const multipart=getPersistableMultipartFields(true),graphql=normalizePersistableGraphqlFields(graphqlInput);
+  const saveAuth=byId('save-token-history').checked,auth=RunnerLogic.persistAuthFields({...authFieldsFromForm(value=>value,true),authMode:authModeFromForm()},saveAuth),authOmitted=auth.authOmitted,preRequest=exportPreRequestActions({preRequestActions:preRequestInput,preRequestActionsEnabled:byId('pre-request-actions-enabled').checked},byId('pre-request-literal-consent').checked);delete auth.authOmitted;const multipart=getPersistableMultipartFields(true),graphql=normalizePersistableGraphqlFields(graphqlInput),responseContract=RunnerLogic.sanitizeOpenApiResponseContract(activeResponseContract);
   return{method:method.value,baseUrl:base.value,route:path.value,headers:headers.value,body:bodyMode==='graphql'?'':payload.value,bodyMode,multipartFields:multipart.fields,graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,...auth,allowInsecureHttp:byId('allow-insecure-http').checked,
       preRequestActions:preRequest.actions,preRequestActionsEnabled:preRequest.enabled,preRequestActionsLiteralConsent:preRequest.literalConsent,
      captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseCaptureTarget:byId('response-capture-target').value==='vault'?'vault':'environment',responseTests,
+     ...(responseContract?{responseContract}:{}),
      redacted:base.redacted||path.redacted||headers.redacted||payload.redacted||authOmitted||multipart.redacted||graphql.redacted||preRequest.actions.length!==preRequestInput.length};
 }
 async function saveCollectionRequest(event){
@@ -2122,7 +2128,7 @@ function loadCollectionRequest(request,collectionId,folderId,notify=true){
   const split=splitRoute(request.route||'');route.value=split.route;renderQueryParams(split.params);byId('headers').value=request.headers||'';body.value=request.body||'';applyBodyMode(request.bodyMode);renderMultipartFields(request.multipartFields||[]);renderGraphqlFields(request);selectedContainer={collectionId,folderId};applyAuthFields(request);
   byId('token-client-id').value=request.tokenRequest?request.tokenClientId||'':'';byId('token-client-secret').value='';byId('token-credential-mode').value=request.tokenCredentialMode==='query'?'query':'body';byId('token-helper').open=!!request.tokenRequest;
   if(request.tokenRequest){byId('token-route').value=split.route;byId('token-client-id-field').value=request.tokenClientIdField||'client_id';byId('token-client-secret-field').value=request.tokenClientSecretField||'client_secret';tokenRequestConfig=RunnerLogic.normalizeTokenRequestConfig({route:split.route,clientIdField:byId('token-client-id-field').value,clientSecretField:byId('token-client-secret-field').value,credentialMode:byId('token-credential-mode').value});}
-   renderPreRequestActions(request.preRequestActions||[]);byId('pre-request-actions-enabled').checked=request.preRequestActionsEnabled!==false;byId('pre-request-literal-consent').checked=request.preRequestActionsLiteralConsent===true;updatePreRequestActionsUi();byId('capture-response-variable').checked=!!request.captureResponseVariable;byId('response-variable-name').value=request.responseVariableName||'token';byId('response-value-source').value=request.responseValueSource==='text'?'text':'json';byId('response-json-path').value=request.responseJsonPath||'access_token';byId('response-success-only').checked=request.responseSuccessOnly!==false;byId('response-capture-target').value=request.responseCaptureTarget==='vault'?'vault':'environment';byId('response-variable-result').hidden=true;updateResponseCaptureUi();setResponseTests(request.responseTests||[]);
+   renderPreRequestActions(request.preRequestActions||[]);byId('pre-request-actions-enabled').checked=request.preRequestActionsEnabled!==false;byId('pre-request-literal-consent').checked=request.preRequestActionsLiteralConsent===true;updatePreRequestActionsUi();byId('capture-response-variable').checked=!!request.captureResponseVariable;byId('response-variable-name').value=request.responseVariableName||'token';byId('response-value-source').value=request.responseValueSource==='text'?'text':'json';byId('response-json-path').value=request.responseJsonPath||'access_token';byId('response-success-only').checked=request.responseSuccessOnly!==false;byId('response-capture-target').value=request.responseCaptureTarget==='vault'?'vault':'environment';byId('response-variable-result').hidden=true;updateResponseCaptureUi();setResponseTests(request.responseTests||[]);setActiveResponseContract(request.responseContract||null);
   updateTokenButton();clearWriteConfirmation();updateGuard();updateCopyButtons();renderBodyHighlight();updateJsonTools();activeSaved={id:request.id,name:request.name,collectionId,folderId};
   byId('request-title').textContent=request.name||'Requisição salva';setEditorTab('params');renderCollectionTree();
   if(notify)showToast('Requisição carregada',hasAuthCredentials(request)?authTypeLabel(request)+' recuperada do banco local; pode expirar.':'Params, headers e body recuperados da coleção.','success',3500);
@@ -2283,10 +2289,34 @@ function addResponseTest(){
   const list=byId('response-tests-list');if(list.children.length>=20){showToast('Limite de testes','Cada requisição aceita até 20 verificações.','warning');return;}
   const row=createResponseTestRow();list.append(row);row.querySelector('.response-test-target').focus();
 }
+function responseContractTestResult(request,result){
+  const contract=request?.responseContract;
+  if(!contract||typeof contract!=='object'||Array.isArray(contract))return null;
+  let validation;
+  try{validation=RunnerLogic.validateOpenApiResponseContract(contract,result,{method:request.method,route:request.route,baseUrl:request.baseUrl});}
+  catch{validation={status:'partial',issues:[],warnings:['Não foi possível validar o contrato importado.']};}
+  const details=[...(validation.issues||[]),...(validation.warnings||[])].filter(Boolean);
+  return{id:'openapi-response-contract',label:'Contrato OpenAPI da resposta',passed:validation.status==='passed',partial:validation.status==='partial',status:validation.status,message:details.join(' ')};
+}
+function responseResultsForRequest(request,result){
+  const tests=RunnerLogic.evaluateResponseTests(request?.responseTests,result),contract=responseContractTestResult(request,result);
+  return contract?[...tests,contract]:tests;
+}
+function setActiveResponseContract(contract){
+  activeResponseContract=RunnerLogic.sanitizeOpenApiResponseContract(contract);
+  updateResponseContractNote();
+}
+function updateResponseContractNote(){
+  const note=byId('response-contract-note');if(!note)return;
+  if(!activeResponseContract){note.hidden=true;note.textContent='';return;}
+  const contract=activeResponseContract,statuses=Object.keys(contract.responses||{}),media=[...new Set(Object.values(contract.responses||{}).flatMap(response=>Object.keys(response?.content||{})))];
+  note.textContent=`Contrato OpenAPI importado: ${contract.method||''} ${contract.pathTemplate||''}`+(statuses.length?` · Status ${statuses.join(', ')}`:'')+(media.length?` · ${media.join(', ')}`:'')+(Array.isArray(contract.partialReasons)&&contract.partialReasons.length?' · Parcial':'');
+  note.hidden=false;
+}
 function renderResponseTestResults(results){
   const section=byId('response-tests-output'),list=byId('response-tests-results'),summary=byId('response-tests-summary');list.replaceChildren();section.hidden=!results.length;if(!results.length){summary.textContent='';return;}
-  const passed=results.filter(result=>result.passed).length;summary.textContent=`${passed}/${results.length} passaram`;
-  for(const result of results){const row=document.createElement('li');row.className='response-test-result';row.dataset.kind=result.passed?'success':'failure';const name=document.createElement('span');name.className='response-test-result-name';name.textContent=result.label;const state=document.createElement('span');state.className='response-test-result-state';state.textContent=result.passed?'Passou':'Falhou';row.append(name,state);if(result.message){const message=document.createElement('span');message.className='response-test-result-message';message.textContent=result.message;row.append(message);}list.append(row);}
+  const passed=results.filter(result=>result.passed).length,partial=results.filter(result=>result.partial).length;summary.textContent=`${passed}/${results.length} passaram`+(partial?` · ${partial} parcial(is)`:'');
+  for(const result of results){const row=document.createElement('li');row.className='response-test-result';row.dataset.kind=result.partial?'partial':result.passed?'success':'failure';const name=document.createElement('span');name.className='response-test-result-name';name.textContent=result.label;const state=document.createElement('span');state.className='response-test-result-state';state.textContent=result.partial?'Parcial':result.passed?'Passou':'Falhou';row.append(name,state);if(result.message){const message=document.createElement('span');message.className='response-test-result-message';message.textContent=result.message;row.append(message);}list.append(row);}
 }
 function applyTypography(){
   document.documentElement.style.setProperty('--app-font-family',fontFamilies.get(activeFont)||fontFamilies.get(DEFAULT_FONT));
@@ -2796,16 +2826,18 @@ async function simulateSavedResponseExample(exampleId){
   if(!activeSaved||!saved){const message='Salve e abra a request da coleção antes de simular um exemplo.';showResponse('Mock indisponível','bad','',message);showToast('Mock indisponível',message,'warning');return;}
   let mock;
   try{
-    const current={method:method.value,route:buildRequestRoute(true)};
+    const rawBaseUrl=byId('base-url').value.trim();let resolvedBaseUrl=rawBaseUrl;try{resolvedBaseUrl=applyEnvironment(rawBaseUrl);}catch{}
+    const current={method:method.value,route:buildRequestRoute(true),baseUrl:resolvedBaseUrl};
     const source={...saved,route:resolveSavedResponseExampleRoute(saved.route||'')};
     mock=RunnerLogic.buildResponseExampleMock(current,source,exampleId);
   }catch(error){const message=error.message||'Confira método, rota e Params da request.';showResponse('Mock indisponível','bad','',message);showToast('Mock indisponível',message,'warning');return;}
   showResponse('HTTP '+mock.status+' · Mock local',mock.status>=200&&mock.status<300?'ok':'bad',JSON.stringify(mock.headers,null,2),mock.body);
   byId('response-persistence-note').textContent='Resposta simulada · não armazenada';
   byId('request-note').textContent='Resposta simulada com dados locais. Nenhuma requisição foi enviada.';
-  const results=RunnerLogic.evaluateResponseTests(getResponseTestsFromForm(),mock);renderResponseTestResults(results);
-  const failed=results.filter(item=>!item.passed).length;
-  showToast(failed?'Mock executado; testes falharam':'Resposta simulada',failed?`${results.length-failed}/${results.length} verificações passaram. Nenhuma API foi chamada.`:`HTTP ${mock.status}. Nenhuma API foi chamada.`,failed?'warning':'info');
+  const results=responseResultsForRequest({...source,method:current.method,route:current.route,baseUrl:current.baseUrl,responseTests:getResponseTestsFromForm(),responseContract:source.responseContract||activeResponseContract},mock);renderResponseTestResults(results);
+  const failed=results.filter(item=>!item.passed&&!item.partial).length,partial=results.filter(item=>item.partial).length;
+  const summaryText=failed?`${results.length-failed}/${results.length} verificações passaram. Nenhuma API foi chamada.`:partial?'Contrato OpenAPI parcial; nenhuma API foi chamada.':`HTTP ${mock.status}. Nenhuma API foi chamada.`;
+  showToast(failed?'Mock executado; testes falharam':partial?'Mock com contrato parcial':'Resposta simulada',summaryText,failed?'warning':'info');
   await captureResponseVariable({captureResponseVariable:byId('capture-response-variable').checked,environmentId:activeEnvironmentId||'default',responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseCaptureTarget:byId('response-capture-target').value==='vault'?'vault':'environment'},mock);
 }
 function updateCopyButtons(){
@@ -2866,7 +2898,7 @@ async function captureResponseVariable(request,result,quiet=false){
   }catch(error){const message=error.message||'Não foi possível ler o valor da resposta.';if(!quiet){showResponseVariableResult(message,'error');showToast('Variável não salva',message,'error');}return{ok:false,captured:true,error:message};}
 }
 async function executeApiRequest(request){
-  const {graphqlQuery,graphqlVariables,graphqlOperationName,...proxyRequest}=request;delete proxyRequest.authMode;delete proxyRequest.authSource;delete proxyRequest.collectionId;delete proxyRequest.folderId;delete proxyRequest.saveBearerToken;delete proxyRequest.resolutionProvenance;delete proxyRequest.responseCaptureTarget;delete proxyRequest.preRequestActions;delete proxyRequest.preRequestActionsEnabled;delete proxyRequest.preRequestActionsLiteralConsent;delete proxyRequest.preRequestSecretValues;delete proxyRequest.preRequestProvenance;
+  const {graphqlQuery,graphqlVariables,graphqlOperationName,...proxyRequest}=request;delete proxyRequest.authMode;delete proxyRequest.authSource;delete proxyRequest.collectionId;delete proxyRequest.folderId;delete proxyRequest.saveBearerToken;delete proxyRequest.resolutionProvenance;delete proxyRequest.responseCaptureTarget;delete proxyRequest.preRequestActions;delete proxyRequest.preRequestActionsEnabled;delete proxyRequest.preRequestActionsLiteralConsent;delete proxyRequest.preRequestSecretValues;delete proxyRequest.preRequestProvenance;delete proxyRequest.responseContract;
   const response=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json','X-Api-Studio':'1'},cache:'no-store',body:JSON.stringify(proxyRequest)});
   let result;try{result=await response.json();}catch{throw Error('O proxy Vortix devolveu uma resposta inválida.');}
   void renderCookieJar();if(result.cookieJarWarning)showToast('Cookie não salvo',result.cookieJarWarning,'warning');
@@ -2885,7 +2917,7 @@ async function performApiRequest(request,button,save,historyRequest=request){
     const requestStartedAt=performance.now();const {proxyStatus,result}=await executeApiRequest(request);dismissToast(toast);
     if(historyEntry)await saveHistoryResponse(historyEntry,result,performance.now()-requestStartedAt,responseVaultSecrets);
     if(result.error||proxyStatus>=400){const message=RunnerLogic.redactSecretValues(result.error||`Servidor local respondeu HTTP ${proxyStatus}.`,responseVaultSecrets);showResponse('Erro '+proxyStatus,'bad','',message);showToast('Requisição não enviada',message,'error');}
-    else{const safeReason=RunnerLogic.redactSecretValues(result.reason||'',responseVaultSecrets),status=(result.status+' '+safeReason).trim(),output=RunnerLogic.redactSecretValues(result.body??'',responseVaultSecrets),headers=RunnerLogic.redactSecretValues(JSON.stringify(result.headers??{},null,2),responseVaultSecrets);showResponse(status,result.status>=200&&result.status<300?'ok':'bad',headers,output);apiStatusToast(result.status,safeReason);const testResults=RunnerLogic.evaluateResponseTests(request.responseTests,result);renderResponseTestResults(testResults);if(testResults.length){const failed=testResults.filter(item=>!item.passed);showToast(failed.length?'Testes da resposta falharam':'Testes da resposta passaram',`${testResults.length-failed.length}/${testResults.length} verificações passaram.`,failed.length?'error':'success');}await captureResponseVariable(request,result);}
+    else{const safeReason=RunnerLogic.redactSecretValues(result.reason||'',responseVaultSecrets),status=(result.status+' '+safeReason).trim(),output=RunnerLogic.redactSecretValues(result.body??'',responseVaultSecrets),headers=RunnerLogic.redactSecretValues(JSON.stringify(result.headers??{},null,2),responseVaultSecrets);showResponse(status,result.status>=200&&result.status<300?'ok':'bad',headers,output);apiStatusToast(result.status,safeReason);const testResults=responseResultsForRequest(request,result);renderResponseTestResults(testResults);if(testResults.length){const failed=testResults.filter(item=>!item.passed&&!item.partial),partial=testResults.filter(item=>item.partial).length,passed=testResults.filter(item=>item.passed).length;showToast(failed.length?'Testes da resposta falharam':partial?'Contrato OpenAPI parcial':'Testes da resposta passaram',`${passed}/${testResults.length} verificações passaram${partial?` · ${partial} parcial(is)`:''}.`,failed.length?'error':partial?'warning':'success');}await captureResponseVariable(request,result);}
     return result;
   }catch{dismissToast(toast);const message='Servidor local indisponível. Confira se está ativo e tente novamente.';showResponse('Falha local','bad','',message);showToast('Falha de conexão',message,'error');return null;}
   finally{button.disabled=false;updateGuard();}
@@ -2896,7 +2928,7 @@ function requestFromForm(selectedMethod,requestRoute,resolveValues=true,preReque
   return{baseUrl:resolve(byId('base-url').value.trim()),route:resolve(requestRoute),method:selectedMethod,...auth,collectionId:selectedContainer.collectionId,folderId:selectedContainer.folderId,environmentId:activeEnvironmentId||'default',bodyMode,headers:resolve(byId('headers').value),body:requestBody,multipartFields:readMultipartFieldEntries(resolve).map(entry=>entry.field),graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,
     allowInsecureHttp:byId('allow-insecure-http').checked,confirmTestData:byId('confirm-test-data').checked,testDataPhrase:byId('test-data-phrase').value,confirmTokenRequest:false,
     saveBearerToken:byId('save-token-history').checked,
-     preRequestActions:getPreRequestActionsFromForm(),preRequestActionsEnabled:byId('pre-request-actions-enabled').checked,preRequestActionsLiteralConsent:byId('pre-request-literal-consent').checked,preRequestSecretValues:preRequestExecution?.vaultSecrets||{},preRequestProvenance:preRequestExecution?.provenance||{},captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseCaptureTarget:byId('response-capture-target').value==='vault'?'vault':'environment',responseTests:getResponseTestsFromForm(),resolutionProvenance:{...lastResolutionProvenance,...(preRequestExecution?.provenance||{})}};
+     preRequestActions:getPreRequestActionsFromForm(),preRequestActionsEnabled:byId('pre-request-actions-enabled').checked,preRequestActionsLiteralConsent:byId('pre-request-literal-consent').checked,preRequestSecretValues:preRequestExecution?.vaultSecrets||{},preRequestProvenance:preRequestExecution?.provenance||{},captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseCaptureTarget:byId('response-capture-target').value==='vault'?'vault':'environment',responseTests:getResponseTestsFromForm(),...(activeResponseContract?{responseContract:activeResponseContract}:{}),resolutionProvenance:{...lastResolutionProvenance,...(preRequestExecution?.provenance||{})}};
 }
 async function sendCurrentRequest(){
   clearCurrentResponseExample();

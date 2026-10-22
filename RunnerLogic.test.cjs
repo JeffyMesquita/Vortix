@@ -273,6 +273,14 @@ test('splits saved routes without turning an empty request into the API root', (
   assert.deepEqual(splitRoute('/v1/items?tenant=west&active=true'), { route: '/v1/items', params: [['tenant', 'west'], ['active', 'true']] });
 });
 
+test('splits imported routes while preserving Vortix templates in path and query values', () => {
+  const { splitRoute } = runnerLogic();
+  assert.deepEqual(splitRoute('/users/{{userId}}?expand={{expand}}&tag=active'), {
+    route: '/users/{{userId}}',
+    params: [['expand', '{{expand}}'], ['tag', 'active']]
+  });
+});
+
 test('write calls only receive the test guard after explicit runner approval', () => {
   const { prepareSavedRequest } = runnerLogic();
   const request = { method: 'POST', baseUrl: '{{baseUrl}}', route: '/groups', body: '{"id":{{id}}}' };
@@ -915,6 +923,22 @@ test('Runner history snapshot keeps only allowlisted run and step metadata', () 
   assert.doesNotMatch(JSON.stringify(snapshot), new RegExp(marker), 'snapshot must never retain arbitrary fields or marker secrets');
 });
 
+test('Runner history preserves partial contract outcomes without counting them as pass or failure', () => {
+  const { createRunnerHistorySnapshot } = runnerLogic();
+  const snapshot = createRunnerHistorySnapshot({
+    id: '44444444-4444-4444-8444-444444444444',
+    startedAt: '2026-10-22T12:00:00.000Z',
+    total: 1, passed: 0, failed: 0, partial: 1, skipped: 0,
+    steps: [{ outcome: 'partial', status: 200, durationMs: 5, tests: { passed: 0, failed: 0, partial: 1 } }]
+  });
+
+  assert.equal(snapshot.partial, 1);
+  assert.equal(snapshot.passed, 0);
+  assert.equal(snapshot.failed, 0);
+  assert.equal(snapshot.steps[0].outcome, 'partial');
+  assert.equal(snapshot.steps[0].testsPartial, 1);
+});
+
 test('Runner history replaces IDs that could carry credential text', () => {
   const { createRunnerHistorySnapshot } = runnerLogic();
   const marker = 'BearerToken1234567890AB';
@@ -1295,10 +1319,27 @@ test('workspace tabs omit Bearer when that tab disables local token saving', () 
 });
 test('workspace backup preserves nested requests, environment values, history, and settings', () => {
   const { createWorkspaceBackup, parseWorkspaceBackup } = runnerLogic();
+  const responseExampleSentinel = 'BACKUP_RESPONSE_EXAMPLE_MUST_BE_STRIPPED';
+  const responseContract = {
+    method: 'POST', pathTemplate: '/token', partialReasons: [responseExampleSentinel],
+    responses: {
+      '200': {
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object', properties: {
+                access_token: { type: 'string', example: responseExampleSentinel, default: responseExampleSentinel, description: responseExampleSentinel }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
   const source = {
-    collections: [{ id: 'collection-1', name: 'Minha coleção', requests: [], folders: [{ id: 'folder-1', name: 'Auth', folders: [], requests: [{ id: 'request-1', method: 'POST', route: '/token', params: [['tenant', '{{tenant}}']], body: '{"client":"{{client}}"}', bearerToken: 'local-token' }] }] }],
+    collections: [{ id: 'collection-1', name: 'Minha coleção', requests: [], folders: [{ id: 'folder-1', name: 'Auth', folders: [], requests: [{ id: 'request-1', method: 'POST', route: '/token', params: [['tenant', '{{tenant}}']], body: '{"client":"{{client}}"}', bearerToken: 'local-token', responseContract }] }] }],
     environments: [{ id: 'environment-1', name: 'Homologação', group: 'API', variables: { baseUrl: 'https://api.example.test', token: 'secret-token' } }],
-    history: [{ id: 'history-1', method: 'POST', route: '/token', body: '{"client":"test"}' }],
+    history: [{ id: 'history-1', method: 'POST', route: '/token', body: '{"client":"test"}', responseContract }],
     settings: [{ key: 'activeEnvironmentId', value: 'environment-1' }]
   };
   const backup = createWorkspaceBackup(source, '2026-10-13T12:00:00.000Z');
@@ -1312,6 +1353,9 @@ test('workspace backup preserves nested requests, environment values, history, a
   assert.equal(restored.data.collections[0].folders[0].requests[0].bearerToken, 'local-token');
   assert.equal(restored.data.environments[0].variables.token, 'secret-token');
   assert.equal(restored.data.history[0].body, '{"client":"test"}');
+  const restoredRequest = restored.data.collections[0].folders[0].requests[0];
+  assert.equal(restoredRequest.responseContract.responses['200'].content['application/json'].schema.properties.access_token.type, 'string');
+  assert.equal(JSON.stringify(backup).includes(responseExampleSentinel), false);
   assert.equal(restored.data.settings[0].value, 'environment-1');
 });
 
@@ -3379,6 +3423,7 @@ test('buildOpenApi31Export round-trips a whole server variable as baseUrl withou
   const imported = parseOpenApiSpec(exported.document);
   assert.equal(imported.collection.requests[0].baseUrl, '{{baseUrl}}');
   assert.equal(imported.collection.requests[0].route, '/status');
+  assert.equal(imported.collection.requests[0].responseContract.pathTemplate, '/v1/status');
   assert.equal(imported.environment.variables.baseUrl, 'https://api.example.test/v1');
 });
 
@@ -3445,4 +3490,424 @@ test('buildOpenApi31Export canonicalizes templated path names across methods and
     assert.doesNotMatch(error.message, /GET|\/users|userId|\{\{id\}\}/);
     return true;
   });
+});
+
+test('imports OpenAPI response contracts through local refs without persisting example values', () => {
+  const { parseOpenApiSpec } = runnerLogic();
+  const secretExample = 'CONTRACT_EXAMPLE_MUST_NOT_PERSIST';
+  const imported = parseOpenApiSpec({
+    openapi: '3.1.0',
+    info: { title: 'Generic API' },
+    servers: [{ url: 'https://api.example.test/v1' }],
+    paths: {
+      '/items/{itemId}': {
+        get: {
+          operationId: 'getItem',
+          responses: {
+            '200': { $ref: '#/components/responses/ItemResponse' },
+            '404': { description: 'Not found' }
+          }
+        }
+      }
+    },
+    components: {
+      responses: {
+        ItemResponse: {
+          description: 'Item response',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/Item' } } }
+        }
+      },
+      schemas: {
+        Item: {
+          type: 'object',
+          required: ['id', 'name'],
+          properties: {
+            id: { type: 'integer', example: 42 },
+            name: { type: 'string', default: secretExample, description: 'Private example label' },
+            tags: { type: 'array', items: { type: 'string' } }
+          }
+        }
+      }
+    }
+  });
+
+  const contract = imported.collection.requests[0].responseContract;
+  assert.equal(contract.method, 'GET');
+  assert.equal(contract.pathTemplate, '/v1/items/{itemId}');
+  assert.deepEqual(contract.responses['200'].content['application/json'].schema, {
+    type: 'object',
+    required: ['id', 'name'],
+    properties: {
+      id: { type: 'integer' },
+      name: { type: 'string' },
+      tags: { type: 'array', items: { type: 'string' } }
+    }
+  });
+  assert.equal(JSON.stringify(contract).includes(secretExample), false);
+  assert.equal(JSON.stringify(contract).includes('Private example label'), false);
+});
+
+test('validates response status, JSON media type, and structural schema', () => {
+  const { validateOpenApiResponseContract } = runnerLogic();
+  const result = validateOpenApiResponseContract({
+    method: 'GET', pathTemplate: '/items/{itemId}', partialReasons: [],
+    responses: { '200': { content: { 'application/json': { schema: {
+      type: 'object', required: ['id', 'name'], properties: { id: { type: 'integer' }, name: { type: 'string' } }
+    } } } } }
+  }, { status: 200, headers: [['Content-Type', 'application/json; charset=utf-8']], body: '{"id":7,"name":"Maple"}' }, { method: 'GET', route: '/items/7' });
+
+  assert.equal(result.status, 'passed');
+  assert.deepEqual(result.issues, []);
+  assert.deepEqual(result.warnings, []);
+});
+
+test('reports schema failures using paths without echoing response values', () => {
+  const { validateOpenApiResponseContract } = runnerLogic();
+  const privateValue = 'RESPONSE_VALUE_MUST_NOT_LEAK';
+  const result = validateOpenApiResponseContract({
+    method: 'GET', pathTemplate: '/items/{itemId}', partialReasons: [],
+    responses: { '200': { content: { 'application/json': { schema: {
+      type: 'object', required: ['id', 'name'], properties: { id: { type: 'integer' }, name: { type: 'string' } }
+    } } } } }
+  }, { status: 200, headers: [['Content-Type', 'application/json']], body: JSON.stringify({ id: 'wrong-type', extra: privateValue }) }, { method: 'GET', route: '/items/7' });
+
+  assert.equal(result.status, 'failed');
+  assert.ok(result.issues.some(issue => /name/i.test(issue)));
+  assert.ok(result.issues.some(issue => /id/i.test(issue)));
+  assert.equal(JSON.stringify(result).includes(privateValue), false);
+});
+
+test('does not echo dynamic response property names when additionalProperties are forbidden', () => {
+  const { validateOpenApiResponseContract } = runnerLogic();
+  const privateName = 'DYNAMIC_RESPONSE_KEY_SENTINEL';
+  const result = validateOpenApiResponseContract({
+    method: 'GET', pathTemplate: '/items', partialReasons: [],
+    responses: {
+      '200': {
+        content: {
+          'application/json': {
+            schema: { type: 'object', properties: { id: { type: 'integer' } }, additionalProperties: false }
+          }
+        }
+      }
+    }
+  }, { status: 200, headers: [['Content-Type', 'application/json']], body: JSON.stringify({ id: 1, [privateName]: 'value' }) }, { method: 'GET', route: '/items' });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(JSON.stringify(result).includes(privateName), false);
+});
+
+test('rejects undeclared status and incompatible response media type', () => {
+  const { validateOpenApiResponseContract } = runnerLogic();
+  const result = validateOpenApiResponseContract({
+    method: 'GET', pathTemplate: '/items', partialReasons: [],
+    responses: { '200': { content: { 'application/json': { schema: { type: 'object' } } } } }
+  }, { status: 201, headers: [['Content-Type', 'text/plain']], body: 'created' }, { method: 'GET', route: '/items' });
+
+  assert.equal(result.status, 'failed');
+  assert.ok(result.issues.some(issue => /status/i.test(issue)));
+  assert.ok(result.issues.some(issue => /media|content.type/i.test(issue)));
+});
+
+test('marks unsupported response schema types and non-JSON structures partial instead of failing silently', () => {
+  const { validateOpenApiResponseContract } = runnerLogic();
+  const unknownType = validateOpenApiResponseContract({
+    method: 'GET', pathTemplate: '/items', partialReasons: [],
+    responses: { '200': { content: { 'application/json': { schema: { type: 'record' } } } } }
+  }, { status: 200, headers: [['Content-Type', 'application/json']], body: '{}' }, { method: 'GET', route: '/items' });
+  const mixedType = validateOpenApiResponseContract({
+    method: 'GET', pathTemplate: '/items', partialReasons: [],
+    responses: {
+      '200': { content: { 'application/json': { schema: { type: ['record', 'object'] } } } }
+    }
+  }, { status: 200, headers: [['Content-Type', 'application/json']], body: '"text"' }, { method: 'GET', route: '/items' });
+  const xmlStructure = validateOpenApiResponseContract({
+    method: 'GET', pathTemplate: '/items', partialReasons: [],
+    responses: {
+      '200': { content: { 'application/xml': { schema: {
+        type: 'object', properties: { id: { type: 'integer' } }
+      } } } }
+    }
+  }, { status: 200, headers: [['Content-Type', 'application/xml']], body: '<item><id>7</id></item>' }, { method: 'GET', route: '/items' });
+
+  assert.equal(unknownType.status, 'partial');
+  assert.equal(mixedType.status, 'partial');
+  assert.equal(xmlStructure.status, 'partial');
+  assert.deepEqual(unknownType.issues, []);
+  assert.deepEqual(mixedType.issues, []);
+  assert.deepEqual(xmlStructure.issues, []);
+});
+
+test('implements OpenAPI nullable and exclusive bounds without accepting invalid values', () => {
+  const { validateOpenApiResponseContract } = runnerLogic();
+  const nullable = validateOpenApiResponseContract({
+    method: 'GET', pathTemplate: '/items', openApiVersion: '3.0', partialReasons: [],
+    responses: {
+      '200': {
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object', properties: { name: { type: 'string', nullable: true } }
+            }
+          }
+        }
+      }
+    }
+  }, { status: 200, headers: [['Content-Type', 'application/json']], body: '{"name":null}' }, { method: 'GET', route: '/items' });
+  const exclusive = validateOpenApiResponseContract({
+    method: 'GET', pathTemplate: '/items', openApiVersion: '3.0', partialReasons: [],
+    responses: {
+      '200': {
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object', properties: { count: { type: 'integer', minimum: 5, exclusiveMinimum: true } }
+            }
+          }
+        }
+      }
+    }
+  }, { status: 200, headers: [['Content-Type', 'application/json']], body: '{"count":5}' }, { method: 'GET', route: '/items' });
+
+  assert.equal(nullable.status, 'passed');
+  assert.equal(exclusive.status, 'failed');
+  assert.ok(exclusive.issues.some(issue => /count/i.test(issue)));
+});
+
+test('normalizes nullable, type arrays, and exclusive bounds by OpenAPI version', () => {
+  const { parseOpenApiSpec, validateOpenApiResponseContract } = runnerLogic();
+  const validate = (version, schema, body) => {
+    const imported = parseOpenApiSpec({
+      openapi: `${version}.0`, info: { title: 'Versioned schema' },
+      paths: { '/items': { get: { responses: { '200': { content: { 'application/json': { schema } } } } } } }
+    });
+    return validateOpenApiResponseContract(imported.collection.requests[0].responseContract, {
+      status: 200, headers: [['Content-Type', 'application/json']], body
+    }, { method: 'GET', baseUrl: 'https://api.example.test', route: '/items' });
+  };
+
+  const nullable30 = validate('3.0', { type: 'string', nullable: true }, 'null');
+  const nullable31 = validate('3.1', { type: 'string', nullable: true }, 'null');
+  const union31 = validate('3.1', { type: ['string', 'null'] }, 'null');
+  const union30 = validate('3.0', { type: ['string', 'null'] }, 'null');
+  const exclusive30 = validate('3.0', { type: 'number', minimum: 5, exclusiveMinimum: true }, '{"count":5}');
+  const exclusive31Boolean = validate('3.1', { type: 'number', minimum: 5, exclusiveMinimum: true }, '5');
+  const exclusive31Numeric = validate('3.1', { type: 'number', exclusiveMinimum: 5 }, '5');
+
+  assert.equal(nullable30.status, 'passed');
+  assert.equal(nullable31.status, 'partial');
+  assert.deepEqual(nullable31.issues, []);
+  assert.equal(union31.status, 'passed');
+  assert.equal(union30.status, 'partial');
+  assert.deepEqual(union30.issues, []);
+  assert.equal(exclusive30.status, 'failed');
+  assert.equal(exclusive31Boolean.status, 'partial');
+  assert.deepEqual(exclusive31Boolean.issues, []);
+  assert.equal(exclusive31Numeric.status, 'failed');
+});
+
+test('marks malformed schema keyword shapes partial instead of treating them as empty schemas', () => {
+  const { parseOpenApiSpec, validateOpenApiResponseContract } = runnerLogic();
+  const malformedSchemas = [
+    { type: [] },
+    { type: null },
+    { type: 'object', required: 'id' },
+    { type: 'object', properties: [] },
+    { type: 'array', items: 'string' }
+  ];
+  for (const schema of malformedSchemas) {
+    const imported = parseOpenApiSpec({
+      openapi: '3.1.0', info: { title: 'Malformed schema' },
+      paths: { '/items': { get: { responses: { '200': { content: { 'application/json': { schema } } } } } } }
+    });
+    const result = validateOpenApiResponseContract(imported.collection.requests[0].responseContract, {
+      status: 200, headers: [['Content-Type', 'application/json']], body: schema.type === 'array' ? '[]' : '{}'
+    }, { method: 'GET', baseUrl: 'https://api.example.test', route: '/items' });
+    assert.equal(result.status, 'partial');
+    assert.deepEqual(result.issues, []);
+  }
+});
+
+test('marks malformed OpenAPI response content as partial instead of checking status alone', () => {
+  const { parseOpenApiSpec, validateOpenApiResponseContract } = runnerLogic();
+  const malformedResponses = [
+    null,
+    { content: 'application/json' },
+    { content: { 'application/json': null } }
+  ];
+  for (const response of malformedResponses) {
+    const imported = parseOpenApiSpec({
+      openapi: '3.1.0', info: { title: 'Malformed response' },
+      paths: { '/items': { get: { responses: { '200': response } } } }
+    });
+    const result = validateOpenApiResponseContract(imported.collection.requests[0].responseContract, {
+      status: 200, headers: [['Content-Type', 'application/json']], body: '{}'
+    }, { method: 'GET', baseUrl: 'https://api.example.test', route: '/items' });
+    assert.equal(result.status, 'partial');
+    assert.deepEqual(result.issues, []);
+  }
+});
+
+test('marks invalid OpenAPI response maps partial instead of rejecting an undeclared status', () => {
+  const { parseOpenApiSpec, validateOpenApiResponseContract } = runnerLogic();
+  const malformedMaps = [null, { bad: { description: 'Invalid status key' } }];
+  for (const responses of malformedMaps) {
+    const imported = parseOpenApiSpec({
+      openapi: '3.1.0', info: { title: 'Malformed response map' },
+      paths: { '/items': { get: { responses } } }
+    });
+    const result = validateOpenApiResponseContract(imported.collection.requests[0].responseContract, {
+      status: 200, headers: [['Content-Type', 'application/json']], body: '{}'
+    }, { method: 'GET', baseUrl: 'https://api.example.test', route: '/items' });
+    assert.equal(result.status, 'partial');
+    assert.deepEqual(result.issues, []);
+  }
+});
+
+test('limits OpenAPI response contract size by UTF-8 bytes', () => {
+  const { parseOpenApiSpec } = runnerLogic();
+  const properties = Object.fromEntries(Array.from({ length: 400 }, (_, index) => ['ü'.repeat(100) + index, { type: 'string' }]));
+  const imported = parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'Large contract' },
+    paths: {
+      '/items': {
+        get: {
+          responses: {
+            '200': {
+              content: {
+                'application/json': { schema: { type: 'object', properties } }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+  const contract = imported.collection.requests[0].responseContract;
+
+  assert.ok(Buffer.byteLength(JSON.stringify(contract), 'utf8') <= 64 * 1024);
+  assert.ok(contract.partialReasons.length > 0);
+});
+
+test('marks a response contract partial when the current request does not match its method or route', () => {
+  const { validateOpenApiResponseContract } = runnerLogic();
+  const result = validateOpenApiResponseContract({
+    method: 'GET', pathTemplate: '/items/{itemId}', partialReasons: [], responses: { '200': { content: {} } }
+  }, { status: 200, headers: [], body: '' }, { method: 'DELETE', route: '/other' });
+
+  assert.equal(result.status, 'partial');
+  assert.ok(result.warnings.length > 0);
+  assert.deepEqual(result.issues, []);
+});
+
+test('marks a response contract partial when its OpenAPI server path differs from the active base URL', () => {
+  const { validateOpenApiResponseContract } = runnerLogic();
+  const result = validateOpenApiResponseContract({
+    method: 'GET', pathTemplate: '/v1/items/{itemId}', partialReasons: [],
+    responses: { '200': { content: {} } }
+  }, { status: 200, headers: [], body: '' }, {
+    method: 'GET', baseUrl: 'https://api.example.test/v2', route: '/items/7'
+  });
+
+  assert.equal(result.status, 'partial');
+  assert.ok(result.warnings.some(warning => /rota/i.test(warning)));
+});
+
+test('matches response contracts against the full effective path, not the route alone', () => {
+  const { validateOpenApiResponseContract } = runnerLogic();
+  const result = validateOpenApiResponseContract({
+    method: 'GET', pathTemplate: '/v1/items/{itemId}', partialReasons: [],
+    responses: { '200': { content: { 'application/json': { schema: { type: 'object' } } } } }
+  }, { status: 200, headers: [['Content-Type', 'application/json']], body: '{}' }, {
+    method: 'GET', baseUrl: 'https://api.example.test/v2', route: '/v1/items/7'
+  });
+
+  assert.equal(result.status, 'partial');
+  assert.ok(result.warnings.some(warning => /rota/i.test(warning)));
+});
+
+test('marks external and cyclic OpenAPI schema refs partial without loading remote references', () => {
+  const { parseOpenApiSpec } = runnerLogic();
+  const imported = parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'Reference cases' },
+    paths: {
+      '/external': {
+        get: { responses: { '200': { content: { 'application/json': {
+          schema: { $ref: 'https://schemas.example.test/item.json' }
+        } } } } }
+      },
+      '/cyclic': {
+        get: { responses: { '200': { content: { 'application/json': {
+          schema: { $ref: '#/components/schemas/A' }
+        } } } } }
+      }
+    },
+    components: { schemas: { A: { type: 'object', properties: { next: { $ref: '#/components/schemas/A' } } } } }
+  });
+
+  const [external, cyclic] = imported.collection.requests.map(request => request.responseContract);
+  assert.ok(external.partialReasons.length > 0);
+  assert.ok(cyclic.partialReasons.length > 0);
+  assert.doesNotMatch(JSON.stringify(imported), /schemas\.example\.test/);
+});
+
+test('prepared and workspace requests preserve normalized response contracts', () => {
+  const { normalizeWorkspaceTabs, prepareSavedRequest } = runnerLogic();
+  const responseContract = {
+    method: 'GET', pathTemplate: '/items/{itemId}', partialReasons: [],
+    responses: {
+      '200': { content: { 'application/json': { schema: {
+        type: 'object', properties: { id: { type: 'integer' } }
+      } } } }
+    }
+  };
+  const prepared = prepareSavedRequest({ method: 'GET', route: '/items/7', responseContract }, {}, {}, false);
+  const state = normalizeWorkspaceTabs({ activeId: 'tab', tabs: [{ id: 'tab', request: prepared }] });
+
+  assert.deepEqual(prepared.responseContract, responseContract);
+  assert.deepEqual(state.tabs[0].request.responseContract, responseContract);
+});
+
+test('untrusted persisted response contracts drop literal values and arbitrary warning text', () => {
+  const { normalizeWorkspaceTabs, prepareSavedRequest } = runnerLogic();
+  const sentinel = 'UNTRUSTED_CONTRACT_LITERAL_SENTINEL';
+  const request = {
+    method: 'GET', route: '/items', responseContract: {
+      method: 'GET', pathTemplate: '/items', partialReasons: [sentinel],
+      responses: { '200': { description: sentinel, content: { 'application/json': {
+        example: sentinel,
+        schema: { type: 'object', properties: { name: { type: 'string', default: sentinel, example: sentinel, description: sentinel } } }
+      } } } }
+    }
+  };
+
+  const prepared = prepareSavedRequest(request, {}, {}, false);
+  const state = normalizeWorkspaceTabs({ tabs: [{ id: 'tab', request }] });
+  assert.equal(JSON.stringify(prepared.responseContract).includes(sentinel), false);
+  assert.equal(JSON.stringify(state.tabs[0].request.responseContract).includes(sentinel), false);
+  assert.deepEqual(prepared.responseContract.responses['200'].content['application/json'].schema, {
+    type: 'object', properties: { name: { type: 'string' } }
+  });
+});
+
+test('workspace tabs discard invalid untrusted response contracts before spreading request fields', () => {
+  const { normalizeWorkspaceTabs } = runnerLogic();
+  const sentinel = 'INVALID_CONTRACT_WORKSPACE_SENTINEL';
+  const request = {
+    method: 'GET', route: '/items', responseContract: {
+      method: 'GET', pathTemplate: '/items?token=' + sentinel, partialReasons: [sentinel],
+      responses: { '200': { content: { 'application/json': { schema: { type: 'object', example: sentinel } } } } }
+    }
+  };
+  const state = normalizeWorkspaceTabs({ tabs: [{ id: 'tab', request }] });
+
+  assert.equal(Object.hasOwn(state.tabs[0].request, 'responseContract'), false);
+  assert.equal(JSON.stringify(state).includes(sentinel), false);
+});
+
+test('rejects untrusted response contract paths that could carry query secrets', () => {
+  const { sanitizeOpenApiResponseContract } = runnerLogic();
+  assert.equal(sanitizeOpenApiResponseContract({
+    method: 'GET', pathTemplate: '/items?token=PATH_SECRET_SENTINEL', partialReasons: [], responses: { '200': { content: {} } }
+  }), null);
 });

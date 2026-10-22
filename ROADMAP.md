@@ -303,6 +303,23 @@ Referências: [exportar um ambiente no Postman](https://learning.postman.com/doc
 - [x] Atualizar README e ROADMAP com escopo e limitações.
 - [x] Executar testes Node direcionados, validação de sintaxe, build Release e smoke visual local do fluxo de download; nenhuma request foi enviada à API de destino.
 
+### 19. Validar respostas com contratos OpenAPI
+
+**Status: concluída e validada nesta rodada.**
+
+**Objetivo:** ao importar OpenAPI, validar respostas reais contra o status, media type e schema da operação, tanto no envio manual quanto no Runner.
+
+- [x] Importar schemas de resposta inline e `$ref` local limitado, sem buscar referências externas.
+- [x] Persistir o contrato junto à request, histórico e snapshots de workspace; mantê-lo na exportação Vortix e fora do payload enviado ao proxy.
+- [x] Validar status, media type, JSON e regras estruturais suportadas sem exibir ou guardar valores da resposta.
+- [x] Comparar método e caminho efetivo incluindo prefixo do servidor; preservar `{{variavel}}` de rota ao reabrir requests.
+- [x] Marcar incompatibilidades e regras/ref não suportadas como parciais, sem falso sucesso; Runner mostra avisos amarelos e registra parciais no histórico.
+- [x] Exibir resultados junto aos testes da resposta no envio manual, mocks locais e Runner visual.
+- [x] Cobrir parsing, limites, redaction, persistência e integração com testes; usar somente mocks locais.
+- [x] Atualizar README com exemplo, limites e diagrama do fluxo.
+- [x] Preservar a versão OpenAPI no contrato e validar `nullable`, tipos em união e limites exclusivos segundo 3.0/3.1/3.2; schemas e mapas/estruturas de resposta malformados ficam **Parciais** em vez de virarem validações vazias.
+- [x] Rodar 268 testes Node (267 passaram; 1 teste de symlink foi ignorado por `EPERM` no Windows), build Release, sintaxe e `git diff --check`; conferir visualmente importação, rota-template e nota do contrato numa instância local com SQLite temporário, sem enviar requests à API.
+
 ## Regra de sequência
 
 Fechamos cada feature com teste, documentação e revisão. Busca, histórico, comparação, HTTPie, schema GraphQL e fluxo PKCE visual foram validados em ambiente local/mock.

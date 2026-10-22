@@ -340,6 +340,7 @@ textarea.compact { min-height: 165px; }
 .response-test-result-state { font-size: 12px; font-weight: 700; }
 .response-test-result[data-kind="success"] .response-test-result-state { color: var(--accent); }
 .response-test-result[data-kind="failure"] .response-test-result-state { color: var(--danger); }
+.response-test-result[data-kind="partial"] .response-test-result-state { color: var(--warning); }
 .response-test-result-message { grid-column: 1 / -1; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .warning-text { margin: 10px 0; color: var(--warning); font-size: 12px; line-height: 1.45; }
 .write-guard { margin: 14px 0 0; border: 1px solid #665332; border-radius: 7px; padding: 11px; background: #29251e; }
@@ -766,6 +767,7 @@ textarea.compact { min-height: 165px; }
 .runner-state { color: var(--muted); font-size: 12px; text-align: right; }
 .runner-result-item[data-state="success"] .runner-state { color: var(--accent); }
 .runner-result-item[data-state="failure"] .runner-state { color: var(--danger); }
+.runner-result-item[data-state="warning"] .runner-state { color: var(--warning); }
 .runner-result-item[data-state="skipped"] .runner-state { color: var(--warning); }
 .runner-options { display: grid; gap: 7px; border: 1px solid var(--border); border-radius: 9px; margin: 0; padding: 13px; }
 .runner-options > legend, .runner-write-guard > legend { padding: 0 5px; color: var(--text); font-size: 12px; font-weight: 700; }
@@ -803,6 +805,7 @@ textarea.compact { min-height: 165px; }
 .runner-history-step { border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; color: var(--muted); background: var(--bg); font-size: 12px; line-height: 1.4; }
 .runner-history-step[data-outcome="passed"] { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); color: var(--accent); }
 .runner-history-step[data-outcome="failed"] { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); }
+.runner-history-step[data-outcome="partial"] { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); color: var(--warning); }
 .runner-history-step[data-outcome="skipped"] { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); color: var(--warning); }
 .runner-history-more { border: 0; margin: 2px 0; padding: 3px 6px; color: var(--accent); background: transparent; font: inherit; font-size: 12px; text-align: left; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .runner-history-more:hover, .runner-history-more:focus-visible { color: var(--text); }
