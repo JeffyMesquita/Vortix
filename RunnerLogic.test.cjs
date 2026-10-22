@@ -3980,7 +3980,8 @@ test('infers the proxy default Content-Type when the request editor has no expli
   const explicitMismatch = validateOpenApiRequestBodyContract(contract, { ...request, headers: 'Content-Type: text/plain' });
 
   assert.equal(inferred.status, 'passed');
-  assert.equal(blankHeader.status, 'passed');
+  assert.equal(blankHeader.status, 'failed');
+  assert.ok(blankHeader.issues.some(issue => /Content-Type/i.test(issue)));
   assert.equal(explicitMismatch.status, 'failed');
 });
 
@@ -3996,6 +3997,8 @@ test('treats populated multipart fields as a present non-JSON request body', () 
   const request = { method: 'POST', route: '/upload', bodyMode: 'multipart', body: '', headers: '', multipartFields: [{ name: 'caption', type: 'text', value: 'sample' }] };
   const populated = validateOpenApiRequestBodyContract(contract, request);
   const empty = validateOpenApiRequestBodyContract(contract, { ...request, multipartFields: [] });
+  const staleTextWithoutFields = validateOpenApiRequestBodyContract(contract, { ...request, body: '{"caption":"stale"}', multipartFields: [] });
+  const manualContentType = validateOpenApiRequestBodyContract(contract, { ...request, headers: 'Content-Type: multipart/form-data' });
   const fieldsIgnoredByProxy = validateOpenApiRequestBodyContract(contract, { ...request, bodyMode: 'json' });
 
   assert.equal(populated.status, 'partial');
@@ -4003,6 +4006,10 @@ test('treats populated multipart fields as a present non-JSON request body', () 
   assert.ok(populated.warnings.some(warning => /não JSON/i.test(warning)));
   assert.equal(empty.status, 'failed');
   assert.ok(empty.issues.some(issue => /obrigat.rio/i.test(issue)));
+  assert.equal(staleTextWithoutFields.status, 'failed');
+  assert.ok(staleTextWithoutFields.issues.some(issue => /obrigat.rio/i.test(issue)));
+  assert.equal(manualContentType.status, 'failed');
+  assert.ok(manualContentType.issues.some(issue => /Content-Type/i.test(issue)));
   assert.equal(fieldsIgnoredByProxy.status, 'failed');
 });
 
@@ -4101,6 +4108,31 @@ test('keeps OpenAPI server path variables dynamic in response contract matching'
   assert.equal(result.status, 'passed');
   assert.deepEqual(result.issues, []);
 
+  const multiSegmentServer = parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'Multi-segment server path' },
+    servers: [{ url: 'https://api.example.test/{basePath}', variables: { basePath: { default: 'api/v1' } } }],
+    paths: {
+      '/items/{itemId}': {
+        get: {
+          responses: {
+            '200': { content: { 'application/json': { schema: { type: 'object' } } } }
+          }
+        }
+      }
+    }
+  }).collection.requests[0];
+  const multiSegmentResult = validateOpenApiResponseContract(multiSegmentServer.responseContract, {
+    status: 200, headers: [['Content-Type', 'application/json']], body: '{}'
+  }, { method: 'GET', baseUrl: 'https://api.example.test/api/v1', route: '/items/7' });
+  const multiSegmentPathParameter = validateOpenApiResponseContract(multiSegmentServer.responseContract, {
+    status: 200, headers: [['Content-Type', 'application/json']], body: '{}'
+  }, { method: 'GET', baseUrl: 'https://api.example.test/api/v1', route: '/items/7/extra' });
+
+  assert.equal(multiSegmentServer.responseContract.pathTemplate, '/{basePath}/items/{itemId}');
+  assert.deepEqual(multiSegmentServer.responseContract.serverPathVariables, ['basePath']);
+  assert.equal(multiSegmentResult.status, 'passed');
+  assert.equal(multiSegmentPathParameter.status, 'partial');
+
   const fullUrlVariable = parseOpenApiSpec({
     openapi: '3.1.0', info: { title: 'Dynamic full server URL' },
     servers: [{ url: '{apiUrl}', variables: { apiUrl: { default: 'https://api.example.test/v1' } } }],
@@ -4184,7 +4216,7 @@ test('marks external and cyclic OpenAPI schema refs partial without loading remo
 test('prepared and workspace requests preserve normalized response contracts', () => {
   const { normalizeWorkspaceTabs, prepareSavedRequest } = runnerLogic();
   const responseContract = {
-    method: 'GET', pathTemplate: '/items/{itemId}', serverBasePathDynamic: true, partialReasons: [],
+    method: 'GET', pathTemplate: '/items/{itemId}', serverBasePathDynamic: true, serverPathVariables: ['basePath'], partialReasons: [],
     requestBody: {
       required: true, partialReasons: [],
       content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string' } } } } }

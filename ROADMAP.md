@@ -340,8 +340,10 @@ Referências: [exportar um ambiente no Postman](https://learning.postman.com/doc
 **Status: concluída e validada nesta rodada.**
 
 - [x] Manter variáveis de caminho de servidor dinâmicas no contrato de resposta, incluindo URL base inteira variável e servidores relativos.
-- [x] Usar o `Content-Type` padrão do `bodyMode` quando o cabeçalho estiver ausente ou vazio; reconhecer campos multipart preenchidos e deixar a criação do boundary para o proxy.
+- [x] Usar o `Content-Type` padrão do `bodyMode` quando o cabeçalho estiver ausente; reprovar cabeçalho explícito vazio e `Content-Type` manual em multipart, conforme o proxy.
+- [x] Contar somente campos multipart no modo multipart e preservar variáveis de servidor com caminhos de vários segmentos sem afrouxar parâmetros de rota.
 - [x] Comparar `uniqueItems` por estrutura JSON, calcular `multipleOf` com precisão decimal e deixar limites de propriedades inconclusivos como **Parciais** acima do teto de inspeção.
+- [x] Corrigir paginação/fronteira nos templates da skill e alinhar criação local de issue e seleção de layout com seus contratos.
 - [x] Adicionar testes de regressão para os seis achados dos PRs #25 e #26 e preservar o marcador de base path no contrato persistido.
 - [x] Rodar 281 testes Node (280 passaram; 1 teste de symlink ignorado por `EPERM` no Windows), build Release sem avisos/erros, `node --check` e `git diff --check`.
 
