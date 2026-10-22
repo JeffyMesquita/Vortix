@@ -335,6 +335,16 @@ Referências: [exportar um ambiente no Postman](https://learning.postman.com/doc
 - [x] Rodar 275 testes Node (274 passaram; 1 teste de symlink foi ignorado por `EPERM` no Windows), build Release, sintaxe e `git diff --check`.
 - [x] Conferir em SQLite isolado: body sem campo obrigatório ficou **Falhou**, body válido ficou **Passou**; não enviar requests à API de destino.
 
+### 21. Endereçar achados de revisão dos contratos OpenAPI
+
+**Status: concluída e validada nesta rodada.**
+
+- [x] Manter variáveis de caminho de servidor dinâmicas no contrato de resposta, incluindo URL base inteira variável e servidores relativos.
+- [x] Usar o `Content-Type` padrão do `bodyMode` quando o cabeçalho estiver ausente ou vazio; reconhecer campos multipart preenchidos e deixar a criação do boundary para o proxy.
+- [x] Comparar `uniqueItems` por estrutura JSON, calcular `multipleOf` com precisão decimal e deixar limites de propriedades inconclusivos como **Parciais** acima do teto de inspeção.
+- [x] Adicionar testes de regressão para os seis achados dos PRs #25 e #26 e preservar o marcador de base path no contrato persistido.
+- [x] Rodar 281 testes Node (280 passaram; 1 teste de symlink ignorado por `EPERM` no Windows), build Release sem avisos/erros, `node --check` e `git diff --check`.
+
 ## Regra de sequência
 
 Fechamos cada feature com teste, documentação e revisão. Busca, histórico, comparação, HTTPie, schema GraphQL e fluxo PKCE visual foram validados em ambiente local/mock.
