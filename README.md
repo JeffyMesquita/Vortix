@@ -581,11 +581,40 @@ Exemplo mínimo:
 
 Variáveis de servidor com valor padrão são criadas em um ambiente OpenAPI. Quando <code>servers[].url</code> é apenas uma variável (por exemplo <code>{baseUrl}</code>), ela vira o <code>baseUrl</code> <code>{{baseUrl}}</code> da request, sem prefixo de rota, e o <code>default</code> correspondente é preservado no ambiente. Valores sensíveis e variáveis sem padrão ficam para configuração manual. Parâmetros sem exemplo ficam editáveis; variáveis de path sem exemplo aparecem como <code>{{nome}}</code>. Confira a coleção gerada antes de enviar.
 
-O importador ainda não resolve referências usadas em parâmetros, segurança ou body, não acessa a rede para buscá-las e não gera body de mídia não JSON. Schemas de resposta têm suporte próprio e limitado, descrito abaixo. Requisitos de segurança continuam para configuração manual. A primeira versão aceita JSON; YAML ainda não é importado. Consulte também a <a href="https://spec.openapis.org/oas/latest.html">especificação OpenAPI</a>.
+O importador não resolve referências de parâmetros ou segurança e nunca acessa a rede para buscar referências externas. Schemas JSON de `requestBody` e respostas aceitam referências locais limitadas. Body de mídia não JSON não recebe exemplo inicial e validação estrutural fica parcial. Requisitos de segurança continuam para configuração manual. A primeira versão aceita JSON; YAML ainda não é importado. Consulte também a <a href="https://spec.openapis.org/oas/latest.html">especificação OpenAPI</a>.
 
 ### Validar respostas com contrato OpenAPI
 
 Ao importar uma operação OpenAPI com respostas descritas, o Vortix guarda o contrato junto à request. Abra a aba **Testes** para ver a indicação do contrato e envie manualmente ou execute pelo Runner. A validação compara o status HTTP, o `Content-Type` e, quando a resposta é JSON, a estrutura do body.
+
+#### Validar body da request
+
+Se a operação declarar `requestBody`, o Vortix também guarda o schema JSON da request. Na aba **Testes**, use **Validar body** para conferir o rascunho sem chamar a API. O envio manual e o Runner repetem essa validação com as variáveis resolvidas. Body vazio obrigatório, JSON inválido, mídia incompatível ou campos fora do schema aparecem como resultado de validação; **o resultado não bloqueia o envio**, porque você pode querer testar uma request inválida de propósito. No Runner, uma incompatibilidade do body aparece como aviso após a chamada e não conta como falha da etapa nem aciona **Parar após falha**. Essa opção continua valendo para falhas HTTP, testes da resposta e erros ao preparar ou enviar a request.
+
+| Resultado do body | O que indica |
+| --- | --- |
+| **Passou** | Body vazio é permitido ou o JSON atende ao schema importado. |
+| **Falhou** | Body obrigatório ausente, JSON inválido, `Content-Type` incompatível ou regra estrutural suportada não atendida. |
+| **Parcial** | Referência ou schema incompleto, variável sem resolução ou conteúdo não JSON sem validação estrutural. |
+
+Exemplo de request body importado:
+
+~~~yaml
+paths:
+  /users:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+~~~
+
+O contrato é local ao navegador, guarda schema e media types, não valores de `example`/`default`, e não é enviado ao proxy. Referências locais seguem os limites descritos acima; body não JSON retorna **Parcial** quando a validação estrutural não é suportada. Mensagens apontam o caminho do campo sem repetir valores enviados.
 
 <p align="center">
   <img src="docs/images/openapi-response-contract.svg" alt="Fluxo de validação do contrato OpenAPI no Vortix" width="100%">

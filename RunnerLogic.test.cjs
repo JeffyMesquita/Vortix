@@ -3764,6 +3764,174 @@ test('marks invalid OpenAPI response maps partial instead of rejecting an undecl
   }
 });
 
+test('imports and validates OpenAPI JSON request bodies without echoing body values', () => {
+  const { parseOpenApiSpec, validateOpenApiRequestBodyContract, prepareSavedRequest } = runnerLogic();
+  const spec = parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'Request contract' },
+    paths: {
+      '/items': {
+        post: {
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object', required: ['id'],
+                  properties: { id: { type: 'integer' }, note: { type: 'string', example: 'BODY_EXAMPLE_SECRET_147' } }
+                }
+              }
+            }
+          },
+          responses: { '201': { description: 'Created' } }
+        }
+      }
+    }
+  });
+  const contract = spec.collection.requests[0].responseContract;
+  assert.ok(contract.requestBody);
+  assert.equal(JSON.stringify(contract).includes('BODY_EXAMPLE_SECRET_147'), false);
+
+  const baseRequest = { method: 'POST', baseUrl: 'https://api.example.test', route: '/items', headers: 'Content-Type: application/json' };
+  const valid = validateOpenApiRequestBodyContract(contract, { ...baseRequest, body: '{"id":7,"note":"ok"}' });
+  const sensitiveValue = 'REQUEST_BODY_SECRET_VALUE_147';
+  const invalid = validateOpenApiRequestBodyContract(contract, { ...baseRequest, body: `{"id":"${sensitiveValue}"}` });
+
+  assert.equal(valid.status, 'passed');
+  assert.equal(invalid.status, 'failed');
+  assert.ok(invalid.issues.some(issue => /body\.id/i.test(issue)));
+  assert.equal(JSON.stringify(invalid).includes(sensitiveValue), false);
+  const prepared = prepareSavedRequest({ method: 'POST', baseUrl: baseRequest.baseUrl, route: baseRequest.route, headers: baseRequest.headers, body: '{"id":7}', responseContract: contract }, {}, {}, true);
+  assert.equal(prepared.responseContract.requestBody.required, true);
+  assert.equal(prepared.responseContract.requestBody.content['application/json'].schema.properties.id.type, 'integer');
+});
+
+test('resolves local OpenAPI requestBody references into a usable JSON starter body', () => {
+  const { parseOpenApiSpec } = runnerLogic();
+  const imported = parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'Referenced request body' },
+    components: {
+      requestBodies: {
+        CreateItem: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CreateItem' } } }
+        }
+      },
+      schemas: { CreateItem: { type: 'object', properties: { id: { type: 'integer' } } } }
+    },
+    paths: {
+      '/items': {
+        post: {
+          requestBody: { $ref: '#/components/requestBodies/CreateItem' },
+          responses: { '201': { description: 'Created' } }
+        }
+      }
+    }
+  });
+  const request = imported.collection.requests[0];
+  assert.equal(request.body, '{}');
+  assert.equal(request.responseContract.requestBody.content['application/json'].schema.type, 'object');
+});
+
+test('keeps unresolved external requestBody references partial instead of inventing a media-type failure', () => {
+  const { parseOpenApiSpec, validateOpenApiRequestBodyContract } = runnerLogic();
+  const imported = parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'External request body reference' },
+    paths: {
+      '/items': {
+        post: {
+          requestBody: { $ref: 'https://schemas.example.test/request-body.json' },
+          responses: { '201': { description: 'Created' } }
+        }
+      }
+    }
+  });
+  const result = validateOpenApiRequestBodyContract(imported.collection.requests[0].responseContract, {
+    method: 'POST', baseUrl: 'https://api.example.test', route: '/items',
+    headers: 'Content-Type: application/json', body: '{"id":7}'
+  });
+  assert.equal(result.status, 'partial');
+  assert.deepEqual(result.issues, []);
+  assert.equal(JSON.stringify(result).includes('schemas.example.test'), false);
+});
+
+test('keeps malformed request body media maps partial instead of reporting a false mismatch', () => {
+  const { parseOpenApiSpec, validateOpenApiRequestBodyContract } = runnerLogic();
+  const imported = parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'Malformed request media' },
+    paths: {
+      '/items': {
+        post: {
+          requestBody: { required: true, content: {
+            'application/json': { schema: { type: 'object' } },
+            'not a media type': { schema: { type: 'string' } }
+          } },
+          responses: { '201': { description: 'Created' } }
+        }
+      }
+    }
+  });
+  const result = validateOpenApiRequestBodyContract(imported.collection.requests[0].responseContract, {
+    method: 'POST', baseUrl: 'https://api.example.test', route: '/items',
+    headers: 'Content-Type: application/xml', body: '<item/>'
+  });
+  assert.equal(result.status, 'partial');
+  assert.deepEqual(result.issues, []);
+});
+
+test('checks required request bodies and media types while leaving non-JSON structure partial', () => {
+  const { parseOpenApiSpec, validateOpenApiRequestBodyContract } = runnerLogic();
+  const importBody = requestBody => parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'Request body edges' },
+    paths: { '/items': { post: { requestBody, responses: { '201': { description: 'Created' } } } } }
+  }).collection.requests[0].responseContract;
+  const jsonContract = importBody({
+    required: true,
+    content: { 'application/json': { schema: { type: 'object', required: ['id'], properties: { id: { type: 'integer' } } } } }
+  });
+  const request = { method: 'POST', baseUrl: 'https://api.example.test', route: '/items' };
+  const missingBody = validateOpenApiRequestBodyContract(jsonContract, { ...request, body: '', headers: '' });
+  const wrongMedia = validateOpenApiRequestBodyContract(jsonContract, { ...request, body: '{"id":7}', headers: 'Content-Type: text/plain' });
+  const unresolvedTemplate = validateOpenApiRequestBodyContract(jsonContract, { ...request, body: '{"id":"{{id}}"}', headers: 'Content-Type: application/json', resolutionProvenance: { id: 'missing' } });
+  const unresolvedBaseUrl = validateOpenApiRequestBodyContract(jsonContract, { ...request, body: '{"id":7}', headers: 'Content-Type: application/json', resolutionProvenance: { baseUrl: 'missing' } });
+  const optionalContract = importBody({ required: false, content: { 'application/json': { schema: { type: 'object' } } } });
+  const optionalEmpty = validateOpenApiRequestBodyContract(optionalContract, { ...request, body: '', headers: '' });
+  const xmlContract = importBody({ required: true, content: { 'application/xml': { schema: { type: 'object' } } } });
+  const xmlBody = validateOpenApiRequestBodyContract(xmlContract, { ...request, bodyMode: 'xml', body: '<item/>', headers: 'Content-Type: application/xml' });
+
+  assert.equal(missingBody.status, 'failed');
+  assert.ok(missingBody.issues.some(issue => /obrigat.rio/i.test(issue)));
+  assert.equal(wrongMedia.status, 'failed');
+  assert.equal(unresolvedTemplate.status, 'partial');
+  assert.deepEqual(unresolvedTemplate.issues, []);
+  assert.equal(unresolvedBaseUrl.status, 'passed');
+  assert.equal(optionalEmpty.status, 'passed');
+  assert.equal(xmlBody.status, 'partial');
+  assert.deepEqual(xmlBody.issues, []);
+});
+
+test('caps oversized request body schemas and reports partial instead of failing media type', () => {
+  const { parseOpenApiSpec, validateOpenApiRequestBodyContract } = runnerLogic();
+  let schema = { type: 'string' };
+  for (let depth = 0; depth < 7; depth++) {
+    schema = {
+      type: 'object',
+      properties: Object.fromEntries(Array.from({ length: 100 }, (_, index) => ['field_' + 'x'.repeat(110) + index, schema]))
+    };
+  }
+  const imported = parseOpenApiSpec({
+    openapi: '3.1.0', info: { title: 'Oversized request schema' },
+    paths: { '/items': { post: { requestBody: { required: true, content: { 'application/json': { schema } } }, responses: { '201': { description: 'Created' } } } } }
+  });
+  const contract = imported.collection.requests[0].responseContract;
+  const result = validateOpenApiRequestBodyContract(contract, {
+    method: 'POST', baseUrl: 'https://api.example.test', route: '/items',
+    headers: 'Content-Type: application/json', body: '{}'
+  });
+  assert.ok(Buffer.byteLength(JSON.stringify(contract), 'utf8') <= 64 * 1024);
+  assert.equal(result.status, 'partial');
+  assert.deepEqual(result.issues, []);
+});
+
 test('limits OpenAPI response contract size by UTF-8 bytes', () => {
   const { parseOpenApiSpec } = runnerLogic();
   const properties = Object.fromEntries(Array.from({ length: 400 }, (_, index) => ['ü'.repeat(100) + index, { type: 'string' }]));
@@ -3855,6 +4023,10 @@ test('prepared and workspace requests preserve normalized response contracts', (
   const { normalizeWorkspaceTabs, prepareSavedRequest } = runnerLogic();
   const responseContract = {
     method: 'GET', pathTemplate: '/items/{itemId}', partialReasons: [],
+    requestBody: {
+      required: true, partialReasons: [],
+      content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string' } } } } }
+    },
     responses: {
       '200': { content: { 'application/json': { schema: {
         type: 'object', properties: { id: { type: 'integer' } }
@@ -3874,6 +4046,10 @@ test('untrusted persisted response contracts drop literal values and arbitrary w
   const request = {
     method: 'GET', route: '/items', responseContract: {
       method: 'GET', pathTemplate: '/items', partialReasons: [sentinel],
+      requestBody: {
+        required: true, partialReasons: [sentinel],
+        content: { 'application/json': { example: sentinel, schema: { type: 'object', properties: { secret: { type: 'string', default: sentinel, example: sentinel, description: sentinel } } } } }
+      },
       responses: { '200': { description: sentinel, content: { 'application/json': {
         example: sentinel,
         schema: { type: 'object', properties: { name: { type: 'string', default: sentinel, example: sentinel, description: sentinel } } }
@@ -3885,6 +4061,9 @@ test('untrusted persisted response contracts drop literal values and arbitrary w
   const state = normalizeWorkspaceTabs({ tabs: [{ id: 'tab', request }] });
   assert.equal(JSON.stringify(prepared.responseContract).includes(sentinel), false);
   assert.equal(JSON.stringify(state.tabs[0].request.responseContract).includes(sentinel), false);
+  assert.deepEqual(prepared.responseContract.requestBody.content['application/json'].schema, {
+    type: 'object', properties: { secret: { type: 'string' } }
+  });
   assert.deepEqual(prepared.responseContract.responses['200'].content['application/json'].schema, {
     type: 'object', properties: { name: { type: 'string' } }
   });

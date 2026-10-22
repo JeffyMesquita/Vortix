@@ -320,6 +320,21 @@ Referências: [exportar um ambiente no Postman](https://learning.postman.com/doc
 - [x] Preservar a versão OpenAPI no contrato e validar `nullable`, tipos em união e limites exclusivos segundo 3.0/3.1/3.2; schemas e mapas/estruturas de resposta malformados ficam **Parciais** em vez de virarem validações vazias.
 - [x] Rodar 268 testes Node (267 passaram; 1 teste de symlink foi ignorado por `EPERM` no Windows), build Release, sintaxe e `git diff --check`; conferir visualmente importação, rota-template e nota do contrato numa instância local com SQLite temporário, sem enviar requests à API.
 
+### 20. Validar body das requests com contratos OpenAPI
+
+**Status: concluída e validada nesta rodada.**
+
+**Objetivo:** encontrar incompatibilidades no body antes do envio, com feedback local e reutilização da especificação importada.
+
+- [x] Importar `requestBody.required`, media types JSON e schemas inline ou em `$ref` local limitado; nunca buscar referências externas.
+- [x] Persistir o schema sanitizado junto ao contrato da operação e mantê-lo fora do payload enviado a `/api/request`.
+- [x] Validar presença do body, JSON, `Content-Type` e regras estruturais suportadas sem repetir valores nas mensagens.
+- [x] Marcar regras malformadas, referências indisponíveis e mídia não JSON como **Parciais**.
+- [x] Expor **Validar body** na aba Testes e registrar o resultado do envio manual e do Runner; no Runner, divergência do body é aviso não bloqueante e não aciona **Parar após falha**.
+- [x] Cobrir limites, templates, redaction e integração; documentar escopo e limitações no README.
+- [x] Rodar 275 testes Node (274 passaram; 1 teste de symlink foi ignorado por `EPERM` no Windows), build Release, sintaxe e `git diff --check`.
+- [x] Conferir em SQLite isolado: body sem campo obrigatório ficou **Falhou**, body válido ficou **Passou**; não enviar requests à API de destino.
+
 ## Regra de sequência
 
 Fechamos cada feature com teste, documentação e revisão. Busca, histórico, comparação, HTTPie, schema GraphQL e fluxo PKCE visual foram validados em ambiente local/mock.
