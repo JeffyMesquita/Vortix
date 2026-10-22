@@ -324,6 +324,12 @@ insomnia.environment.set("token", body.access_token);</code></pre>
               <button class="button secondary compact-button" id="add-response-test" type="button">＋ Adicionar teste</button>
             </div>
             <p class="hint response-tests-help">Ex.: status HTTP igual a 201, <code>data.id</code> existe ou <code>items[0].id</code> igual a 42.</p>
+            <details class="script-help response-contract-help">
+              <summary>Como funciona o contrato OpenAPI?</summary>
+              <p>Ao importar uma especificação, a request pode validar status, Content-Type e estrutura JSON no envio manual ou no Runner. “Parcial” significa que o método/rota mudou ou que a especificação usa uma regra não suportada; revise o contrato antes de confiar no resultado.</p>
+              <p>Referências locais limitadas são lidas do próprio arquivo. Referências externas não são carregadas. Valores de exemplo e o body da resposta não entram no contrato.</p>
+            </details>
+            <p class="hint" id="response-contract-note" role="note" hidden></p>
             <div id="response-tests-list" class="response-tests-list"></div>
             <details class="script-help response-tests-format-help">
               <summary>Compatibilidade com Insomnia e Postman</summary>

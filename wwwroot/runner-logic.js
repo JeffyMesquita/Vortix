@@ -327,8 +327,10 @@
       const editorSection = ['params', 'headers', 'body', 'auth', 'scripts', 'tests'].includes(source.editorSection) ? source.editorSection : 'params';
       const saveBearerToken = source.saveBearerToken !== false;
       const savedAuth = persistAuthFields(source.request, saveBearerToken);
+      const { responseContract: untrustedResponseContract, ...sourceRequest } = source.request;
+      const responseContract = sanitizeOpenApiResponseContract(untrustedResponseContract);
       const request = {
-        ...source.request,
+        ...sourceRequest,
         bodyMode: normalizeBodyMode(source.request.bodyMode),
         multipartFields: normalizeMultipartFields(source.request.multipartFields),
         ...savedAuth,
@@ -339,6 +341,7 @@
         preRequestActionsEnabled: source.request.preRequestActionsEnabled !== false,
         preRequestActionsLiteralConsent: source.request.preRequestActionsLiteralConsent === true,
         responseCaptureTarget: source.request.responseCaptureTarget === 'vault' ? 'vault' : 'environment',
+        ...(responseContract ? { responseContract } : {}),
         allowInsecureHttp: source.request.allowInsecureHttp === true
       };
       tabs.push({
@@ -1733,6 +1736,633 @@
     return { document, warnings: [...warnings] };
   }
 
+  const maxOpenApiResponseContractBytes = 64 * 1024;
+  const openApiSchemaDepthLimit = 8;
+  const openApiSchemaNodeLimit = 1200;
+  const openApiSchemaPropertyLimit = 100;
+  const openApiResponseLimit = 100;
+  const openApiMediaTypeLimit = 20;
+  const openApiJsonTypes = new Set(['null', 'boolean', 'object', 'array', 'number', 'integer', 'string']);
+  const openApiSupportedSchemaKeywords = new Set(['type', 'nullable', 'required', 'properties', 'items', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf', 'minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties', 'uniqueItems', 'additionalProperties']);
+  const openApiSchemaMetadataKeywords = new Set(['title', 'description', 'example', 'examples', 'default', '$comment', 'deprecated', 'xml', 'externalDocs']);
+  const openApiIgnoredSchemaKeywords = new Set(['enum', 'const', 'pattern', 'format', 'allOf', 'oneOf', 'anyOf', 'not', 'if', 'then', 'else', 'discriminator', 'dependentSchemas', 'propertyNames', 'unevaluatedProperties', 'unevaluatedItems', 'contains', 'prefixItems', 'readOnly', 'writeOnly']);
+  const openApiResponseMapPartialMessage = 'O mapa de respostas OpenAPI está incompleto ou inválido.';
+  const openApiSafePartialMessages = new Set([
+    'O schema excede o limite de profundidade de 8 níveis.',
+    'Referência externa de schema não foi resolvida.',
+    'Referência circular de schema foi reduzida.',
+    'Referência local de schema não encontrada.',
+    'O schema usa um recurso não suportado pelo contrato de resposta.',
+    'O schema usa uma lista de itens não suportada pelo contrato de resposta.',
+    'O schema usa um tipo não suportado pelo contrato de resposta.',
+    'O schema excede o limite de itens do contrato de resposta.',
+    'A resposta excede o limite de profundidade de 8 níveis.',
+    'Referência externa de resposta não foi resolvida.',
+    'Referência circular de resposta foi reduzida.',
+    'Referência local de resposta não encontrada.',
+    'A resposta excede o limite de itens do contrato de resposta.',
+    'O contrato normalizado excedeu 64 KB e foi reduzido.',
+    'A estrutura de respostas contém regras que não podem ser validadas.',
+    openApiResponseMapPartialMessage,
+    'A validação estrutural de conteúdo não JSON não é suportada.',
+    'O contrato importado contém avisos não confiáveis e precisa de revisão manual.'
+  ]);
+
+  function openApiUtf8ByteLength(text) {
+    const value = String(text ?? '');
+    if (typeof TextEncoder === 'function') return new TextEncoder().encode(value).length;
+    return encodeURIComponent(value).replace(/%[0-9A-F]{2}/gi, 'x').length;
+  }
+
+  function sanitizeOpenApiContractSchema(schema, state, document = null, depth = 0) {
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+      state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+      return {};
+    }
+    if (depth > openApiSchemaDepthLimit) {
+      state.partial('O schema excede o limite de profundidade de 8 níveis.');
+      return {};
+    }
+    if (state.nodesRemaining-- <= 0) {
+      state.partial('O schema excede o limite de itens do contrato de resposta.');
+      return {};
+    }
+    if (Object.hasOwn(schema, '$ref')) {
+      for (const key in schema) {
+        if (!Object.hasOwn(schema, key) || key === '$ref' || openApiSchemaMetadataKeywords.has(key) || /^x-[a-z0-9_.-]+$/i.test(key)) continue;
+        state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+      }
+      const ref = String(schema.$ref || '');
+      if (!document || !openApiPointerParts(ref)) {
+        state.partial('Referência externa de schema não foi resolvida.');
+        return {};
+      }
+      if (state.stack.has(ref)) {
+        state.partial('Referência circular de schema foi reduzida.');
+        return {};
+      }
+      if (state.stack.size >= openApiSchemaDepthLimit) {
+        state.partial('O schema excede o limite de profundidade de 8 níveis.');
+        return {};
+      }
+      const resolved = resolveOpenApiLocalPointer(document, ref);
+      if (!resolved.found) {
+        state.partial('Referência local de schema não encontrada.');
+        return {};
+      }
+      state.stack.add(ref);
+      const normalized = sanitizeOpenApiContractSchema(resolved.value, state, document, depth + 1);
+      state.stack.delete(ref);
+      return normalized;
+    }
+
+    const result = {};
+    let keywordCount = 0;
+    for (const key in schema) {
+      if (!Object.hasOwn(schema, key)) continue;
+      if (keywordCount++ >= 50) { state.partial('O schema excede o limite de itens do contrato de resposta.'); break; }
+      if (openApiSupportedSchemaKeywords.has(key) || openApiSchemaMetadataKeywords.has(key) || key === '$ref' || /^x-[a-z0-9_.-]+$/i.test(key)) continue;
+      if (openApiIgnoredSchemaKeywords.has(key) || !key.startsWith('x-')) state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+    }
+    for (const key of openApiIgnoredSchemaKeywords) if (Object.hasOwn(schema, key)) state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+
+    const version = state.openApiVersion;
+    if (Object.hasOwn(schema, 'type')) {
+      if (typeof schema.type === 'string') {
+        if (openApiJsonTypes.has(schema.type) && !(version === '3.0' && schema.type === 'null')) result.type = schema.type;
+        else state.partial('O schema usa um tipo não suportado pelo contrato de resposta.');
+      } else if (Array.isArray(schema.type)) {
+        const types = [...new Set(schema.type)];
+        if (version !== '3.0' && types.length > 0 && types.length === schema.type.length && types.every(type => typeof type === 'string' && openApiJsonTypes.has(type))) result.type = types;
+        else state.partial('O schema usa um tipo não suportado pelo contrato de resposta.');
+      } else {
+        state.partial('O schema usa um tipo não suportado pelo contrato de resposta.');
+      }
+    }
+    if (Object.hasOwn(schema, 'nullable')) {
+      if (version === '3.0' && typeof schema.nullable === 'boolean') {
+        if (schema.nullable) result.nullable = true;
+      } else if (schema.nullable !== false || version !== '3.0') {
+        state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+        if (schema.nullable === true || typeof schema.nullable !== 'boolean') delete result.type;
+      }
+    }
+
+    if (Object.hasOwn(schema, 'required') && !Array.isArray(schema.required))
+      state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+    if (Array.isArray(schema.required)) {
+      const required = [];
+      let inspected = 0;
+      for (const name of schema.required) {
+        if (inspected++ >= openApiSchemaPropertyLimit) { state.partial('O schema excede o limite de itens do contrato de resposta.'); break; }
+        if (typeof name === 'string' && name && name.length <= 128 && !reservedNames.has(name) && !required.includes(name)) required.push(name);
+        else state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+      }
+      if (required.length) result.required = required;
+    }
+    if (Object.hasOwn(schema, 'properties') && (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties)))
+      state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+    if (schema.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties)) {
+      const properties = {};
+      let count = 0;
+      for (const name in schema.properties) {
+        if (!Object.hasOwn(schema.properties, name)) continue;
+        if (count >= openApiSchemaPropertyLimit) { state.partial('O schema excede o limite de itens do contrato de resposta.'); break; }
+        count++;
+        if (!name || name.length > 128 || reservedNames.has(name)) { state.partial('O schema usa um recurso não suportado pelo contrato de resposta.'); continue; }
+        Object.defineProperty(properties, name, { value: sanitizeOpenApiContractSchema(schema.properties[name], state, document, depth + 1), enumerable: true, writable: true, configurable: true });
+      }
+      if (Object.keys(properties).length) result.properties = properties;
+    }
+    if (Object.hasOwn(schema, 'items')) {
+      if (Array.isArray(schema.items)) state.partial('O schema usa uma lista de itens não suportada pelo contrato de resposta.');
+      else if (!schema.items || typeof schema.items !== 'object') state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+      else result.items = sanitizeOpenApiContractSchema(schema.items, state, document, depth + 1);
+    }
+    for (const key of ['minimum', 'maximum', 'multipleOf']) {
+      if (!Object.hasOwn(schema, key)) continue;
+      if (typeof schema[key] === 'number' && Number.isFinite(schema[key]) && (key !== 'multipleOf' || schema[key] > 0)) result[key] = schema[key];
+      else state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+    }
+    for (const [exclusiveKey, boundKey] of [['exclusiveMinimum', 'minimum'], ['exclusiveMaximum', 'maximum']]) {
+      if (!Object.hasOwn(schema, exclusiveKey)) continue;
+      const exclusive = schema[exclusiveKey];
+      if (version === '3.0' && typeof exclusive === 'boolean') {
+        if (exclusive) {
+          if (typeof schema[boundKey] === 'number' && Number.isFinite(schema[boundKey])) {
+            result[exclusiveKey] = schema[boundKey];
+            delete result[boundKey];
+          } else state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+        }
+      } else if (version !== '3.0' && typeof exclusive === 'number' && Number.isFinite(exclusive)) result[exclusiveKey] = exclusive;
+      else {
+        state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+        delete result[boundKey];
+        if (exclusive === true && version !== '3.0') continue;
+        if (exclusive === false && version === '3.0') continue;
+        if (exclusive === true && version === '3.0') {
+          if (typeof schema[boundKey] === 'number' && Number.isFinite(schema[boundKey])) {
+            result[exclusiveKey] = schema[boundKey];
+            delete result[boundKey];
+          }
+        }
+      }
+    }
+    for (const key of ['minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties']) {
+      if (!Object.hasOwn(schema, key)) continue;
+      if (Number.isInteger(schema[key]) && schema[key] >= 0) result[key] = schema[key];
+      else state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+    }
+    if (Object.hasOwn(schema, 'uniqueItems')) {
+      if (typeof schema.uniqueItems !== 'boolean') state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+      else if (schema.uniqueItems) result.uniqueItems = true;
+    }
+    if (Object.hasOwn(schema, 'additionalProperties')) {
+      if (typeof schema.additionalProperties === 'boolean') result.additionalProperties = schema.additionalProperties;
+      else if (schema.additionalProperties && typeof schema.additionalProperties === 'object' && !Array.isArray(schema.additionalProperties))
+        result.additionalProperties = sanitizeOpenApiContractSchema(schema.additionalProperties, state, document, depth + 1);
+      else state.partial('O schema usa um recurso não suportado pelo contrato de resposta.');
+    }
+    return result;
+  }
+
+  function openApiPointerParts(ref) {
+    const text = String(ref || '');
+    if (text === '#') return [];
+    if (!text.startsWith('#/')) return null;
+    return text.slice(2).split('/').map(part => {
+      const decoded = part.replace(/~1/g, '/').replace(/~0/g, '~');
+      try { return decodeURIComponent(decoded); }
+      catch { return decoded; }
+    });
+  }
+
+  function resolveOpenApiLocalPointer(document, ref) {
+    const parts = openApiPointerParts(ref);
+    if (!parts) return { found: false, external: true };
+    let current = document;
+    for (const part of parts) {
+      if (!current || typeof current !== 'object' || Array.isArray(current) || reservedNames.has(part) || !Object.hasOwn(current, part))
+        return { found: false, external: false };
+      current = current[part];
+    }
+    return { found: true, value: current };
+  }
+
+  function normalizeOpenApiSchema(schema, document, state, depth = 0) {
+    return sanitizeOpenApiContractSchema(schema, state, document, depth);
+  }
+
+  function normalizeOpenApiResponseObject(source, document, state, depth = 0) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) {
+      state.partial('A estrutura de respostas contém regras que não podem ser validadas.');
+      return { content: {} };
+    }
+    if (depth > openApiSchemaDepthLimit) {
+      state.partial('A resposta excede o limite de profundidade de 8 níveis.');
+      return { content: {} };
+    }
+    if (state.nodesRemaining-- <= 0) {
+      state.partial('A resposta excede o limite de itens do contrato de resposta.');
+      return { content: {} };
+    }
+    if (Object.hasOwn(source, '$ref')) {
+      const ref = String(source.$ref || '');
+      const parts = openApiPointerParts(ref);
+      if (!parts) {
+        state.partial('Referência externa de resposta não foi resolvida.');
+        return { content: {} };
+      }
+      if (state.stack.has(ref)) {
+        state.partial('Referência circular de resposta foi reduzida.');
+        return { content: {} };
+      }
+      if (state.stack.size >= openApiSchemaDepthLimit) {
+        state.partial('A resposta excede o limite de profundidade de 8 níveis.');
+        return { content: {} };
+      }
+      const resolved = resolveOpenApiLocalPointer(document, ref);
+      if (!resolved.found) {
+        state.partial('Referência local de resposta não encontrada.');
+        return { content: {} };
+      }
+      state.stack.add(ref);
+      const normalized = normalizeOpenApiResponseObject(resolved.value, document, state, depth + 1);
+      state.stack.delete(ref);
+      return normalized;
+    }
+    const response = { content: {} };
+    if (Object.hasOwn(source, 'content') && (!source.content || typeof source.content !== 'object' || Array.isArray(source.content)))
+      state.partial('A estrutura de respostas contém regras que não podem ser validadas.');
+    if (source.content && typeof source.content === 'object' && !Array.isArray(source.content)) {
+      let count = 0;
+      for (const rawMediaType in source.content) {
+        if (!Object.hasOwn(source.content, rawMediaType)) continue;
+        if (count++ >= openApiMediaTypeLimit) { state.partial('A resposta excede o limite de itens do contrato de resposta.'); break; }
+        const media = source.content[rawMediaType];
+        const mediaType = String(rawMediaType || '').trim().slice(0, 200);
+        if (!mediaType) continue;
+        if (!/^(?:\*|[a-z0-9!#$&^_.+-]+)\/(?:\*|[a-z0-9!#$&^_.+-]+)$/i.test(mediaType)) {
+          state.partial('A estrutura de respostas contém regras que não podem ser validadas.');
+          continue;
+        }
+        const entry = {};
+        if (!media || typeof media !== 'object' || Array.isArray(media))
+          state.partial('A estrutura de respostas contém regras que não podem ser validadas.');
+        else if (Object.hasOwn(media, 'schema')) entry.schema = normalizeOpenApiSchema(media.schema, document, state, depth + 1);
+        Object.defineProperty(response.content, mediaType, { value: entry, enumerable: true, writable: true, configurable: true });
+      }
+    }
+    return response;
+  }
+
+  function capOpenApiResponseContract(contract) {
+    const fits = () => openApiUtf8ByteLength(JSON.stringify(contract)) <= maxOpenApiResponseContractBytes;
+    if (fits()) return contract;
+    contract.partialReasons.push('O contrato normalizado excedeu 64 KB e foi reduzido.');
+    const responses = contract.responses && typeof contract.responses === 'object' && !Array.isArray(contract.responses) ? contract.responses : (contract.responses = {});
+    for (const response of Object.values(responses)) {
+      for (const media of Object.values(response?.content || {})) if (media && typeof media === 'object') media.schema = {};
+    }
+    if (fits()) return contract;
+    for (const response of Object.values(responses)) response.content = {};
+    if (fits()) return contract;
+    for (const key of Object.keys(responses)) {
+      responses[key] = { content: {} };
+      if (fits()) return contract;
+    }
+    for (const key of Object.keys(responses)) {
+      delete responses[key];
+      if (fits()) return contract;
+    }
+    contract.responses = {};
+    return contract;
+  }
+
+  function sanitizeOpenApiResponseContract(source) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+    const partialReasons = new Set();
+    const openApiVersion = /^3\.(?:0|1|2)$/.test(String(source.openApiVersion || '')) ? String(source.openApiVersion) : null;
+    const state = {
+      openApiVersion,
+      stack: new Set(),
+      nodesRemaining: openApiSchemaNodeLimit,
+      partial: reason => partialReasons.add(openApiSafePartialMessages.has(String(reason)) ? String(reason) : 'O contrato importado contém avisos não confiáveis e precisa de revisão manual.')
+    };
+    if (Object.hasOwn(source, 'openApiVersion') && !openApiVersion)
+      state.partial('O contrato importado contém avisos não confiáveis e precisa de revisão manual.');
+    if (Array.isArray(source.partialReasons)) {
+      for (const reason of source.partialReasons.slice(0, 50)) {
+        const text = typeof reason === 'string' ? reason : '';
+        state.partial(openApiSafePartialMessages.has(text) ? text : 'O contrato importado contém avisos não confiáveis e precisa de revisão manual.');
+      }
+    }
+    const method = String(source.method || '').toUpperCase();
+    const methods = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
+    if (!methods.has(method)) return null;
+    const pathTemplate = String(source.pathTemplate || '').trim();
+    if (!pathTemplate.startsWith('/') || pathTemplate.length > 4096 || /[?#\\\r\n]/.test(pathTemplate)) return null;
+    const responses = {};
+    if (!source.responses || typeof source.responses !== 'object' || Array.isArray(source.responses)) {
+      state.partial(openApiResponseMapPartialMessage);
+    } else {
+      let responseCount = 0;
+      for (const rawStatus in source.responses) {
+        if (!Object.hasOwn(source.responses, rawStatus)) continue;
+        if (responseCount++ >= openApiResponseLimit) { state.partial('A resposta excede o limite de itens do contrato de resposta.'); state.partial(openApiResponseMapPartialMessage); break; }
+        const status = String(rawStatus).trim();
+        if (!/^(?:[1-5]\d{2}|[1-5]XX|default)$/i.test(status)) { state.partial(openApiResponseMapPartialMessage); continue; }
+        const normalizedStatus = status.toLowerCase() === 'default' ? 'default' : status.toUpperCase();
+        const rawResponse = source.responses[rawStatus];
+        const content = {};
+        if (!rawResponse || typeof rawResponse !== 'object' || Array.isArray(rawResponse)) {
+          state.partial('A estrutura de respostas contém regras que não podem ser validadas.');
+        } else if (rawResponse.content && typeof rawResponse.content === 'object' && !Array.isArray(rawResponse.content)) {
+          let mediaCount = 0;
+          for (const rawMediaType in rawResponse.content) {
+            if (!Object.hasOwn(rawResponse.content, rawMediaType)) continue;
+            if (mediaCount++ >= openApiMediaTypeLimit) { state.partial('A resposta excede o limite de itens do contrato de resposta.'); break; }
+            const mediaType = String(rawMediaType).trim().slice(0, 200);
+            if (!/^(?:\*|[a-z0-9!#$&^_.+-]+)\/(?:\*|[a-z0-9!#$&^_.+-]+)$/i.test(mediaType)) { state.partial('A estrutura de respostas contém regras que não podem ser validadas.'); continue; }
+            const rawMedia = rawResponse.content[rawMediaType], media = {};
+            if (!rawMedia || typeof rawMedia !== 'object' || Array.isArray(rawMedia)) {
+              state.partial('A estrutura de respostas contém regras que não podem ser validadas.');
+            } else if (Object.hasOwn(rawMedia, 'schema')) {
+              media.schema = sanitizeOpenApiContractSchema(rawMedia.schema, state);
+            }
+            Object.defineProperty(content, mediaType, { value: media, enumerable: true, writable: true, configurable: true });
+          }
+        } else if (Object.hasOwn(rawResponse, 'content')) state.partial('A estrutura de respostas contém regras que não podem ser validadas.');
+        Object.defineProperty(responses, normalizedStatus, { value: { content }, enumerable: true, writable: true, configurable: true });
+      }
+      if (!responseCount) state.partial(openApiResponseMapPartialMessage);
+    }
+    const normalized = { method, pathTemplate, partialReasons: [...partialReasons].slice(0, 50), responses };
+    if (openApiVersion) normalized.openApiVersion = openApiVersion;
+    return capOpenApiResponseContract(normalized);
+  }
+
+  function openApiContractPathTemplate(serverInfo, path, environmentVariables = {}) {
+    let prefix = String(serverInfo?.prefix || '').trim();
+    if (!prefix) {
+      const base = String(serverInfo?.baseUrl || '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, name) =>
+        Object.hasOwn(environmentVariables, name) ? String(environmentVariables[name]) : 'vortix');
+      try {
+        const pathname = new URL(base).pathname.replace(/\/+$/, '');
+        if (pathname && pathname !== '/') prefix = pathname;
+      } catch { /* templated or relative base URL */ }
+    }
+    const route = String(path || '/').split('?')[0];
+    const full = (prefix + '/' + route.replace(/^\/+/, '')).replace(/\/{2,}/g, '/');
+    return full.startsWith('/') ? full : '/' + full;
+  }
+
+  function normalizeOpenApiResponseContract(document, operation, method, pathTemplate) {
+    const partialReasons = new Set();
+    const state = {
+      openApiVersion: '3.' + String(document?.openapi || '').split('.')[1],
+      stack: new Set(),
+      nodesRemaining: openApiSchemaNodeLimit,
+      partial: reason => partialReasons.add(String(reason || ''))
+    };
+    const responses = {};
+    const sourceResponseMap = operation?.responses;
+    const hasValidResponseMap = !!sourceResponseMap && typeof sourceResponseMap === 'object' && !Array.isArray(sourceResponseMap);
+    const sourceResponses = hasValidResponseMap ? sourceResponseMap : {};
+    if (!hasValidResponseMap || !Object.keys(sourceResponses).length) state.partial(openApiResponseMapPartialMessage);
+    let responseCount = 0;
+    for (const rawStatus in sourceResponses) {
+      if (!Object.hasOwn(sourceResponses, rawStatus)) continue;
+      if (responseCount++ >= openApiResponseLimit) { state.partial('A resposta excede o limite de itens do contrato de resposta.'); state.partial(openApiResponseMapPartialMessage); break; }
+      const source = sourceResponses[rawStatus];
+      const status = String(rawStatus || '').trim();
+      if (!/^(?:[1-5]\d{2}|[1-5]XX|default)$/i.test(status)) { state.partial(openApiResponseMapPartialMessage); continue; }
+      const key = status.toLowerCase() === 'default' ? 'default' : status.toUpperCase();
+      Object.defineProperty(responses, key, { value: normalizeOpenApiResponseObject(source, document, state), enumerable: true, writable: true, configurable: true });
+    }
+    const contract = {
+      method: String(method || 'GET').toUpperCase().slice(0, 16),
+      pathTemplate: String(pathTemplate || '/').slice(0, 4096),
+      partialReasons: [...partialReasons].slice(0, 50),
+      responses
+    };
+    contract.openApiVersion = state.openApiVersion;
+    return sanitizeOpenApiResponseContract(contract);
+  }
+
+  function openApiResponseHeader(headers, name) {
+    const target = String(name || '').toLowerCase();
+    if (Array.isArray(headers)) {
+      for (const entry of headers) {
+        if (Array.isArray(entry) && String(entry[0] || '').toLowerCase() === target) return String(entry[1] ?? '');
+      }
+      return '';
+    }
+    if (headers && typeof headers === 'object') {
+      for (const [key, value] of Object.entries(headers)) {
+        if (String(key).toLowerCase() !== target) continue;
+        return Array.isArray(value) ? value.join(', ') : String(value ?? '');
+      }
+    }
+    return '';
+  }
+
+  function openApiMediaMatches(declared, actual) {
+    const left = String(declared || '').split(';')[0].trim().toLowerCase();
+    const right = String(actual || '').split(';')[0].trim().toLowerCase();
+    if (!left || !right) return false;
+    if (left === right) return true;
+    const [leftType, leftSubtype] = left.split('/');
+    const [rightType, rightSubtype] = right.split('/');
+    if (!leftType || !leftSubtype || !rightType || !rightSubtype) return false;
+    if (leftType === '*') return true;
+    if (leftType !== rightType) return false;
+    return leftSubtype === '*' || leftSubtype === rightSubtype;
+  }
+
+  function openApiJsonMediaType(value) {
+    const type = String(value || '').split(';')[0].trim().toLowerCase();
+    return type === 'application/json' || /^application\/[^/]+\+json$/.test(type) || type === 'text/json';
+  }
+
+  function openApiStatusResponse(responses, status) {
+    if (!responses || typeof responses !== 'object' || Array.isArray(responses)) return null;
+    if (Object.hasOwn(responses, String(status))) return responses[String(status)];
+    const range = Math.floor(Number(status) / 100);
+    if (Number.isInteger(range) && range >= 1 && range <= 5) {
+      const key = Object.keys(responses).find(item => item.toUpperCase() === range + 'XX');
+      if (key) return responses[key];
+    }
+    return Object.hasOwn(responses, 'default') ? responses.default : null;
+  }
+
+  function openApiRouteMatchesTemplate(route, template, baseUrl = '') {
+    const pathOf = value => {
+      try { return new URL(String(value || ''), 'http://localhost').pathname; }
+      catch { return String(value || '').split('?')[0]; }
+    };
+    const routePath = pathOf(route);
+    let basePath = '', basePathKnown = false;
+    const rawBase = String(baseUrl || '').trim();
+    try {
+      if (!/^\{\{\s*[^{}]+\s*\}\}\/?$/.test(rawBase)) {
+        basePath = new URL(rawBase.replace(/\{\{[^{}]+\}\}/g, 'vortix'), 'http://localhost').pathname.replace(/\/+$/, '');
+        basePathKnown = true;
+      }
+    }
+    catch { /* base URL is a whole-variable template */ }
+    const effectivePath = basePathKnown
+      ? (basePath + '/' + routePath.replace(/^\/+/, '')).replace(/\/{2,}/g, '/')
+      : routePath;
+    const fullTemplate = String(template || '').split('?')[0];
+    const normalized = effectivePath.startsWith('/') ? effectivePath : '/' + effectivePath;
+    const templateSource = fullTemplate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\{[^{}]+\\\}/g, '[^/]+');
+    try { return new RegExp('^' + templateSource + '/?$').test(normalized); }
+    catch { return false; }
+  }
+
+  function openApiValueMatchesType(value, type) {
+    if (type === 'integer') return typeof value === 'number' && Number.isInteger(value);
+    if (type === 'number') return typeof value === 'number' && Number.isFinite(value);
+    if (type === 'string') return typeof value === 'string';
+    if (type === 'boolean') return typeof value === 'boolean';
+    if (type === 'array') return Array.isArray(value);
+    if (type === 'object') return !!value && typeof value === 'object' && !Array.isArray(value);
+    if (type === 'null') return value === null;
+    return false;
+  }
+
+  function validateOpenApiSchemaValue(schema, value, location, issues, warnings, depth = 0) {
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return;
+    if (depth > openApiSchemaDepthLimit) { warnings.push('A resposta excede o limite de profundidade de validação.'); return; }
+    if (issues.length >= 50) return;
+    if (schema.nullable === true && value === null) return;
+    const types = Array.isArray(schema.type) ? schema.type.filter(type => typeof type === 'string') : typeof schema.type === 'string' ? [schema.type] : [];
+    if (types.length && !types.some(type => openApiValueMatchesType(value, type))) {
+      issues.push('Campo ' + location + ' deve ser do tipo ' + types.join(' ou ') + '.');
+      return;
+    }
+    const isObject = !!value && typeof value === 'object' && !Array.isArray(value);
+    if (Array.isArray(schema.required) && isObject) {
+      for (const name of schema.required) {
+        if (!Object.hasOwn(value, name)) issues.push('Campo ' + location + '.' + name + ' é obrigatório.');
+        if (issues.length >= 50) return;
+      }
+    }
+    if (isObject) {
+      const properties = schema.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties) ? schema.properties : {};
+      for (const [name, child] of Object.entries(properties)) {
+        if (Object.hasOwn(value, name)) validateOpenApiSchemaValue(child, value[name], location + '.' + name, issues, warnings, depth + 1);
+        if (issues.length >= 50) return;
+      }
+      if (schema.additionalProperties === false) {
+        let inspected = 0, hasExtra = false;
+        for (const name in value) {
+          if (!Object.hasOwn(value, name)) continue;
+          if (++inspected > 1000) { warnings.push('A resposta excede o limite de propriedades validadas.'); break; }
+          if (!Object.hasOwn(properties, name)) { hasExtra = true; break; }
+        }
+        if (hasExtra) issues.push('A resposta contém propriedades não declaradas no contrato.');
+      } else if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
+        let inspected = 0;
+        for (const name in value) {
+          if (!Object.hasOwn(value, name) || Object.hasOwn(properties, name)) continue;
+          if (inspected++ >= 1000) { warnings.push('A resposta excede o limite de propriedades validadas.'); break; }
+          validateOpenApiSchemaValue(schema.additionalProperties, value[name], location + '.*', issues, warnings, depth + 1);
+          if (issues.length >= 50) return;
+        }
+      }
+    }
+    if (schema.items && Array.isArray(value)) {
+      const limit = Math.min(value.length, 1000);
+      if (value.length > limit) warnings.push('A resposta excede o limite de itens validados.');
+      for (let index = 0; index < limit; index++) validateOpenApiSchemaValue(schema.items, value[index], location + '[' + index + ']', issues, warnings, depth + 1);
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      if (typeof schema.minimum === 'number' && value < schema.minimum) issues.push('Campo ' + location + ' deve ser maior ou igual a ' + schema.minimum + '.');
+      if (typeof schema.maximum === 'number' && value > schema.maximum) issues.push('Campo ' + location + ' deve ser menor ou igual a ' + schema.maximum + '.');
+      if (typeof schema.exclusiveMinimum === 'number' && value <= schema.exclusiveMinimum) issues.push('Campo ' + location + ' deve ser maior que ' + schema.exclusiveMinimum + '.');
+      if (typeof schema.exclusiveMaximum === 'number' && value >= schema.exclusiveMaximum) issues.push('Campo ' + location + ' deve ser menor que ' + schema.exclusiveMaximum + '.');
+      if (typeof schema.multipleOf === 'number' && schema.multipleOf > 0 && Math.abs(value / schema.multipleOf - Math.round(value / schema.multipleOf)) > 1e-9)
+        issues.push('Campo ' + location + ' deve ser múltiplo de ' + schema.multipleOf + '.');
+    }
+    if (typeof value === 'string') {
+      const length = Array.from(value).length;
+      if (Number.isInteger(schema.minLength) && length < schema.minLength) issues.push('Campo ' + location + ' deve ter pelo menos ' + schema.minLength + ' caracteres.');
+      if (Number.isInteger(schema.maxLength) && length > schema.maxLength) issues.push('Campo ' + location + ' deve ter no máximo ' + schema.maxLength + ' caracteres.');
+    }
+    if (Array.isArray(value)) {
+      if (Number.isInteger(schema.minItems) && value.length < schema.minItems) issues.push('Campo ' + location + ' deve ter pelo menos ' + schema.minItems + ' itens.');
+      if (Number.isInteger(schema.maxItems) && value.length > schema.maxItems) issues.push('Campo ' + location + ' deve ter no máximo ' + schema.maxItems + ' itens.');
+      if (schema.uniqueItems === true) {
+        const seen = new Set();
+        for (const item of value.slice(0, 1000)) {
+          const key = JSON.stringify(item);
+          if (seen.has(key)) { issues.push('Campo ' + location + ' deve conter itens únicos.'); break; }
+          seen.add(key);
+        }
+        if (value.length > 1000) warnings.push('A resposta excede o limite de itens validados.');
+      }
+    }
+    if (isObject) {
+      let count = 0;
+      for (const name in value) if (Object.hasOwn(value, name) && ++count > 1000) break;
+      if (count > 1000) warnings.push('A resposta excede o limite de propriedades validadas.');
+      if (Number.isInteger(schema.minProperties) && count < schema.minProperties) issues.push('Campo ' + location + ' deve ter pelo menos ' + schema.minProperties + ' propriedades.');
+      if (Number.isInteger(schema.maxProperties) && count > schema.maxProperties) issues.push('Campo ' + location + ' deve ter no máximo ' + schema.maxProperties + ' propriedades.');
+    }
+  }
+
+  function validateOpenApiResponseContract(contract, response = {}, request = {}) {
+    const issues = [], warnings = [];
+    const safeContract = sanitizeOpenApiResponseContract(contract);
+    if (!safeContract)
+      return { status: 'partial', issues, warnings: ['Contrato de resposta indisponível.'] };
+    warnings.push(...safeContract.partialReasons);
+    const contractMethod = safeContract.method;
+    const requestMethod = String(request?.method || '').toUpperCase();
+    if (requestMethod && contractMethod && requestMethod !== contractMethod)
+      return { status: 'partial', issues, warnings: ['Método da request atual não corresponde ao contrato importado.'] };
+    if (request?.route && safeContract.pathTemplate && !openApiRouteMatchesTemplate(request.route, safeContract.pathTemplate, request.baseUrl))
+      return { status: 'partial', issues, warnings: ['Rota da request atual não corresponde ao contrato importado.'] };
+    const status = Number(response?.status);
+    const responses = safeContract.responses;
+    const selected = openApiStatusResponse(responses, status);
+    if (!selected && !safeContract.partialReasons.includes(openApiResponseMapPartialMessage)) {
+      issues.push('Status HTTP ' + (Number.isFinite(status) ? status : 0) + ' não declarado no contrato.');
+    }
+    const inspection = selected || Object.values(responses).find(item => item && typeof item === 'object' && item.content);
+    const declaredTypes = inspection?.content && typeof inspection.content === 'object' && !Array.isArray(inspection.content) ? Object.keys(inspection.content) : [];
+    if (declaredTypes.length) {
+      const actualType = openApiResponseHeader(response?.headers, 'content-type');
+      const mediaType = inspection.content && typeof inspection.content === 'object'
+        ? declaredTypes.find(type => openApiMediaMatches(type, actualType)) || ''
+        : '';
+      if (!actualType || !mediaType) {
+        issues.push('Tipo de mídia (Content-Type) da resposta não é compatível com o contrato.');
+      } else {
+        const media = inspection.content[mediaType];
+        if (media && Object.hasOwn(media, 'schema')) {
+          const jsonExpected = openApiJsonMediaType(mediaType) || openApiJsonMediaType(actualType);
+          if (jsonExpected) {
+            let body;
+            try { body = JSON.parse(String(response?.body ?? '')); }
+            catch {
+              issues.push('A resposta não contém JSON válido para o contrato.');
+              body = undefined;
+            }
+            if (body !== undefined) validateOpenApiSchemaValue(media.schema, body, 'body', issues, warnings);
+          } else {
+            warnings.push('A validação estrutural de conteúdo não JSON não é suportada.');
+          }
+        }
+      }
+    }
+    if (issues.length) return { status: 'failed', issues, warnings };
+    if (warnings.length) return { status: 'partial', issues, warnings };
+    return { status: 'passed', issues, warnings };
+  }
+
   function parseOpenApiSpec(document) {
     if (!document || typeof document !== 'object' || Array.isArray(document)) throw Error('Documento OpenAPI invalido.');
     const version = String(document.openapi || '');
@@ -1864,7 +2494,8 @@
         }
         target.requests.push({
           name: String(operation.summary || operation.operationId || method.toUpperCase() + ' ' + path).slice(0, 100),
-          method: method.toUpperCase(), baseUrl: serverInfo.baseUrl, route, headers, body
+          method: method.toUpperCase(), baseUrl: serverInfo.baseUrl, route, headers, body,
+          responseContract: normalizeOpenApiResponseContract(document, operation, method.toUpperCase(), openApiContractPathTemplate(serverInfo, path, environmentVariables))
         });
       }
     }
@@ -1878,7 +2509,11 @@
     if (!source.trim()) return { route: '', params: [] };
     try {
       const url = new URL(source, 'http://localhost');
-      return { route: url.pathname, params: [...url.searchParams.entries()] };
+      const route = url.pathname.replace(/%7B%7B([^/?#]*?)%7D%7D/gi, (_, name) => {
+        try { return '{{' + decodeURIComponent(name) + '}}'; }
+        catch { return '{{' + name + '}}'; }
+      });
+      return { route, params: [...url.searchParams.entries()] };
     } catch { return { route: source, params: [] }; }
   }
 
@@ -2078,7 +2713,7 @@
   const runnerHistoryMaxRequests = 500;
   const runnerHistoryMaxTestsPerRequest = 20;
   const runnerHistoryMaxDurationMs = 86_400_000;
-  const runnerHistoryOutcomes = new Set(['passed', 'failed', 'skipped']);
+  const runnerHistoryOutcomes = new Set(['passed', 'failed', 'partial', 'skipped']);
 
   function runnerHistoryCount(value, maximum = runnerHistoryMaxRequests) {
     if (typeof value === 'boolean') return 0;
@@ -2118,15 +2753,18 @@
       const step = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
       const outcome = runnerHistoryOutcomes.has(step.outcome) ? step.outcome : 'skipped';
       const tests = step.tests && typeof step.tests === 'object' && !Array.isArray(step.tests) ? step.tests : {};
+      const testsPartial = runnerHistoryCount(tests.partial ?? step.testsPartial, runnerHistoryMaxTestsPerRequest);
       return {
         ordinal: index + 1,
         outcome,
         status: runnerHistoryStatus(step.status),
         durationMs: runnerHistoryDuration(step.durationMs),
         testsPassed: runnerHistoryCount(tests.passed ?? step.testsPassed, runnerHistoryMaxTestsPerRequest),
-        testsFailed: runnerHistoryCount(tests.failed ?? step.testsFailed, runnerHistoryMaxTestsPerRequest)
+        testsFailed: runnerHistoryCount(tests.failed ?? step.testsFailed, runnerHistoryMaxTestsPerRequest),
+        ...(testsPartial ? { testsPartial } : {})
       };
     });
+    const partial = runnerHistoryCount(run.partial);
     return {
       id,
       startedAt,
@@ -2134,6 +2772,7 @@
       total: runnerHistoryCount(run.total),
       passed: runnerHistoryCount(run.passed),
       failed: runnerHistoryCount(run.failed),
+      ...(partial ? { partial } : {}),
       skipped: runnerHistoryCount(run.skipped),
       stopped: run.stopped === true,
       steps
@@ -2200,12 +2839,20 @@
   }
 
   function sanitizePreRequestActionRecord(record) {
-    if (!record || typeof record !== 'object' || Array.isArray(record) || !Object.hasOwn(record, 'preRequestActions')) return record;
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return record;
+    let safe = record;
+    if (Object.hasOwn(record, 'responseContract')) {
+      const responseContract = sanitizeOpenApiResponseContract(record.responseContract);
+      safe = { ...record };
+      if (responseContract) safe.responseContract = responseContract;
+      else delete safe.responseContract;
+    }
+    if (!Object.hasOwn(record, 'preRequestActions')) return safe;
     let persisted;
     try { persisted = persistablePreRequestActions(record.preRequestActions, record.preRequestActionsLiteralConsent === true); }
     catch { persisted = { actions: [], redacted: true }; }
     return {
-      ...record,
+      ...safe,
       preRequestActions: persisted.actions,
       preRequestActionsEnabled: record.preRequestActionsEnabled !== false && persisted.actions.length > 0,
       preRequestActionsLiteralConsent: record.preRequestActionsLiteralConsent === true,
@@ -2516,6 +3163,7 @@
 
   function prepareSavedRequest(saved, environment, dataset, allowWrites = false, authScopes = [], vaultSecrets = {}, preRequestOverrides = {}) {
     const method = String(saved?.method || 'GET').toUpperCase();
+    const responseContract = sanitizeOpenApiResponseContract(saved?.responseContract);
     if (saved?.tokenRequest) {
       throw Error('Requests de credenciais manuais precisam ser enviadas pelo fluxo de token.');
     }
@@ -2578,6 +3226,7 @@
       responseSuccessOnly: saved?.responseSuccessOnly !== false,
       responseCaptureTarget: saved?.responseCaptureTarget === 'vault' ? 'vault' : 'environment',
       responseTests: normalizeResponseTests(saved?.responseTests),
+      ...(responseContract ? { responseContract } : {}),
       resolutionProvenance: provenance,
       saveBearerToken: false
     };
@@ -2941,5 +3590,5 @@
     return makeLocalSecretVault({ salt: saltBytes, key, cryptoProvider, secrets, envelope: { ...envelope, names: [...secrets.keys()] } });
   }
 
-  return { buildOpenApi31Export, parseOpenApiSpec, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, buildCurlCommand, buildHttpieCommand, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { buildOpenApi31Export, parseOpenApiSpec, sanitizeOpenApiResponseContract, validateOpenApiResponseContract, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, buildCurlCommand, buildHttpieCommand, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });

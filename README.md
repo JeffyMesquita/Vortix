@@ -35,6 +35,7 @@
   - [Gerar comando HTTPie](#gerar-comando-httpie)
   - [Importar HTTPie](#importar-httpie)
 - [Importar OpenAPI JSON](#importar-openapi-json)
+  - [Validar respostas com contrato OpenAPI](#validar-respostas-com-contrato-openapi)
 - [Ambientes e variáveis](#ambientes-e-variáveis)
   - [Cofre local de segredos](#cofre-local-de-segredos)
 - [Scripts, testes e Runner](#scripts-testes-e-runner)
@@ -580,7 +581,43 @@ Exemplo mínimo:
 
 Variáveis de servidor com valor padrão são criadas em um ambiente OpenAPI. Quando <code>servers[].url</code> é apenas uma variável (por exemplo <code>{baseUrl}</code>), ela vira o <code>baseUrl</code> <code>{{baseUrl}}</code> da request, sem prefixo de rota, e o <code>default</code> correspondente é preservado no ambiente. Valores sensíveis e variáveis sem padrão ficam para configuração manual. Parâmetros sem exemplo ficam editáveis; variáveis de path sem exemplo aparecem como <code>{{nome}}</code>. Confira a coleção gerada antes de enviar.
 
-O importador não resolve referências <code>$ref</code> (locais ou externas), não acessa a rede para buscá-las, não aplica automaticamente os requisitos de segurança e não gera body de mídia não JSON. Esses casos aparecem como avisos para revisão manual. A primeira versão aceita JSON; YAML ainda não é importado. Consulte também a <a href="https://spec.openapis.org/oas/latest.html">especificação OpenAPI</a>.
+O importador ainda não resolve referências usadas em parâmetros, segurança ou body, não acessa a rede para buscá-las e não gera body de mídia não JSON. Schemas de resposta têm suporte próprio e limitado, descrito abaixo. Requisitos de segurança continuam para configuração manual. A primeira versão aceita JSON; YAML ainda não é importado. Consulte também a <a href="https://spec.openapis.org/oas/latest.html">especificação OpenAPI</a>.
+
+### Validar respostas com contrato OpenAPI
+
+Ao importar uma operação OpenAPI com respostas descritas, o Vortix guarda o contrato junto à request. Abra a aba **Testes** para ver a indicação do contrato e envie manualmente ou execute pelo Runner. A validação compara o status HTTP, o `Content-Type` e, quando a resposta é JSON, a estrutura do body.
+
+<p align="center">
+  <img src="docs/images/openapi-response-contract.svg" alt="Fluxo de validação do contrato OpenAPI no Vortix" width="100%">
+</p>
+
+Exemplo da resposta esperada na especificação:
+
+~~~yaml
+paths:
+  /users/{id}:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name]
+                properties:
+                  id: { type: integer }
+                  name: { type: string }
+~~~
+
+O contrato acima aceita, por exemplo, `{"id": 42, "name": "Ava"}`. A validação não mostra nem persiste valores do body da resposta.
+
+| Resultado | Quando aparece |
+| --- | --- |
+| **Passou** | Status, tipo de mídia e estrutura atendem ao contrato suportado. |
+| **Falhou** | Status ou tipo de mídia não correspondem, o JSON é inválido ou uma regra estrutural falha. A mensagem identifica o caminho do campo, sem copiar seu valor. |
+| **Parcial** | Método/rota não correspondem ou a especificação usa uma regra que o validador não interpreta. Não conte como sucesso: revise o contrato. |
+
+O subconjunto estrutural cobre tipos, `nullable`, `required`, `properties`, `items`, `uniqueItems`, limites de números/textos/arrays/objetos e `additionalProperties`. A normalização preserva a versão OpenAPI: em 3.0, `nullable` e `exclusiveMinimum`/`exclusiveMaximum` booleanos seguem a semântica dessa versão; em 3.1 e 3.2 são aceitos tipos em união (como `['string', 'null']`) e limites exclusivos numéricos. Uma regra incompatível com a versão, schema ou mapa de respostas malformado, ou estrutura inválida de resposta/mídia deixa o resultado **Parcial** sem inventar uma reprovação. `$ref` local em respostas pode ser resolvido dentro de limites; referências externas nunca são carregadas. Enums, formatos, padrões, composição (`oneOf`/`allOf`/`anyOf`), `readOnly`/`writeOnly`, conteúdo XML/texto estruturado, ciclos e limites excedidos também deixam o resultado **Parcial** em vez de passar silenciosamente. Valores de `example`, `examples`, `default` e descrições não são copiados para o contrato. A request continua livre para edição; se método ou rota efetiva mudarem, a tela avisa que o contrato importado não se aplica à chamada atual.
 
 ## Ambientes e variáveis
 
