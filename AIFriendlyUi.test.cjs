@@ -29,7 +29,9 @@ test('agent-facing controls have a versioned, named DOM contract', async () => {
     ['export-collection', 'collection.export'],
     ['run-collection', 'runner.open'],
     ['manage-environments', 'settings.open'],
-    ['refresh-agent-safe-state', 'agent.snapshot.refresh']
+    ['refresh-agent-safe-state', 'agent.snapshot.refresh'],
+    ['ai-friendly-trigger', 'agent.help.open'],
+    ['copy-maestri-agent-prompt', 'agent.prompt.copy']
   ]);
 
   for (const [id, action] of expected) {
@@ -44,7 +46,8 @@ test('agent-facing controls have a versioned, named DOM contract', async () => {
     ['query-params', 'request-params'], ['headers', 'request.headers'], ['body-mode', 'request.body-mode'],
     ['body', 'request.body'], ['auth-type', 'request.auth-type'], ['response-status', 'response.status'],
     ['response-headers', 'response.headers'], ['response-body', 'response.body'],
-    ['agent-safe-state-output', 'agent.safe-state']
+    ['agent-safe-state-output', 'agent.safe-state'],
+    ['ai-friendly-status', 'agent.capability-status']
   ]) {
     assert.ok(fields.has(id), `expected field or region #${id}`);
     assert.equal(attribute(fields.get(id), 'data-vortix-field') ?? attribute(fields.get(id), 'data-vortix-region'), field, `#${id} contract name`);
@@ -154,6 +157,8 @@ test('Maestri Portal guide describes safe UI-only operation and available contro
   assert.match(guide, /window\.vortixAgent\.describe\(\)/);
   assert.match(guide, /window\.vortixAgent\.snapshot\(\)/);
   assert.match(guide, /agent-safe-state/);
+  assert.match(guide, /IA v2 pronta/);
+  assert.match(guide, /agent\.help\.open/);
   assert.match(guide, /GET|HEAD|OPTIONS/);
   assert.match(guide, /POST[\s\S]*PUT[\s\S]*PATCH[\s\S]*DELETE/);
   assert.match(guide, /consentimento explícito/i);
@@ -161,6 +166,57 @@ test('Maestri Portal guide describes safe UI-only operation and available contro
   assert.match(guide, /Antes de enviar qualquer request, desmarque[\s\S]{0,140}Salvar credenciais de Auth[\s\S]{0,100}(?:histórico|histórico é gravado)/i);
   assert.match(guide, /Nunca.*(?:endpoint|fetch|guard)/i);
   assert.match(readme, /## Automação por IA com Maestri Portal/);
+  assert.match(readme, /selo \*\*IA v2 pronta\*\*/);
   assert.match(readme, /\[guia para agentes no Maestri Portal\]\(docs\/maestri-portal\.md\)/i);
   assert.match(readme, /\.agents\/skills\/vortix-maestri-operator\/SKILL\.md/);
+});
+
+test('AI readiness reports ready only for the supported bridge contract', async () => {
+  const app = await fs.readFile(path.join(root, 'wwwroot', 'app.js'), 'utf8');
+  const start = app.indexOf('function resolveAiFriendlyStatus(');
+  const end = app.indexOf('\nfunction updateAiFriendlyStatus(', start);
+  assert.ok(start >= 0 && end > start, 'AI readiness resolver should exist');
+  const resolve = vm.runInNewContext(`${app.slice(start, end)}; resolveAiFriendlyStatus`, {});
+
+  assert.equal(resolve({ contractVersion: 2, describe() {}, snapshot() {} }).state, 'ready');
+  assert.equal(resolve({ contractVersion: 1, describe() {}, snapshot() {} }).state, 'outdated');
+  assert.equal(resolve({ contractVersion: 2, snapshot() {} }).state, 'unavailable');
+  assert.equal(resolve(null).state, 'unavailable');
+});
+
+test('Maestri prompt button copies the prompt shown in the help dialog', async () => {
+  const app = await fs.readFile(path.join(root, 'wwwroot', 'app.js'), 'utf8');
+  const start = app.indexOf('async function copyMaestriAgentPrompt(');
+  const end = app.indexOf('\nfunction vaultCaptureError(', start);
+  assert.ok(start >= 0 && end > start, 'Maestri prompt copy handler should exist');
+  const prompt = { textContent: '  PROMPT_DO_VORTIX_PARA_MAESTRI  ' };
+  let copied = '';
+  const messages = [];
+  const copy = vm.runInNewContext(`${app.slice(start, end)}; copyMaestriAgentPrompt`, {
+    byId: id => id === 'maestri-agent-prompt' ? prompt : null,
+    navigator: { clipboard: { writeText: async value => { copied = value; } } },
+    showToast: (...args) => messages.push(args)
+  });
+
+  await copy();
+  assert.equal(copied, 'PROMPT_DO_VORTIX_PARA_MAESTRI');
+  assert.equal(messages[0][2], 'success');
+});
+
+test('Maestri prompt copy reports a blocked clipboard without exposing prompt text', async () => {
+  const app = await fs.readFile(path.join(root, 'wwwroot', 'app.js'), 'utf8');
+  const start = app.indexOf('async function copyMaestriAgentPrompt(');
+  const end = app.indexOf('\nfunction vaultCaptureError(', start);
+  assert.ok(start >= 0 && end > start, 'Maestri prompt copy handler should exist');
+  const secretPrompt = 'PRIVATE_PROMPT_SENTINEL';
+  const messages = [];
+  const copy = vm.runInNewContext(`${app.slice(start, end)}; copyMaestriAgentPrompt`, {
+    byId: id => id === 'maestri-agent-prompt' ? { textContent: secretPrompt } : null,
+    navigator: { clipboard: { writeText: async () => { throw Error('clipboard denied'); } } },
+    showToast: (...args) => messages.push(args)
+  });
+
+  await copy();
+  assert.equal(messages[0][2], 'error');
+  assert.equal(JSON.stringify(messages).includes(secretPrompt), false);
 });

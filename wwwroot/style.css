@@ -124,6 +124,15 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .breadcrumb strong { overflow: hidden; color: #d9e0e8; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .breadcrumb-separator { color: #4e5965; }
 .workspace-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+.ai-friendly-trigger { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; min-height: 30px; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border)); border-radius: 999px; padding: 5px 10px; color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.ai-friendly-trigger:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+.ai-friendly-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ai-friendly-trigger[data-state="outdated"] { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); color: var(--warning); background: color-mix(in srgb, var(--warning) 8%, var(--surface)); }
+.ai-friendly-trigger[data-state="unavailable"] { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
+.ai-friendly-dot { display: block; width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--muted); }
+.ai-friendly-status[data-state="ready"] .ai-friendly-dot, .ai-friendly-trigger[data-state="ready"] .ai-friendly-dot { background: var(--accent); }
+.ai-friendly-status[data-state="outdated"] .ai-friendly-dot, .ai-friendly-trigger[data-state="outdated"] .ai-friendly-dot { background: var(--warning); }
+.ai-friendly-status[data-state="unavailable"] .ai-friendly-dot, .ai-friendly-trigger[data-state="unavailable"] .ai-friendly-dot { background: var(--danger); }
 .environment-picker { display: grid; gap: 2px; margin: 0; }
 .environment-picker span { color: #84909d; font-size: 12px; font-weight: 800; letter-spacing: .1em; }
 .environment-picker select { width: 142px; border: 0; padding: 3px 20px 3px 0; color: #c9d4de; background: transparent; font-size: 12px; }
@@ -709,6 +718,21 @@ textarea.compact { min-height: 165px; }
 .dialog-note p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .dialog-actions { position: sticky; z-index: 1; bottom: 0; flex: 0 0 auto; justify-content: flex-end; border-color: var(--border); margin: auto 0 0; padding: 14px 24px 20px; background: var(--surface); }
 .dialog-actions .button { min-height: 36px; padding-inline: 14px; font-size: 12px; }
+.ai-help-dialog { width: min(620px, calc(100vw - 32px)); }
+.ai-help-dialog[open] { display: flex; flex-direction: column; }
+.ai-help-dialog .dialog-heading { margin: 0; }
+.ai-help-content { flex: 1 1 auto; min-height: 0; gap: 18px; }
+.ai-friendly-status { align-items: center; margin: 0; }
+.ai-friendly-status > div { min-width: 0; }
+.ai-help-steps { display: grid; gap: 9px; margin: 0; padding-left: 22px; color: var(--text); font-size: 12px; line-height: 1.55; }
+.ai-help-steps li { padding-left: 3px; }
+.ai-help-steps code { color: var(--accent); }
+.ai-help-prompt { border-top: 1px solid var(--border); padding-top: 12px; }
+.ai-help-prompt summary { color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer; }
+.ai-help-prompt pre { max-height: 190px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; margin: 10px 0; padding: 11px; color: var(--text); background: var(--code); font: 12px/1.55 var(--app-font-family); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-help-links { display: flex; flex-wrap: wrap; gap: 10px 16px; border-top: 1px solid var(--border); padding-top: 13px; }
+.ai-help-links a { color: var(--accent); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+.ai-help-links a:hover { color: var(--text); }
 .app-dialog form > label { margin: 15px 24px 6px; color: var(--text); font-size: 12px; }
 .app-dialog form > input, .app-dialog form > select { width: calc(100% - 48px); margin-inline: 24px; }
 .app-dialog form > .hint { margin: 12px 24px; }

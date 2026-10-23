@@ -22,6 +22,12 @@ window.vortixAgent.snapshot() // estado resumido e seguro da tela atual
 
 `snapshot()` informa método, presença de campos, contagens, tipo Auth e metadados da resposta (status HTTP e estado). Omite conteúdo da resposta, URL, rota, valores de Params/Headers/Body/Auth e variáveis do ambiente. O painel **Estado seguro para IA**, dentro de **Referências e origens**, mostra o mesmo JSON ao ser solicitado. Esse estado serve para orientar a navegação; não dispara chamadas e não comprova consentimento nem autorização para gravar.
 
+## Ajuda dentro do Vortix
+
+O selo **IA v2 pronta** na barra superior verifica se o bridge compatível está carregado. Se estiver ausente ou desatualizado, o selo mostra esse estado. Clique nele para abrir instruções, links para a documentação e um prompt copiável.
+
+No Maestri, abra o Vortix em um Portal e conecte o Portal ao terminal do agente. O Maestri usa sua CLI para controlar o navegador; não precisa de MCP. Para reutilizar as instruções, copie o prompt do Vortix e salve como responsabilidade **Vortix Operator** em **Ajustes → Agentes**. Os controles de ajuda também aparecem no contrato DOM como `agent.help.open` e `agent.prompt.copy`.
+
 Prefira localizar elementos por papel e nome acessível. `data-vortix-action`, `data-vortix-field` e `data-vortix-region` são referências estáveis para encontrar controles, campos e áreas:
 
 | Ação | Seletor | Para que serve |
@@ -29,6 +35,8 @@ Prefira localizar elementos por papel e nome acessível. `data-vortix-action`, `
 | Nova request | `[data-vortix-action="request.new"]` | Abrir uma request em branco |
 | Nova coleção | `[data-vortix-action="collection.new"]` | Criar uma coleção |
 | Enviar request | `[data-vortix-action="request.send"]` | Enviar a request atual pela interface |
+| Abrir ajuda de IA | `[data-vortix-action="agent.help.open"]` | Consultar status, instruções e prompt copiável |
+| Copiar prompt Maestri | `[data-vortix-action="agent.prompt.copy"]` | Copiar o prompt mostrado na ajuda |
 | Salvar request | `[data-vortix-action="request.save"]` | Salvar na coleção escolhida |
 | Selecionar ambiente | `[data-vortix-action="environment.select"]` | Trocar o ambiente ativo |
 | Gerenciar ambientes | `[data-vortix-action="environment.manage"]` | Criar ou editar ambientes |
@@ -39,9 +47,9 @@ Prefira localizar elementos por papel e nome acessível. `data-vortix-action`, `
 | Configurações | `[data-vortix-action="settings.open"]` | Abrir configurações |
 | Gerar estado seguro | `[data-vortix-action="agent.snapshot.refresh"]` | Mostrar o resumo JSON sem valores da request |
 
-Campos úteis usam `data-vortix-field`: `request.method`, `request.route`, `request.base-url`, `request.headers`, `request.body-mode`, `request.body`, `request.auth-type`, `response.status`, `response.headers`, `response.body` e `agent.safe-state`. `request-params` é uma região com as linhas de query Params. Identificadores ajudam a localizar o campo; não autorizam ler ou repetir valores sensíveis.
+Campos úteis usam `data-vortix-field`: `request.method`, `request.route`, `request.base-url`, `request.headers`, `request.body-mode`, `request.body`, `request.auth-type`, `response.status`, `response.headers`, `response.body`, `agent.safe-state` e `agent.capability-status`. `request-params` é uma região com as linhas de query Params. Identificadores ajudam a localizar o campo; não autorizam ler ou repetir valores sensíveis.
 
-As áreas principais usam `data-vortix-region`: `collections`, `history`, `environment`, `request-workspace`, `request-editor`, `request-editor-tabs`, `request-response` e `agent-safe-state`. As abas Params, Headers, Body, Auth, Scripts e Testes são `tab`; cada uma aponta para seu painel por `aria-controls`, e cada painel retorna a referência por `aria-labelledby`. Use as teclas ←/→, Home e End para navegar pelas abas.
+As áreas principais usam `data-vortix-region`: `collections`, `history`, `environment`, `request-workspace`, `request-editor`, `request-editor-tabs`, `request-response`, `agent-safe-state` e `agent-help`. As abas Params, Headers, Body, Auth, Scripts e Testes são `tab`; cada uma aponta para seu painel por `aria-controls`, e cada painel retorna a referência por `aria-labelledby`. Use as teclas ←/→, Home e End para navegar pelas abas.
 
 ## Fluxo recomendado
 
