@@ -59,11 +59,14 @@ function createDocument() {
 
   const actions = [
     element({ id: 'send-request', dataset: { vortixAction: 'request.send' }, label: 'Enviar' }),
-    element({ id: 'refresh-agent-safe-state', dataset: { vortixAction: 'agent.snapshot.refresh' }, label: 'Gerar estado seguro' })
+    element({ id: 'refresh-agent-safe-state', dataset: { vortixAction: 'agent.snapshot.refresh' }, label: 'Gerar estado seguro' }),
+    element({ id: 'ai-friendly-trigger', dataset: { vortixAction: 'agent.help.open' }, label: 'IA v2 pronta' }),
+    element({ id: 'copy-maestri-agent-prompt', dataset: { vortixAction: 'agent.prompt.copy' }, label: 'Copiar prompt' })
   ];
   const fields = [
     element({ id: 'method', dataset: { vortixField: 'request.method' }, value: 'PATCH' }),
-    element({ id: 'bearer-token', dataset: { vortixField: 'request.auth.bearer' }, value: values.auth, type: 'password' })
+    element({ id: 'bearer-token', dataset: { vortixField: 'request.auth.bearer' }, value: values.auth, type: 'password' }),
+    element({ id: 'ai-friendly-status', dataset: { vortixField: 'agent.capability-status' }, textContent: 'IA v2 pronta' })
   ];
   const regions = [element({ id: 'request-editor', dataset: { vortixRegion: 'request-editor' } })];
   const tabs = [element({ id: 'workspace-tab-0', dataset: { workspaceTabId: 'tab-1' }, label: 'Users' })];
@@ -115,6 +118,8 @@ test('Vortix loads contract v2 bridge and safe snapshot leaks no user values', a
   const description = api.describe();
   assert.equal(description.contractVersion, 2);
   assert.ok(description.actions.some(action => action.name === 'request.send'));
+  assert.ok(description.actions.some(action => action.name === 'agent.help.open'));
+  assert.ok(description.actions.some(action => action.name === 'agent.prompt.copy'));
   assert.ok(description.fields.some(field => field.name === 'request.method'));
   assert.ok(description.regions.some(region => region.name === 'request-editor'));
 

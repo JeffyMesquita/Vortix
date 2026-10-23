@@ -2507,6 +2507,27 @@ function refreshAgentSafeState(){
     output.textContent=JSON.stringify(snapshot,null,2);output.hidden=false;
   }catch(error){showToast('Estado seguro indisponível',error.message||'Atualize a página e tente novamente.','error');}
 }
+function resolveAiFriendlyStatus(agent){
+  if(!agent||typeof agent.describe!=='function'||typeof agent.snapshot!=='function')return{state:'unavailable',label:'IA indisponível',message:'O bridge de IA não carregou nesta página. Atualize o Vortix e tente novamente.'};
+  if(agent.contractVersion!==2)return{state:'outdated',label:'IA desatualizada',message:`Bridge encontrado, mas contrato v${String(agent.contractVersion??'?')} não corresponde ao v2 esperado. Atualize o Vortix.`};
+  return{state:'ready',label:'IA v2 pronta',message:'Contrato v2 ativo. O bridge só expõe controles e metadados seguros; não envia requests nem lê o armazenamento.'};
+}
+function updateAiFriendlyStatus(){
+  const status=resolveAiFriendlyStatus(window.vortixAgent),trigger=byId('ai-friendly-trigger'),label=byId('ai-friendly-trigger-label'),summary=byId('ai-friendly-status'),title=byId('ai-friendly-status-title'),message=byId('ai-friendly-status-text');
+  if(trigger){trigger.dataset.state=status.state;trigger.title=status.message;trigger.setAttribute('aria-label',`${status.label}. Abrir ajuda para usar IA.`);}
+  if(label)label.textContent=status.label;
+  if(summary)summary.dataset.state=status.state;
+  if(title)title.textContent=status.label;
+  if(message)message.textContent=status.message;
+  return status;
+}
+function openAiFriendlyHelp(){updateAiFriendlyStatus();byId('ai-help-dialog').showModal();}
+async function copyMaestriAgentPrompt(){
+  const prompt=byId('maestri-agent-prompt')?.textContent?.trim();
+  if(!prompt){showToast('Prompt indisponível','Atualize a página e tente novamente.','error');return;}
+  try{await navigator.clipboard.writeText(prompt);showToast('Prompt copiado','Cole nas instruções da responsabilidade Vortix Operator no Maestri.','success');}
+  catch{showToast('Falha ao copiar prompt','O navegador bloqueou a área de transferência. Selecione o texto e copie manualmente.','error');}
+}
 function vaultCaptureError(request){
   return RunnerLogic.vaultCaptureEnvironmentError({
     loading:secretVaultLoading,
@@ -3111,6 +3132,7 @@ async function requestTokenFromHelper(){
 }
 function addEventListeners(){
   const quickOpenDialog = byId('quick-open-dialog'), quickOpenQuery = byId('quick-open-query');
+  byId('ai-friendly-trigger').onclick=openAiFriendlyHelp;byId('close-ai-help').onclick=()=>byId('ai-help-dialog').close();byId('close-ai-help-done').onclick=()=>byId('ai-help-dialog').close();byId('copy-maestri-agent-prompt').onclick=()=>void copyMaestriAgentPrompt();
   byId('compare-history-responses').onclick=()=>void openHistoryComparison();byId('close-history-compare').onclick=()=>byId('history-compare-dialog').close();byId('close-history-compare-done').onclick=()=>byId('history-compare-dialog').close();
   byId('quick-open-button').onclick = openQuickOpen;quickOpenQuery.addEventListener('input', renderQuickOpenResults);quickOpenQuery.addEventListener('keydown', handleQuickOpenQueryKeydown);['quick-open-method-filter','quick-open-status-filter','quick-open-scope-filter'].forEach(id=>byId(id).addEventListener('change',renderQuickOpenResults));
   quickOpenDialog.addEventListener('click', event => { if (event.target === quickOpenDialog) quickOpenDialog.close(); });
@@ -3170,7 +3192,7 @@ function addEventListeners(){
   oauth2TokenButton.onclick=()=>void requestOAuthClientCredentialsToken();byId('oauth-pkce-start').onclick=()=>void requestOAuthAuthorizationCodeToken();byId('oauth-pkce-cancel').onclick=cancelOAuthPkceAuthorization;byId('oauth-pkce-redirect-copy').onclick=copyOAuthPkceRedirectUri;sendButton.onclick=sendCurrentRequest;tokenRequestButton.onclick=requestTokenFromHelper;
 }
 async function startApp(){
-  addEventListeners();renderQueryParams([]);renderMultipartFields([]);renderGraphqlFields({});updateAuthTypeUi();updateBodyModeUi();renderBodyHighlight();
+  addEventListeners();updateAiFriendlyStatus();renderQueryParams([]);renderMultipartFields([]);renderGraphqlFields({});updateAuthTypeUi();updateBodyModeUi();renderBodyHighlight();
   try{await initializeHostingMode();await initializeDb();await loadSecretVaultForActiveEnvironment();await loadTokenRequestConfig();await loadOAuth2TokenConfig();applyTheme(activeTheme);applyTypography();applyUiScale();renderCollectionTree();renderEnvironmentSelect();await loadOAuthPkceConfig();if(!byId('base-url').value)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';await renderHistory();await initializeWorkspaceTabs();updateGuard();updateCopyButtons();updateTokenButton();updateJsonTools();updateResponseCaptureUi();
     byId('protect-existing-secrets').hidden=hostedMode;
     if(hostedMode){byId('sidebar-storage-note').textContent='Coleções e histórico neste navegador';document.querySelector('.sidebar-bottom strong').textContent='Workspace do navegador';byId('history-panel').querySelector('.history-hint').textContent='Histórico e dados ficam neste navegador; exporte backups para transferi-los.';byId('app-storage-note').textContent='Coleções, ambientes, requests e histórico ficam no IndexedDB deste navegador, sem criptografia automática. Use Backup com senha para transportar uma cópia protegida.';}
