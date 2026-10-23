@@ -34,7 +34,7 @@ Closes #
 
 - [ ] `dotnet restore ./VortixApiClient.csproj`
 - [ ] `dotnet build ./VortixApiClient.csproj -c Release`
-- [ ] `node --test ./RunnerLogic.test.cjs ./VortixRunner.test.cjs`
+- [ ] `node --test ./RunnerLogic.test.cjs ./VortixRunner.test.cjs ./AIFriendlyUi.test.cjs`
 - [ ] Testes PowerShell aplicáveis
 - [ ] Teste manual descrito abaixo
 
