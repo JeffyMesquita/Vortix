@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#15191f">
+  <meta name="vortix-agent-contract" content="1">
   <title>Vortix — API Client</title>
   <link rel="icon" type="image/svg+xml" href="/vortix-mark.svg">
   <link rel="preload" href="/fonts/fira-code-latin.woff2" as="font" type="font/woff2" crossorigin>
@@ -21,29 +22,29 @@
         <span><strong>Vortix</strong><small>API CLIENT</small></span>
       </a>
       <div class="sidebar-tools">
-        <button class="new-request-button" id="new-request" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg> Nova requisição</button>
-        <button class="icon-button" id="add-collection" type="button" aria-label="Nova coleção" title="Nova coleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg></button>
+        <button class="new-request-button" id="new-request" data-vortix-action="request.new" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg> Nova requisição</button>
+        <button class="icon-button" id="add-collection" data-vortix-action="collection.new" type="button" aria-label="Nova coleção" title="Nova coleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg></button>
       </div>
 
       <section class="side-section collections-section" aria-labelledby="collections-heading">
         <div class="side-section-heading">
           <h2 id="collections-heading">Coleções</h2>
           <div class="collection-tools">
-            <button class="icon-button small-icon quick-open-trigger" id="quick-open-button" type="button" aria-label="Buscar requisição" title="Buscar requisição (Ctrl+K)">
+            <button class="icon-button small-icon quick-open-trigger" id="quick-open-button" data-vortix-action="collection.search" type="button" aria-label="Buscar requisição" title="Buscar requisição (Ctrl+K)">
               <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
             </button>
-            <button class="icon-button small-icon" id="import-collection" type="button" aria-label="Importar coleção, OpenAPI JSON, cURL ou HTTPie" title="Importar coleção JSON, OpenAPI JSON ou comando cURL/HTTPie"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"></path></svg></button>
-            <button class="icon-button small-icon" id="export-collection" type="button" aria-label="Exportar coleção selecionada" title="Exportar coleção selecionada"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 0 4 4m-4-4L8 7M5 12v7h14v-7"></path></svg></button>
-            <button class="icon-button small-icon" id="run-collection" type="button" aria-label="Executar coleção ou pasta selecionada" title="Runner da seleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8a1 1 0 0 1 1.5-.86l11.2 7.2a1 1 0 0 1 0 1.72l-11.2 7.2a1 1 0 0 1-1.5-.86z"></path></svg></button>
-            <button class="icon-button small-icon" id="add-collection-heading" type="button" aria-label="Adicionar coleção" title="Adicionar coleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg></button>
+            <button class="icon-button small-icon" id="import-collection" data-vortix-action="collection.import" type="button" aria-label="Importar coleção, OpenAPI JSON, cURL ou HTTPie" title="Importar coleção JSON, OpenAPI JSON ou comando cURL/HTTPie"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"></path></svg></button>
+            <button class="icon-button small-icon" id="export-collection" data-vortix-action="collection.export" type="button" aria-label="Exportar coleção selecionada" title="Exportar coleção selecionada"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 0 4 4m-4-4L8 7M5 12v7h14v-7"></path></svg></button>
+            <button class="icon-button small-icon" id="run-collection" data-vortix-action="runner.open" type="button" aria-label="Executar coleção ou pasta selecionada" title="Runner da seleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8a1 1 0 0 1 1.5-.86l11.2 7.2a1 1 0 0 1 0 1.72l-11.2 7.2a1 1 0 0 1-1.5-.86z"></path></svg></button>
+            <button class="icon-button small-icon" id="add-collection-heading" data-vortix-action="collection.new" type="button" aria-label="Adicionar coleção" title="Adicionar coleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg></button>
           </div>
           <input id="import-collection-file" type="file" accept=".json,application/json" hidden>
         </div>
-        <div id="collections-tree" class="collections-tree"></div>
+        <div id="collections-tree" class="collections-tree" data-vortix-region="collections"></div>
         <p id="collections-empty" class="sidebar-empty" hidden>Organize requests em coleções e pastas.</p>
       </section>
 
-      <details class="history-panel side-section" id="history-panel">
+      <details class="history-panel side-section" id="history-panel" data-vortix-region="history">
         <summary><span>Histórico</span><span class="history-count" id="history-count">0</span></summary>
         <p class="history-hint">Responses salvas neste computador. Marque duas para comparar.</p>
         <div class="history-list" id="request-history"></div>
@@ -61,10 +62,10 @@
       <header class="workspace-bar">
         <div class="breadcrumb"><span>Workspace</span><span class="breadcrumb-separator">/</span><strong id="request-title">Nova requisição</strong></div>
         <div class="workspace-actions">
-          <label class="environment-picker" for="environment-select"><span>AMBIENTE</span><select id="environment-select" aria-label="Ambiente ativo" disabled><option value="" selected disabled>Carregando ambientes…</option></select></label>
-          <button class="button secondary manage-environments-direct" id="manage-environments-direct" type="button">Gerenciar ambientes</button>
-          <button class="icon-button environment-settings" id="manage-environments" type="button" title="Configurações" aria-label="Configurações"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"></circle><path d="m19.4 13.5 1.1.8-1.3 2.3-1.3-.5a8 8 0 0 1-1.5.8l-.2 1.5h-2.6l-.2-1.5a8 8 0 0 1-1.5-.8l-1.3.5-1.3-2.3 1.1-.8a8 8 0 0 1 0-1.6l-1.1-.8 1.3-2.3 1.3.5a8 8 0 0 1 1.5-.8l.2-1.5h2.6l.2 1.5a8 8 0 0 1 1.5.8l1.3-.5 1.3 2.3-1.1.8a8 8 0 0 1 0 1.6z"></path></svg></button>
-          <button class="button secondary save-request" id="save-collection-request" type="button">Salvar</button>
+          <label class="environment-picker" for="environment-select"><span>AMBIENTE</span><select id="environment-select" data-vortix-action="environment.select" data-vortix-region="environment" aria-label="Ambiente ativo" disabled><option value="" selected disabled>Carregando ambientes…</option></select></label>
+          <button class="button secondary manage-environments-direct" id="manage-environments-direct" data-vortix-action="environment.manage" type="button">Gerenciar ambientes</button>
+          <button class="icon-button environment-settings" id="manage-environments" data-vortix-action="settings.open" type="button" title="Configurações" aria-label="Configurações"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"></circle><path d="m19.4 13.5 1.1.8-1.3 2.3-1.3-.5a8 8 0 0 1-1.5.8l-.2 1.5h-2.6l-.2-1.5a8 8 0 0 1-1.5-.8l-1.3.5-1.3-2.3 1.1-.8a8 8 0 0 1 0-1.6l-1.1-.8 1.3-2.3 1.3.5a8 8 0 0 1 1.5-.8l.2-1.5h2.6l.2 1.5a8 8 0 0 1 1.5.8l1.3-.5 1.3 2.3-1.1.8a8 8 0 0 1 0 1.6z"></path></svg></button>
+          <button class="button secondary save-request" id="save-collection-request" data-vortix-action="request.save" type="button">Salvar</button>
         </div>
       </header>
 
@@ -75,20 +76,20 @@
         </button>
       </div>
 
-      <div class="workspace-grid" id="request-workspace-panel" role="tabpanel">
-        <section class="editor-column" aria-label="Editor da requisição">
+      <div class="workspace-grid" id="request-workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-0" data-vortix-region="request-workspace">
+        <section class="editor-column" aria-label="Editor da requisição" data-vortix-region="request-editor">
           <div class="request-line">
             <label class="visually-hidden" for="method">Método</label>
-            <select id="method" class="method-select method-get" aria-label="Método HTTP">
+            <select id="method" data-vortix-field="request.method" class="method-select method-get" aria-label="Método HTTP">
               <option>GET</option><option>HEAD</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>OPTIONS</option>
             </select>
             <label class="visually-hidden" for="route">Rota</label>
-            <input id="route" class="route-input" type="text" autocomplete="off" spellcheck="false" aria-label="Rota da API" placeholder="/v1/resource">
+            <input id="route" data-vortix-field="request.route" class="route-input" type="text" autocomplete="off" spellcheck="false" aria-label="Rota da API" placeholder="/v1/resource">
             <button class="button secondary request-curl-button" id="generate-curl" type="button" title="Gerar comando cURL">cURL</button>
-            <button class="button primary send-button" id="send-request" type="button"><span aria-hidden="true">▶</span> Enviar</button>
+            <button class="button primary send-button" id="send-request" data-vortix-action="request.send" type="button"><span aria-hidden="true">▶</span> Enviar</button>
           </div>
           <label class="base-url-label" for="base-url">URL base</label>
-          <div class="base-url-wrap"><span class="base-url-icon" aria-hidden="true">↗</span><input id="base-url" type="url" autocomplete="off" placeholder="https://api.example.com/" spellcheck="false"></div>
+          <div class="base-url-wrap"><span class="base-url-icon" aria-hidden="true">↗</span><input id="base-url" data-vortix-field="request.base-url" type="url" autocomplete="off" placeholder="https://api.example.com/" spellcheck="false"></div>
           <p class="hint base-url-hint">Use URL base por ambiente. HTTPS é recomendado; HTTP em localhost funciona sem configuração adicional.</p>
           <label class="check-row insecure-http-option" for="allow-insecure-http"><input id="allow-insecure-http" type="checkbox"><span>Permitir HTTP sem TLS para esta request fora de localhost. A opção fica salva com a request.</span></label>
 
@@ -101,36 +102,36 @@
             </div>
           </details>
 
-          <nav class="editor-tabs" aria-label="Seções da requisição" role="tablist">
-            <button class="editor-tab active" type="button" role="tab" aria-selected="true" data-editor-tab="params">Params <span class="tab-count" id="params-count">0</span></button>
-            <button class="editor-tab" type="button" role="tab" aria-selected="false" data-editor-tab="headers">Headers</button>
-            <button class="editor-tab" type="button" role="tab" aria-selected="false" data-editor-tab="body">Body</button>
-            <button class="editor-tab" type="button" role="tab" aria-selected="false" data-editor-tab="auth">Auth</button>
-            <button class="editor-tab" type="button" role="tab" aria-selected="false" data-editor-tab="scripts">Scripts</button>
-            <button class="editor-tab" type="button" role="tab" aria-selected="false" data-editor-tab="tests">Testes</button>
+          <nav class="editor-tabs" id="request-editor-tabs" aria-label="Seções da requisição" role="tablist" data-vortix-region="request-editor-tabs">
+            <button class="editor-tab active" type="button" id="editor-tab-params" role="tab" aria-selected="true" aria-controls="editor-panel-params" tabindex="0" data-editor-tab="params">Params <span class="tab-count" id="params-count">0</span></button>
+            <button class="editor-tab" type="button" id="editor-tab-headers" role="tab" aria-selected="false" aria-controls="editor-panel-headers" tabindex="-1" data-editor-tab="headers">Headers</button>
+            <button class="editor-tab" type="button" id="editor-tab-body" role="tab" aria-selected="false" aria-controls="editor-panel-body" tabindex="-1" data-editor-tab="body">Body</button>
+            <button class="editor-tab" type="button" id="editor-tab-auth" role="tab" aria-selected="false" aria-controls="editor-panel-auth" tabindex="-1" data-editor-tab="auth">Auth</button>
+            <button class="editor-tab" type="button" id="editor-tab-scripts" role="tab" aria-selected="false" aria-controls="editor-panel-scripts" tabindex="-1" data-editor-tab="scripts">Scripts</button>
+            <button class="editor-tab" type="button" id="editor-tab-tests" role="tab" aria-selected="false" aria-controls="editor-panel-tests" tabindex="-1" data-editor-tab="tests">Testes</button>
           </nav>
 
-          <div class="tab-panel" data-editor-panel="params">
-            <div class="panel-heading"><div><h2>Query Params</h2><p>Parâmetros são adicionados à URL ao enviar.</p></div><button class="button secondary compact-button" id="add-query-param" type="button">＋ Adicionar</button></div>
+          <div class="tab-panel" id="editor-panel-params" role="tabpanel" aria-labelledby="editor-tab-params" data-editor-panel="params">
+            <div class="panel-heading"><div><h2>Query Params</h2><p>Parâmetros são adicionados à URL ao enviar.</p></div><button class="button secondary compact-button" id="add-query-param" data-vortix-action="request.params.add" type="button">＋ Adicionar</button></div>
             <div class="params-header"><span>CHAVE</span><span>VALOR</span><span></span></div>
-            <div id="query-params" class="query-params"></div>
+            <div id="query-params" class="query-params" data-vortix-region="request-params"></div>
             <p class="hint">Nomes repetidos e valores vazios são aceitos. Valores sensíveis são mascarados nos campos.</p>
           </div>
 
-          <div class="tab-panel" data-editor-panel="headers" hidden>
+          <div class="tab-panel" id="editor-panel-headers" role="tabpanel" aria-labelledby="editor-tab-headers" data-editor-panel="headers" hidden>
             <div class="panel-heading"><div><h2>Headers</h2><p>Um cabeçalho por linha no formato <code>Nome: valor</code>.</p></div></div>
             <label class="visually-hidden" for="headers">Cabeçalhos adicionais</label>
-            <textarea id="headers" class="compact code-input" rows="8" autocomplete="off" spellcheck="false">Accept: application/json</textarea>
+            <textarea id="headers" data-vortix-field="request.headers" class="compact code-input" rows="8" autocomplete="off" spellcheck="false">Accept: application/json</textarea>
             <p class="hint">Authorization é preenchido pelo campo Bearer na aba Auth.</p>
           </div>
 
-          <div class="tab-panel" data-editor-panel="body" hidden>
+          <div class="tab-panel" id="editor-panel-body" role="tabpanel" aria-labelledby="editor-tab-body" data-editor-panel="body" hidden>
             <div class="panel-heading"><div><h2>Request Body</h2><p>Escolha o formato do conteúdo; o Content-Type padrão é aplicado ao enviar.</p></div><div class="code-tools"><span class="language-badge" id="body-mode-badge">JSON</span><button class="text-button format-button" id="format-json" type="button" title="Formatar JSON">Identar</button><button class="text-button format-button" id="minify-json" type="button" title="Remover espaços do JSON">Compactar</button></div></div>
-            <div class="body-mode-row"><label for="body-mode">Formato</label><select id="body-mode"><option value="json">JSON</option><option value="text">Texto</option><option value="xml">XML</option><option value="urlencoded">Form URL-encoded</option><option value="multipart">Multipart form-data</option><option value="graphql">GraphQL</option></select><span class="hint" id="body-mode-hint">Content-Type: application/json</span></div>
+            <div class="body-mode-row"><label for="body-mode">Formato</label><select id="body-mode" data-vortix-field="request.body-mode"><option value="json">JSON</option><option value="text">Texto</option><option value="xml">XML</option><option value="urlencoded">Form URL-encoded</option><option value="multipart">Multipart form-data</option><option value="graphql">GraphQL</option></select><span class="hint" id="body-mode-hint">Content-Type: application/json</span></div>
             <div class="code-editor" id="raw-body-editor">
               <pre id="body-highlight" class="code-highlight" aria-hidden="true"></pre>
               <label class="visually-hidden" for="body">Conteúdo do body</label>
-              <textarea id="body" class="code-input" rows="15" autocomplete="off" spellcheck="false" placeholder="{\n  \"exemplo\": true\n}" aria-label="Conteúdo do body"></textarea>
+              <textarea id="body" data-vortix-field="request.body" class="code-input" rows="15" autocomplete="off" spellcheck="false" placeholder="{\n  \"exemplo\": true\n}" aria-label="Conteúdo do body"></textarea>
             </div>
             <div id="multipart-editor" class="multipart-editor" hidden>
               <div class="multipart-field-columns" aria-hidden="true"><span>Nome do campo</span><span>Tipo</span><span>Valor ou arquivo</span><span></span></div>
@@ -160,7 +161,7 @@
             </div>
           </div>
 
-          <div class="tab-panel auth-panel" data-editor-panel="auth" hidden>
+          <div class="tab-panel auth-panel" id="editor-panel-auth" role="tabpanel" aria-labelledby="editor-tab-auth" data-editor-panel="auth" hidden>
             <div class="panel-heading"><div><h2>Autentica&ccedil;&atilde;o</h2><p>Escolha como esta request comprova identidade.</p></div><span class="auth-badge" id="auth-type-badge">Bearer</span></div>
             <div class="auth-inheritance-row">
               <div><label for="auth-inheritance-mode">Autentica&ccedil;&atilde;o desta request</label>
@@ -173,7 +174,7 @@
               <button class="button secondary compact-button" id="save-auth-default" type="button">Salvar como padr&atilde;o</button>
             </div>
             <p class="hint auth-inheritance-source" id="auth-inheritance-source" role="status">Herdando autentica&ccedil;&atilde;o do n&iacute;vel mais pr&oacute;ximo.</p>            <label for="auth-type">Tipo de autentica&ccedil;&atilde;o</label>
-            <select id="auth-type"><option value="bearer">Bearer Token</option><option value="basic">Basic Auth</option><option value="apiKey">API Key</option><option value="none">Sem autentica&ccedil;&atilde;o</option></select>
+            <select id="auth-type" data-vortix-field="request.auth-type"><option value="bearer">Bearer Token</option><option value="basic">Basic Auth</option><option value="apiKey">API Key</option><option value="none">Sem autentica&ccedil;&atilde;o</option></select>
             <div id="auth-bearer-fields">
               <div class="token-row">
                 <label class="visually-hidden" for="bearer-token">Token Bearer</label>
@@ -264,7 +265,7 @@
               <button class="button secondary compact-button" id="oauth-pkce-cancel" type="button" hidden>Cancelar autorização</button>
             </details>
           </div>
-          <div class="tab-panel scripts-panel" data-editor-panel="scripts" hidden>
+          <div class="tab-panel scripts-panel" id="editor-panel-scripts" role="tabpanel" aria-labelledby="editor-tab-scripts" data-editor-panel="scripts" hidden>
             <section class="pre-request-section" aria-labelledby="pre-request-title">
               <div class="panel-heading">
                 <div><h2 id="pre-request-title">Antes da request</h2><p>Crie valores temporários para usar como <code>{{request_id}}</code>. Eles só existem nesta chamada.</p></div>
@@ -318,7 +319,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
             </section>
           </div>
 
-          <div class="tab-panel response-tests-panel" data-editor-panel="tests" hidden>
+          <div class="tab-panel response-tests-panel" id="editor-panel-tests" role="tabpanel" aria-labelledby="editor-tab-tests" data-editor-panel="tests" hidden>
             <div class="response-tests-heading">
               <div><h2 id="response-tests-title">Testes e contratos</h2><p>Valide o body JSON, status HTTP e campos da resposta ao enviar ou rodar a coleção.</p></div>
               <button class="button secondary compact-button" id="add-response-test" type="button">＋ Adicionar teste</button>
@@ -360,12 +361,12 @@ insomnia.environment.set("token", body.access_token);</code></pre>
           <div class="editor-foot"><span id="request-note" class="hint">GET, HEAD e OPTIONS consultam a API. POST, PUT, PATCH e DELETE exigem confirmação manual.</span></div>
         </section>
 
-        <section class="response-column" aria-labelledby="response-title">
+        <section class="response-column" aria-labelledby="response-title" data-vortix-region="request-response">
           <div class="response-topline">
             <div><p class="eyebrow">RESPOSTA</p><h1 id="response-title">Resultado</h1></div>
             <div class="response-title-actions">
-              <button class="copy-button" id="save-response-example" type="button" disabled title="Salva esta resposta na request da coleção">Salvar exemplo</button>
-              <span id="response-status" class="status idle" role="status" aria-live="polite">Aguardando</span>
+              <button class="copy-button" id="save-response-example" data-vortix-action="response.save-example" type="button" disabled title="Salva esta resposta na request da coleção">Salvar exemplo</button>
+              <span id="response-status" data-vortix-field="response.status" class="status idle" role="status" aria-live="polite">Aguardando</span>
             </div>
           </div>
           <p id="response-example-save-hint" class="hint response-example-save-hint" role="status"></p>
@@ -381,8 +382,8 @@ insomnia.environment.set("token", body.access_token);</code></pre>
             <p class="hint">O body fica salvo na coleção local e pode conter dados sensíveis.</p>
           </form>
           <div class="response-section">
-            <div class="output-heading"><h2>Cabeçalhos</h2><button class="copy-button" id="copy-headers" type="button" disabled>Copiar</button></div>
-            <pre id="response-headers" class="output empty">A resposta aparecerá aqui.</pre>
+            <div class="output-heading"><h2>Cabeçalhos</h2><button class="copy-button" id="copy-headers" data-vortix-action="response.copy-headers" type="button" disabled>Copiar</button></div>
+            <pre id="response-headers" data-vortix-field="response.headers" class="output empty">A resposta aparecerá aqui.</pre>
           </div>
           <div class="response-section response-body-section">
             <div class="output-heading response-body-heading">
@@ -393,7 +394,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
                   <button class="response-view-mode" type="button" data-response-view="tree" aria-pressed="false" disabled>Árvore</button>
                   <button class="response-view-mode" type="button" data-response-view="raw" aria-pressed="false" disabled>Raw</button>
                 </div>
-                <button class="copy-button" id="copy-body" type="button" disabled>Copiar</button>
+                <button class="copy-button" id="copy-body" data-vortix-action="response.copy-body" type="button" disabled>Copiar</button>
               </div>
             </div>
             <div class="response-search-row">
@@ -401,7 +402,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
               <input id="response-search" type="search" placeholder="Buscar no body" autocomplete="off" disabled>
               <span id="response-search-count" role="status" aria-live="polite"></span>
             </div>
-            <div id="response-body" class="output body-output empty">
+            <div id="response-body" data-vortix-field="response.body" class="output body-output empty">
               <pre id="response-body-pre" class="response-body-pre" tabindex="0" aria-label="Body da resposta">A resposta aparecerá aqui.</pre>
               <div id="response-tree" class="response-json-tree" hidden></div>
             </div>

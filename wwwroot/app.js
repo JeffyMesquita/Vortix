@@ -1352,9 +1352,9 @@ function restoreResponseTestDraft(tests){
 }
 function renderWorkspaceTabs(){
   const list=byId('workspace-tabs');if(!list)return;list.replaceChildren();
-  for(const tab of workspaceTabs){
+  for(const [index,tab] of workspaceTabs.entries()){
     const item=document.createElement('div');item.className='workspace-tab-item';item.setAttribute('role','presentation');
-    const select=document.createElement('button');select.className='workspace-tab';select.type='button';select.setAttribute('role','tab');select.setAttribute('aria-selected',String(tab.id===activeWorkspaceTabId));select.setAttribute('aria-controls','request-workspace-panel');select.tabIndex=tab.id===activeWorkspaceTabId?0:-1;select.dataset.workspaceTabId=tab.id;select.title=tab.title;select.onclick=()=>void activateWorkspaceTab(tab.id);
+    const select=document.createElement('button');select.id='workspace-tab-'+index;select.className='workspace-tab';select.type='button';select.setAttribute('role','tab');select.setAttribute('aria-selected',String(tab.id===activeWorkspaceTabId));select.setAttribute('aria-controls','request-workspace-panel');select.tabIndex=tab.id===activeWorkspaceTabId?0:-1;select.dataset.workspaceTabId=tab.id;select.title=tab.title;select.onclick=()=>void activateWorkspaceTab(tab.id);
     const methodName=String(tab.request?.method||tab.rawDraft?.method||'GET').toUpperCase(),methodClass=['get','post','put','patch','delete'].includes(methodName.toLowerCase())?` ${methodName.toLowerCase()}`:'';
     const badge=document.createElement('span');badge.className='workspace-tab-method'+methodClass;badge.textContent=methodName;
     const name=document.createElement('span');name.className='workspace-tab-name';name.textContent=tab.title||'Nova requisição';select.append(badge,name);
@@ -1362,6 +1362,7 @@ function renderWorkspaceTabs(){
     item.append(select);
     const close=document.createElement('button');close.className='workspace-tab-close';close.type='button';close.dataset.closeWorkspaceTab=tab.id;close.setAttribute('aria-label','Fechar '+(tab.title||'Nova requisição'));close.title='Fechar aba';close.innerHTML='<svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m4 4 8 8M12 4l-8 8"></path></svg>';close.onclick=event=>{event.stopPropagation();void closeWorkspaceTab(tab.id);};item.append(close);list.append(item);
   }
+  const active=list.querySelector('[role="tab"][aria-selected="true"]'),panel=byId('request-workspace-panel');if(active)panel.setAttribute('aria-labelledby',active.id);else panel.removeAttribute('aria-labelledby');
 }
 function persistableWorkspaceTabs(){return RunnerLogic.normalizeWorkspaceTabs({activeId:activeWorkspaceTabId,tabs:workspaceTabs.map(({id,title,request,activeSaved,collectionId,folderId,editorSection,saveBearerToken,dirty})=>({id,title,request,activeSaved,collectionId,folderId,editorSection,saveBearerToken,dirty}))});}
 async function persistWorkspaceTabsNow(){
@@ -2249,8 +2250,13 @@ function apiStatusToast(status,reason){
   const guide=status===401?'Confira o token Bearer.':status===403?'Confira as permissões do token.':status===404?'Confira a rota e a URL base.':status===429?'Aguarde antes de tentar novamente.':status>=500?'Falha no servidor da API; tente novamente mais tarde.':'Confira os campos e o JSON da requisição.';showToast('Erro da API',`${label}. ${guide}`,'error');
 }
 function setEditorTab(name){
-  document.querySelectorAll('[data-editor-tab]').forEach(button=>{const active=button.dataset.editorTab===name;button.classList.toggle('active',active);button.setAttribute('aria-selected',String(active));});
+  document.querySelectorAll('[data-editor-tab]').forEach(button=>{const active=button.dataset.editorTab===name;button.classList.toggle('active',active);button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;});
   document.querySelectorAll('[data-editor-panel]').forEach(panel=>panel.hidden=panel.dataset.editorPanel!==name);if(name==='body')renderBodyHighlight();if(name==='scripts')updateInsomniaScriptPreview();syncActiveWorkspaceTab(false);
+}
+function handleEditorTabKeydown(event){
+  if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+  const tabs=[...event.currentTarget.querySelectorAll('[data-editor-tab]')],current=tabs.indexOf(event.target.closest('[data-editor-tab]'));if(current<0||!tabs.length)return;
+  event.preventDefault();const nextIndex=event.key==='Home'?0:event.key==='End'?tabs.length-1:(current+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length,next=tabs[nextIndex];setEditorTab(next.dataset.editorTab);next.focus();
 }
 function responseTestField(labelText,control,id){
   const field=document.createElement('div');field.className='response-test-field';field.dataset.field=labelText.toLowerCase();
@@ -3135,7 +3141,7 @@ function addEventListeners(){
     const remove=event.target.closest('[data-remove-environment]');if(remove){const card=remove.closest('.environment-card');if(environmentDraft.length<=1){showToast('Mantenha um ambiente','O último ambiente não pode ser removido.','warning');return;}const environmentName=card.querySelector('.environment-name').value;if(await confirmWithDialog({eyebrow:'AMBIENTES',title:'Remover ambiente?',description:'O ambiente “'+environmentName+'” será removido do rascunho.',confirmLabel:'Remover ambiente',danger:true}))card.remove();return;}
     if(event.target.closest('[data-add-variable]')){const vars=event.target.closest('.environment-card').querySelector('.environment-vars');vars.append(makeVarRow());vars.lastElementChild.querySelector('.environment-var-name').focus();}
   });
-  document.querySelectorAll('[data-editor-tab]').forEach(button=>button.onclick=()=>setEditorTab(button.dataset.editorTab));byId('format-json').onclick=()=>formatBodyJson(false);byId('minify-json').onclick=()=>formatBodyJson(true);body.addEventListener('keydown',handleJsonKeydown);
+  const editorTabList=byId('request-editor-tabs');editorTabList.addEventListener('click',event=>{const button=event.target.closest('[data-editor-tab]');if(button)setEditorTab(button.dataset.editorTab);});editorTabList.addEventListener('keydown',handleEditorTabKeydown);byId('format-json').onclick=()=>formatBodyJson(false);byId('minify-json').onclick=()=>formatBodyJson(true);body.addEventListener('keydown',handleJsonKeydown);
   for(const id of ['response-variable-name','response-json-path','response-value-source','response-success-only','capture-response-variable','response-capture-target']){byId(id).addEventListener('input',updateResponseCaptureUi);byId(id).addEventListener('change',updateResponseCaptureUi);}
   byId('insert-token-script').onclick=async()=>{const isDefault=byId('response-variable-name').value.trim()==='token'&&byId('response-json-path').value.trim()==='access_token';if(!isDefault&&!(await confirmWithDialog({eyebrow:'EXEMPLO DE TOKEN',title:'Usar o exemplo de token?',description:'Os campos do extrator serão preenchidos com token e access_token.',confirmLabel:'Usar exemplo'})))return;byId('capture-response-variable').checked=true;byId('response-value-source').value='json';byId('response-variable-name').value='token';byId('response-json-path').value='access_token';byId('response-success-only').checked=true;byId('response-capture-target').value='environment';updateResponseCaptureUi();showToast('Exemplo pronto','Confira o caminho access_token na resposta antes de enviar.','info');};
   byId('copy-insomnia-script').onclick=async()=>{try{await navigator.clipboard.writeText(byId('insomnia-script-preview').textContent);showToast('Exemplo copiado','Script pronto para Scripts → After-response no Insomnia.','success');}catch{showToast('Falha ao copiar','O navegador bloqueou a área de transferência.','error');}};

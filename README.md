@@ -22,6 +22,7 @@
 - [Hospedagem pessoal no Render](#hospedagem-pessoal-no-render)
 - [Primeiro fluxo](#primeiro-fluxo)
 - [Busca rápida](#busca-rápida)
+- [Automação por IA com Maestri Portal](#automação-por-ia-com-maestri-portal)
 - [Autenticação](#autenticação)
   - [Auth herdada por coleção e pasta](#auth-herdada-por-coleção-e-pasta)
   - [OAuth 2.0 Client Credentials](#oauth-20-client-credentials)
@@ -240,6 +241,12 @@ Os filtros podem ser combinados e também funcionam sem texto:
 - **Coleção ou pasta:** limita a busca à coleção escolhida; uma pasta inclui também suas subpastas.
 
 O status vem dos exemplos já salvos; a busca não envia requests nem altera o histórico. A lista mostra até 30 resultados por vez.
+
+## Automação por IA com Maestri Portal
+
+O Vortix expõe um contrato DOM versionado (`vortix-agent-contract: 1`) com nomes estáveis em `data-vortix-action` e `data-vortix-field`, regiões identificadas e abas ligadas aos respectivos painéis. Um agente pode navegar pela interface usando os nomes acessíveis e esses seletores, sem depender de posições visuais frágeis.
+
+O [guia para agentes no Maestri Portal](docs/maestri-portal.md) traz um fluxo copiável para localizar controles, preparar requests, ler respostas e seguir as proteções de escrita. Use o Portal para interagir com o Vortix; não chame o proxy da API diretamente nem tente contornar as confirmações da interface. O guia também proíbe ler ou repetir credenciais e valores do cofre.
 
 ## Modos de body
 
@@ -960,7 +967,7 @@ As variáveis valem para o processo iniciado nesse terminal.
 ~~~powershell
 dotnet restore ./VortixApiClient.csproj
 dotnet build ./VortixApiClient.csproj -c Release
-node --test ./RunnerLogic.test.cjs ./VortixRunner.test.cjs
+node --test ./RunnerLogic.test.cjs ./VortixRunner.test.cjs ./AIFriendlyUi.test.cjs
 powershell -NoProfile -ExecutionPolicy Bypass -File ./HostingMode.test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File ./WorkspaceProtection.test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File ./AuthorizationCodePkce.test.ps1
@@ -1003,6 +1010,7 @@ Pull requests passam pela validação automática de build e testes em Windows. 
 | <code>GraphqlIntrospection.test.ps1</code> | Testa introspecção fixa contra mock local. |
 | <code>GraphqlSchemaCaptureServer.test.ps1</code> | Mock GraphQL loopback para o teste integrado. |
 | <code>RunnerLogic.test.cjs</code> | Testes de lógica JavaScript. |
+| <code>AIFriendlyUi.test.cjs</code> | Contrato DOM, abas acessíveis e guia para agentes do Maestri Portal. |
 | <code>WorkspaceProtection.test.ps1</code> | Teste integrado de persistência e proteção em banco temporário. |
 | <code>AuthorizationCodePkce.test.ps1</code> | Teste local de callback, state, PKCE, cancelamento e expiração. |
 | <code>OAuthAuthorizationServer.test.ps1</code> | Provedor OAuth fictício de loopback para testes. |
