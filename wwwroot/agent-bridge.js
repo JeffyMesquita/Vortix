@@ -11,6 +11,23 @@
     return value === undefined || value === null || value === '' ? null : String(value);
   };
   const hasValue = id => Boolean(String(byId(id)?.value || '').trim());
+  const bodyPresent = () => {
+    const mode = valueOf('body-mode');
+    if (mode === 'graphql') return hasValue('graphql-query');
+    if (mode === 'multipart') {
+      return Array.from(byId('multipart-fields-list')?.children || []).some(row => {
+        const fieldValue = selector => row.querySelector(selector)?.value;
+        const file = row.querySelector('[data-multipart-file]');
+        return Boolean(
+          String(fieldValue('[data-multipart-name]') || '').trim() ||
+          String(fieldValue('[data-multipart-value]') || '').trim() ||
+          file?.files?.length ||
+          row.dataset?.savedFileName
+        );
+      });
+    }
+    return hasValue('body');
+  };
   const authConfigured = () => {
     if (valueOf('auth-inheritance-mode') === 'none') return false;
     switch (valueOf('auth-type')) {
@@ -21,6 +38,8 @@
     }
   };
   const countChildren = id => byId(id)?.children?.length || 0;
+  const countEnvironments = select => Array.from(select?.options || [])
+    .filter(option => String(option?.value ?? '').trim() !== '').length;
   const responseState = () => {
     const status = byId('response-status');
     const states = ['idle', 'pending', 'ok', 'bad'];
@@ -65,7 +84,7 @@
       contractVersion: contractVersion(),
       environment: {
         selected: Boolean(environments?.value),
-        count: Math.max(0, (environments?.options?.length || 0) - 1)
+        count: countEnvironments(environments)
       },
       workspace: {
         openRequestTabs: all('#workspace-tabs [role="tab"]').length,
@@ -77,7 +96,7 @@
         routePresent: hasValue('route'),
         paramsCount: countChildren('query-params'),
         headersPresent: hasValue('headers'),
-        bodyPresent: hasValue('body'),
+        bodyPresent: bodyPresent(),
         bodyMode: valueOf('body-mode'),
         authType: valueOf('auth-type'),
         authConfigured: authConfigured(),

@@ -36,6 +36,7 @@ function createDocument() {
     ['headers', element({ id: 'headers', value: values.headers })],
     ['body-mode', element({ id: 'body-mode', value: 'json' })],
     ['body', element({ id: 'body', value: values.body })],
+    ['multipart-fields-list', element({ id: 'multipart-fields-list' })],
     ['auth-type', element({ id: 'auth-type', value: 'bearer' })],
     ['auth-inheritance-mode', element({ id: 'auth-inheritance-mode', value: 'custom' })],
     ['bearer-token', element({ id: 'bearer-token', value: values.auth, type: 'password' })],
@@ -87,7 +88,7 @@ function createDocument() {
       return [];
     }
   };
-  return { document: doc, values };
+  return { document: doc, values, elements };
 }
 
 test('Vortix loads contract v2 bridge and safe snapshot leaks no user values', async () => {
@@ -136,6 +137,49 @@ test('Vortix loads contract v2 bridge and safe snapshot leaks no user values', a
   for (const secret of Object.values(values)) assert.equal(serialized.includes(secret), false, `bridge leaked ${secret}`);
 });
 
+test('safe snapshot detects a GraphQL body from the active editor without exposing it', async () => {
+  const source = await fs.readFile(path.join(root, 'wwwroot', 'agent-bridge.js'), 'utf8');
+  const { document, elements } = createDocument();
+  elements.get('body-mode').value = 'graphql';
+  elements.get('body').value = '';
+  const querySecret = 'GRAPHQL_QUERY_SENTINEL';
+  elements.set('graphql-query', element({ id: 'graphql-query', value: `query { user(name: "${querySecret}") { id } }` }));
+  elements.set('graphql-variables', element({ id: 'graphql-variables', value: `{"name":"${querySecret}"}` }));
+  const window = {};
+  vm.runInNewContext(source, { window, document }, { filename: 'agent-bridge.js' });
+
+  const snapshot = window.vortixAgent.snapshot();
+  assert.equal(snapshot.request.bodyPresent, true);
+  assert.equal(JSON.stringify(snapshot).includes(querySecret), false);
+  elements.get('graphql-query').value = '';
+  elements.get('graphql-variables').value = '';
+  elements.get('body').value = 'STALE_RAW_BODY_SENTINEL';
+  assert.equal(window.vortixAgent.snapshot().request.bodyPresent, false);
+});
+
+test('safe snapshot detects multipart fields from the active editor without exposing values', async () => {
+  const source = await fs.readFile(path.join(root, 'wwwroot', 'agent-bridge.js'), 'utf8');
+  const { document, elements } = createDocument();
+  elements.get('body-mode').value = 'multipart';
+  elements.get('body').value = '';
+  const valueSecret = 'MULTIPART_VALUE_SENTINEL';
+  const controls = new Map([
+    ['[data-multipart-name]', element({ value: 'comment' })],
+    ['[data-multipart-value]', element({ value: valueSecret })],
+    ['[data-multipart-file]', { files: [] }]
+  ]);
+  elements.get('multipart-fields-list').children = [{ dataset: {}, querySelector: selector => controls.get(selector) ?? null }];
+  const window = {};
+  vm.runInNewContext(source, { window, document }, { filename: 'agent-bridge.js' });
+
+  const snapshot = window.vortixAgent.snapshot();
+  assert.equal(snapshot.request.bodyPresent, true);
+  assert.equal(JSON.stringify(snapshot).includes(valueSecret), false);
+  elements.get('multipart-fields-list').children = [];
+  elements.get('body').value = 'STALE_RAW_BODY_SENTINEL';
+  assert.equal(window.vortixAgent.snapshot().request.bodyPresent, false);
+});
+
 test('safe snapshot tolerates a page whose request controls are not ready', async () => {
   const html = await fs.readFile(path.join(root, 'wwwroot', 'index.html'), 'utf8');
   assert.ok(html.includes('<script src="/agent-bridge.js" defer></script>'), 'page should load the agent bridge');
@@ -145,6 +189,18 @@ test('safe snapshot tolerates a page whose request controls are not ready', asyn
   vm.runInNewContext(source, { window, document }, { filename: 'agent-bridge.js' });
   assert.equal(window.vortixAgent.snapshot().request.method, null);
   assert.equal(window.vortixAgent.snapshot().response.statusCode, null);
+});
+
+test('safe snapshot counts usable environment options without assuming a placeholder', async () => {
+  const source = await fs.readFile(path.join(root, 'wwwroot', 'agent-bridge.js'), 'utf8');
+  const { document, elements } = createDocument();
+  elements.get('environment-select').options = [{ value: 'local' }, { value: 'test' }];
+  const window = {};
+  vm.runInNewContext(source, { window, document }, { filename: 'agent-bridge.js' });
+
+  assert.equal(window.vortixAgent.snapshot().environment.count, 2);
+  elements.get('environment-select').options = [{ value: '', disabled: true }];
+  assert.equal(window.vortixAgent.snapshot().environment.count, 0);
 });
 
 test('safe-state button renders JSON and reports a missing bridge without side effects', async () => {
