@@ -2508,9 +2508,9 @@ function refreshAgentSafeState(){
   }catch(error){showToast('Estado seguro indisponível',error.message||'Atualize a página e tente novamente.','error');}
 }
 function resolveAiFriendlyStatus(agent){
-  if(!agent||typeof agent.describe!=='function'||typeof agent.snapshot!=='function')return{state:'unavailable',label:'IA indisponível',message:'O bridge de IA não carregou nesta página. Atualize o Vortix e tente novamente.'};
-  if(agent.contractVersion!==2)return{state:'outdated',label:'IA desatualizada',message:`Bridge encontrado, mas contrato v${String(agent.contractVersion??'?')} não corresponde ao v2 esperado. Atualize o Vortix.`};
-  return{state:'ready',label:'IA v2 pronta',message:'Contrato v2 ativo. O bridge só expõe controles e metadados seguros; não envia requests nem lê o armazenamento.'};
+  if(!agent||typeof agent.describe!=='function'||typeof agent.snapshot!=='function')return{state:'unavailable',label:'Bridge indisponível',message:'O bridge do Vortix não carregou nesta página. Atualize o Vortix e tente novamente.'};
+  if(agent.contractVersion!==2)return{state:'outdated',label:'Bridge desatualizado',message:`Bridge encontrado, mas contrato v${String(agent.contractVersion??'?')} não corresponde ao v2 esperado. Atualize o Vortix.`};
+  return{state:'ready',label:'Bridge v2 ativo',message:'Contrato v2 do Vortix ativo nesta página. Esse status não informa se um agente está conectado ao Portal do Maestri. O bridge só expõe controles e metadados seguros; não envia requests nem lê o armazenamento.'};
 }
 function updateAiFriendlyStatus(){
   const status=resolveAiFriendlyStatus(window.vortixAgent),trigger=byId('ai-friendly-trigger'),label=byId('ai-friendly-trigger-label'),summary=byId('ai-friendly-status'),title=byId('ai-friendly-status-title'),message=byId('ai-friendly-status-text');
