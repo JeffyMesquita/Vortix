@@ -2499,6 +2499,14 @@ function refreshRequestInspector(){
     output.append(item);
   }
 }
+function refreshAgentSafeState(){
+  const output=byId('agent-safe-state-output');
+  try{
+    const snapshot=window.vortixAgent?.snapshot();
+    if(!snapshot)throw Error('O contrato de estado seguro não está carregado.');
+    output.textContent=JSON.stringify(snapshot,null,2);output.hidden=false;
+  }catch(error){showToast('Estado seguro indisponível',error.message||'Atualize a página e tente novamente.','error');}
+}
 function vaultCaptureError(request){
   return RunnerLogic.vaultCaptureEnvironmentError({
     loading:secretVaultLoading,
@@ -3154,6 +3162,7 @@ function addEventListeners(){
   byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('auth-inheritance-mode').addEventListener('change',()=>{const authMode=authModeFromForm();applyAuthFields(authMode==='custom'?{authMode,authType:'none'}:{authMode});syncActiveWorkspaceTab(true);});byId('save-auth-default').onclick=()=>void saveAuthDefault();byId('body-mode').addEventListener('change',updateBodyModeUi);byId('multipart-add-text').onclick=()=>addMultipartField('text');byId('multipart-add-file').onclick=()=>addMultipartField('file');byId('graphql-load-schema').onclick=()=>void loadGraphqlSchema();byId('graphql-schema-type').addEventListener('change',renderGraphqlSchemaFields);const graphqlQueryField=byId('graphql-query');graphqlQueryField.addEventListener('input',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keyup',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('click',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keydown',handleGraphqlAutocompleteKeydown);byId('format-graphql-variables').onclick=formatGraphqlVariables;for(const id of ['graphql-query','graphql-variables','graphql-operation-name']){byId(id).addEventListener('input',()=>{byId('confirm-test-data').checked=false;updateGuard();});byId(id).addEventListener('change',()=>{byId('confirm-test-data').checked=false;updateGuard();});}byId('clear-cookie-jar').onclick=clearCookieJar;byId('inspect-references').onclick=refreshRequestInspector;byId('request-inspector').addEventListener('toggle',()=>{if(byId('request-inspector').open)refreshRequestInspector();});byId('runner-datasets').addEventListener('input',()=>{if(byId('runner-dialog').open)renderRunnerPlan(runnerEntries);});
   for(const id of ['token-route','token-client-id-field','token-client-secret-field','token-credential-mode']){byId(id).addEventListener('input',updateTokenButton);byId(id).addEventListener('change',()=>void persistTokenRequestConfig());}
     for(const id of ['oauth2-token-url','oauth2-client-id','oauth2-scope'])byId(id).addEventListener('input',updateOAuth2TokenButton);
+  byId('refresh-agent-safe-state').onclick=refreshAgentSafeState;
   for(const id of ['oauth2-token-url','oauth2-client-id','oauth2-scope','oauth2-client-auth-method'])byId(id).addEventListener('change',()=>void persistOAuth2TokenConfig(true));
   for(const id of ['oauth-pkce-authorization-url','oauth-pkce-token-url','oauth-pkce-client-id','oauth-pkce-scope'])byId(id).addEventListener('input',()=>{if(id==='oauth-pkce-authorization-url'){byId('oauth-pkce-redirect-uri').value='';scheduleOAuthPkceRedirectPreview();}updateOAuthPkceStartButton();});
   for(const id of ['oauth-pkce-authorization-url','oauth-pkce-token-url','oauth-pkce-client-id','oauth-pkce-scope'])byId(id).addEventListener('change',()=>{void persistOAuthPkceConfig(true);if(id==='oauth-pkce-authorization-url')scheduleOAuthPkceRedirectPreview();});

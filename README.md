@@ -244,9 +244,9 @@ O status vem dos exemplos já salvos; a busca não envia requests nem altera o h
 
 ## Automação por IA com Maestri Portal
 
-O Vortix expõe um contrato DOM versionado (`vortix-agent-contract: 1`) com nomes estáveis em `data-vortix-action` e `data-vortix-field`, regiões identificadas e abas ligadas aos respectivos painéis. Um agente pode navegar pela interface usando os nomes acessíveis e esses seletores, sem depender de posições visuais frágeis.
+O Vortix expõe um contrato DOM versão 2 (`vortix-agent-contract: 2`) com nomes estáveis em `data-vortix-action` e `data-vortix-field`, regiões identificadas, abas ligadas aos painéis e `window.vortixAgent.describe()` / `snapshot()` para descoberta e estado seguro. O snapshot retorna metadados, incluindo status HTTP; omite URLs, valores de requisição, credenciais e conteúdo da resposta.
 
-O [guia para agentes no Maestri Portal](docs/maestri-portal.md) traz um fluxo copiável para localizar controles, preparar requests, ler respostas e seguir as proteções de escrita. Use o Portal para interagir com o Vortix; não chame o proxy da API diretamente nem tente contornar as confirmações da interface. O guia também proíbe ler ou repetir credenciais e valores do cofre.
+O [guia para agentes no Maestri Portal](docs/maestri-portal.md) traz um fluxo copiável para localizar controles, consultar estado seguro, preparar requests, ler respostas e seguir as proteções de escrita. O skill repo-local [vortix-maestri-operator](.agents/skills/vortix-maestri-operator/SKILL.md) orienta esse fluxo em tarefas futuras. Use o Portal para interagir com o Vortix; não chame o proxy da API diretamente nem tente contornar as confirmações da interface. O guia e o skill proíbem ler ou repetir credenciais e valores do cofre.
 
 ## Modos de body
 
@@ -967,7 +967,7 @@ As variáveis valem para o processo iniciado nesse terminal.
 ~~~powershell
 dotnet restore ./VortixApiClient.csproj
 dotnet build ./VortixApiClient.csproj -c Release
-node --test ./RunnerLogic.test.cjs ./VortixRunner.test.cjs ./AIFriendlyUi.test.cjs
+node --test ./RunnerLogic.test.cjs ./VortixRunner.test.cjs ./AIFriendlyUi.test.cjs ./AIAgentBridge.test.cjs
 powershell -NoProfile -ExecutionPolicy Bypass -File ./HostingMode.test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File ./WorkspaceProtection.test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File ./AuthorizationCodePkce.test.ps1
@@ -997,7 +997,9 @@ Pull requests passam pela validação automática de build e testes em Windows. 
 | <code>LocalDataStore.cs</code> | Persistência SQLite, proteção de valores e backups do workspace. |
 | <code>wwwroot/index.html</code> | Estrutura da interface. |
 | <code>wwwroot/app.js</code> | Editor, coleções, ambientes, histórico e fluxos da interface. |
+| <code>wwwroot/agent-bridge.js</code> | API DOM somente leitura para descoberta de controles e snapshot seguro. |
 | <code>wwwroot/runner-logic.js</code> | Lógica sem dependência de DOM, importação, validação e Runner. |
+| <code>.agents/skills/vortix-maestri-operator/SKILL.md</code> | Skill repo-local para operar Vortix pelo Maestri Portal com limites de segurança. |
 | <code>wwwroot/style.css</code> | Layout, temas, tipografia e estados visuais. |
 | <code>VortixApiClient.csproj</code> | Nome do projeto e artefatos de build. |
 | <code>VortixApiClient.ps1</code> | Inicializa ou reutiliza a instância local. |
@@ -1011,6 +1013,7 @@ Pull requests passam pela validação automática de build e testes em Windows. 
 | <code>GraphqlSchemaCaptureServer.test.ps1</code> | Mock GraphQL loopback para o teste integrado. |
 | <code>RunnerLogic.test.cjs</code> | Testes de lógica JavaScript. |
 | <code>AIFriendlyUi.test.cjs</code> | Contrato DOM, abas acessíveis e guia para agentes do Maestri Portal. |
+| <code>AIAgentBridge.test.cjs</code> | Testa o snapshot seguro do bridge DOM do Vortix, incluindo ausência de valores sensíveis. |
 | <code>WorkspaceProtection.test.ps1</code> | Teste integrado de persistência e proteção em banco temporário. |
 | <code>AuthorizationCodePkce.test.ps1</code> | Teste local de callback, state, PKCE, cancelamento e expiração. |
 | <code>OAuthAuthorizationServer.test.ps1</code> | Provedor OAuth fictício de loopback para testes. |
