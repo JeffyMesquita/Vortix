@@ -4,13 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#15191f">
-  <meta name="vortix-agent-contract" content="1">
+  <meta name="vortix-agent-contract" content="2">
   <title>Vortix — API Client</title>
   <link rel="icon" type="image/svg+xml" href="/vortix-mark.svg">
   <link rel="preload" href="/fonts/fira-code-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/fonts/fonts.css">
   <link rel="stylesheet" href="/style.css">
   <script src="/runner-logic.js" defer></script>
+  <script src="/agent-bridge.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -99,6 +100,12 @@
               <p class="hint">Mostra campo, nome e origem de cada <code>{{...}}</code> antes do envio: <code>environment</code>, <code>vault</code>, <code>dataset</code>, <code>missing</code>, <code>locked</code> ou <code>unavailable</code>. Valores resolvidos nunca aparecem aqui.</p>
               <button class="button secondary compact-button" id="inspect-references" type="button">Atualizar origens</button>
               <ul id="request-inspector-output" class="request-inspector-output" aria-live="polite"><li class="request-inspector-empty">Abra ou atualize para inspecionar as referências.</li></ul>
+              <details class="agent-safe-state-panel" data-vortix-region="agent-safe-state">
+                <summary>Estado seguro para IA</summary>
+                <p class="hint">Gera um resumo sem URL, rota, valores de request, credenciais ou conteúdo da resposta. O resumo não envia requests nem comprova consentimento.</p>
+                <button class="button secondary compact-button" id="refresh-agent-safe-state" data-vortix-action="agent.snapshot.refresh" type="button">Gerar estado seguro</button>
+                <pre id="agent-safe-state-output" data-vortix-field="agent.safe-state" class="agent-safe-state-output" aria-label="Resumo seguro para IA" aria-live="polite" tabindex="0" hidden></pre>
+              </details>
             </div>
           </details>
 

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Vortix Maestri Operator"
+  short_description: "Operate Vortix safely through a Maestri Portal"
+  brand_color: "#68DDBA"
+  default_prompt: "Use $vortix-maestri-operator to operate Vortix through a connected Maestri Portal, inspect safe state, send a requested API call, and report its response."

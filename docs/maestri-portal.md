@@ -2,14 +2,25 @@
 
 Este guia orienta agentes de IA que controlam o Vortix pela interface do Portal. Use os controles visíveis e acessíveis; não dependa de coordenadas fixas nem de chamadas internas do servidor.
 
+O Maestri conecta o agente ao Portal pelo CLI `maestri`; o Portal pode inspecionar DOM, executar JavaScript e clicar/digitar. Não precisa de servidor MCP. Consulte a [documentação oficial de Portais](https://www.themaestri.app/pt-br/docs/portals).
+
 ## Contrato de navegação
 
 Confira a versão do contrato DOM antes de usar seletores estáveis:
 
 ```js
 document.querySelector('meta[name="vortix-agent-contract"]')?.content
-// "1"
+// "2"
 ```
+
+O Vortix disponibiliza duas consultas somente de leitura:
+
+```js
+window.vortixAgent.describe() // ações, campos, regiões e abas; sem valores
+window.vortixAgent.snapshot() // estado resumido e seguro da tela atual
+```
+
+`snapshot()` informa método, presença de campos, contagens, tipo Auth e metadados da resposta (status HTTP e estado). Omite conteúdo da resposta, URL, rota, valores de Params/Headers/Body/Auth e variáveis do ambiente. O painel **Estado seguro para IA**, dentro de **Referências e origens**, mostra o mesmo JSON ao ser solicitado. Esse estado serve para orientar a navegação; não dispara chamadas e não comprova consentimento nem autorização para gravar.
 
 Prefira localizar elementos por papel e nome acessível. `data-vortix-action`, `data-vortix-field` e `data-vortix-region` são referências estáveis para encontrar controles, campos e áreas:
 
@@ -26,15 +37,16 @@ Prefira localizar elementos por papel e nome acessível. `data-vortix-action`, `
 | Exportar coleção | `[data-vortix-action="collection.export"]` | Exportar a coleção selecionada |
 | Runner | `[data-vortix-action="runner.open"]` | Preparar execução de coleção ou pasta |
 | Configurações | `[data-vortix-action="settings.open"]` | Abrir configurações |
+| Gerar estado seguro | `[data-vortix-action="agent.snapshot.refresh"]` | Mostrar o resumo JSON sem valores da request |
 
-Campos úteis usam `data-vortix-field`: `request.method`, `request.route`, `request.base-url`, `request.headers`, `request.body-mode`, `request.body`, `request.auth-type`, `response.status`, `response.headers` e `response.body`. `request-params` é uma região com as linhas de query Params. Identificadores ajudam a localizar o campo; não autorizam ler ou repetir valores sensíveis.
+Campos úteis usam `data-vortix-field`: `request.method`, `request.route`, `request.base-url`, `request.headers`, `request.body-mode`, `request.body`, `request.auth-type`, `response.status`, `response.headers`, `response.body` e `agent.safe-state`. `request-params` é uma região com as linhas de query Params. Identificadores ajudam a localizar o campo; não autorizam ler ou repetir valores sensíveis.
 
-As áreas principais usam `data-vortix-region`: `collections`, `history`, `environment`, `request-workspace`, `request-editor`, `request-editor-tabs` e `request-response`. As abas Params, Headers, Body, Auth, Scripts e Testes são `tab`; cada uma aponta para seu painel por `aria-controls`, e cada painel retorna a referência por `aria-labelledby`. Use as teclas ←/→, Home e End para navegar pelas abas.
+As áreas principais usam `data-vortix-region`: `collections`, `history`, `environment`, `request-workspace`, `request-editor`, `request-editor-tabs`, `request-response` e `agent-safe-state`. As abas Params, Headers, Body, Auth, Scripts e Testes são `tab`; cada uma aponta para seu painel por `aria-controls`, e cada painel retorna a referência por `aria-labelledby`. Use as teclas ←/→, Home e End para navegar pelas abas.
 
 ## Fluxo recomendado
 
 1. Confirme que está no Vortix e confira o ambiente ativo. Se não existir ambiente, abra **Gerenciar ambientes** e peça a URL base e os dados que faltarem; não invente valores.
-2. Prepare a request pelos campos acessíveis **Método HTTP**, **Rota** e **URL base**. Configure Params, Headers, Body e Auth nas abas correspondentes. Antes de enviar, confirme o destino e o método solicitados.
+2. Consulte `window.vortixAgent.snapshot()` ou clique **Gerar estado seguro** para ver método, campos preenchidos e status sem ler os valores. Prepare a request pelos campos acessíveis **Método HTTP**, **Rota** e **URL base**. Configure Params, Headers, Body e Auth nas abas correspondentes. Antes de enviar, confirme o destino e o método solicitados.
 3. Antes de enviar qualquer request, desmarque **Salvar credenciais de Auth nas requests deste workspace**; essa opção vem marcada por padrão. O Vortix grava o histórico antes do envio, e Auth pode ser persistida ali. Só mantenha a opção ligada se o usuário pedir explicitamente para guardar credenciais. Depois, envie apenas a chamada pedida. GET, HEAD e OPTIONS não exigem a confirmação de gravação do Vortix, mas confira o contrato da API: um endpoint GET ainda pode alterar dados.
 4. Leia o status, os cabeçalhos e o body em **Resposta**. Relate o resultado sem copiar tokens, senhas ou outros valores sensíveis.
 5. O histórico registra requests enviadas conforme as configurações de retenção. Peça autorização antes de salvar uma request numa coleção. Não persista credenciais sem pedido explícito. Confirme com a pessoa antes de importar, exportar, apagar dados ou executar um Runner com várias requests.

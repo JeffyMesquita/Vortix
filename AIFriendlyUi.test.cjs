@@ -13,7 +13,7 @@ function attribute(tag, name) {
 
 test('agent-facing controls have a versioned, named DOM contract', async () => {
   const html = await fs.readFile(path.join(root, 'wwwroot', 'index.html'), 'utf8');
-  assert.match(html, /<meta\s+name="vortix-agent-contract"\s+content="1"/);
+  assert.match(html, /<meta\s+name="vortix-agent-contract"\s+content="2"/);
 
   const controls = new Map([...html.matchAll(/<(?:button|select)\b[^>]*\bid="([^"]+)"[^>]*>/g)]
     .map(match => [match[1], match[0]]));
@@ -28,7 +28,8 @@ test('agent-facing controls have a versioned, named DOM contract', async () => {
     ['import-collection', 'collection.import'],
     ['export-collection', 'collection.export'],
     ['run-collection', 'runner.open'],
-    ['manage-environments', 'settings.open']
+    ['manage-environments', 'settings.open'],
+    ['refresh-agent-safe-state', 'agent.snapshot.refresh']
   ]);
 
   for (const [id, action] of expected) {
@@ -42,7 +43,8 @@ test('agent-facing controls have a versioned, named DOM contract', async () => {
     ['method', 'request.method'], ['route', 'request.route'], ['base-url', 'request.base-url'],
     ['query-params', 'request-params'], ['headers', 'request.headers'], ['body-mode', 'request.body-mode'],
     ['body', 'request.body'], ['auth-type', 'request.auth-type'], ['response-status', 'response.status'],
-    ['response-headers', 'response.headers'], ['response-body', 'response.body']
+    ['response-headers', 'response.headers'], ['response-body', 'response.body'],
+    ['agent-safe-state-output', 'agent.safe-state']
   ]) {
     assert.ok(fields.has(id), `expected field or region #${id}`);
     assert.equal(attribute(fields.get(id), 'data-vortix-field') ?? attribute(fields.get(id), 'data-vortix-region'), field, `#${id} contract name`);
@@ -149,6 +151,9 @@ test('Maestri Portal guide describes safe UI-only operation and available contro
   assert.match(guide, /Portal/i);
   assert.match(guide, /data-vortix-action/);
   assert.match(guide, /data-vortix-field/);
+  assert.match(guide, /window\.vortixAgent\.describe\(\)/);
+  assert.match(guide, /window\.vortixAgent\.snapshot\(\)/);
+  assert.match(guide, /agent-safe-state/);
   assert.match(guide, /GET|HEAD|OPTIONS/);
   assert.match(guide, /POST[\s\S]*PUT[\s\S]*PATCH[\s\S]*DELETE/);
   assert.match(guide, /consentimento explícito/i);
@@ -157,4 +162,5 @@ test('Maestri Portal guide describes safe UI-only operation and available contro
   assert.match(guide, /Nunca.*(?:endpoint|fetch|guard)/i);
   assert.match(readme, /## Automação por IA com Maestri Portal/);
   assert.match(readme, /\[guia para agentes no Maestri Portal\]\(docs\/maestri-portal\.md\)/i);
+  assert.match(readme, /\.agents\/skills\/vortix-maestri-operator\/SKILL\.md/);
 });
