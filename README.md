@@ -6,6 +6,9 @@
 
 <p align="center">Cliente HTTP agnóstico para criar, organizar, executar e repetir requisições de API.</p>
 <p align="center">ASP.NET Core 10 · SQLite local · IndexedDB no navegador</p>
+<p align="center">
+  <a href="https://skills.sh/JeffyMesquita/Vortix"><img src="https://skills.sh/b/JeffyMesquita/Vortix" alt="Instalações da skill Vortix no skills.sh"></a>
+</p>
 
 ---
 
@@ -247,6 +250,16 @@ O status vem dos exemplos já salvos; a busca não envia requests nem altera o h
 O Vortix expõe um contrato DOM versão 2 (`vortix-agent-contract: 2`) com nomes estáveis em `data-vortix-action` e `data-vortix-field`, regiões identificadas, abas ligadas aos painéis e `window.vortixAgent.describe()` / `snapshot()` para descoberta e estado seguro. O selo **IA v2 pronta** verifica se o bridge compatível carregou; clique para abrir a ajuda no app, copiar o prompt recomendado ou acessar os guias. O snapshot retorna metadados, incluindo status HTTP; omite URLs, valores de requisição, credenciais e conteúdo da resposta.
 
 O [guia para agentes no Maestri Portal](docs/maestri-portal.md) traz um fluxo copiável para localizar controles, consultar estado seguro, preparar requests, ler respostas e seguir as proteções de escrita. No Maestri, conecte o Portal ao terminal do agente; o controle do navegador usa a CLI nativa, sem servidor MCP. Você também pode salvar o prompt como responsabilidade **Vortix Operator** em **Ajustes → Agentes**. O skill repo-local [vortix-maestri-operator](.agents/skills/vortix-maestri-operator/SKILL.md) orienta agentes que trabalham no repositório. Use o Portal para interagir com o Vortix; não chame o proxy da API diretamente nem tente contornar as confirmações da interface. O guia e o skill proíbem ler ou repetir credenciais e valores do cofre.
+
+### Instalar a skill pelo skills.sh
+
+A skill `vortix-maestri-operator` fica no repositório público e pode ser instalada pelo [CLI do skills.sh](https://skills.sh/docs/cli), sem publicação de pacote separado. O CLI requer Node.js 22.20 ou superior:
+
+~~~sh
+npx skills add https://github.com/JeffyMesquita/Vortix/tree/master/.agents/skills/vortix-maestri-operator --agent codex
+~~~
+
+O comando instala a skill no projeto atual para o Codex. Remova `--agent codex` para escolher outro agente compatível; acrescente `--global` para instalá-la no diretório do usuário, disponível entre projetos daquela máquina. O [skills.sh](https://skills.sh) usa instalações feitas pelo CLI para alimentar seu ranking e o badge acima.
 
 ## Modos de body
 
