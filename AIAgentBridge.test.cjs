@@ -60,13 +60,13 @@ function createDocument() {
   const actions = [
     element({ id: 'send-request', dataset: { vortixAction: 'request.send' }, label: 'Enviar' }),
     element({ id: 'refresh-agent-safe-state', dataset: { vortixAction: 'agent.snapshot.refresh' }, label: 'Gerar estado seguro' }),
-    element({ id: 'ai-friendly-trigger', dataset: { vortixAction: 'agent.help.open' }, label: 'IA v2 pronta' }),
+    element({ id: 'ai-friendly-trigger', dataset: { vortixAction: 'agent.help.open' }, label: 'Bridge v2 ativo' }),
     element({ id: 'copy-maestri-agent-prompt', dataset: { vortixAction: 'agent.prompt.copy' }, label: 'Copiar prompt' })
   ];
   const fields = [
     element({ id: 'method', dataset: { vortixField: 'request.method' }, value: 'PATCH' }),
     element({ id: 'bearer-token', dataset: { vortixField: 'request.auth.bearer' }, value: values.auth, type: 'password' }),
-    element({ id: 'ai-friendly-status', dataset: { vortixField: 'agent.capability-status' }, textContent: 'IA v2 pronta' })
+    element({ id: 'ai-friendly-status', dataset: { vortixField: 'agent.capability-status' }, textContent: 'Bridge v2 ativo' })
   ];
   const regions = [element({ id: 'request-editor', dataset: { vortixRegion: 'request-editor' } })];
   const tabs = [element({ id: 'workspace-tab-0', dataset: { workspaceTabId: 'tab-1' }, label: 'Users' })];
