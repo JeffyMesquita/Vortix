@@ -153,7 +153,7 @@ test('Maestri Portal guide describes safe UI-only operation and available contro
   assert.match(guide, /POST[\s\S]*PUT[\s\S]*PATCH[\s\S]*DELETE/);
   assert.match(guide, /consentimento explícito/i);
   assert.match(guide, /não (?:leia|acesse|consulte)[\s\S]{0,80}(?:token|senha|segredo|cofre|IndexedDB)/i);
-  assert.match(guide, /desmarque[\s\S]{0,100}Salvar credenciais de Auth/i);
+  assert.match(guide, /Antes de enviar qualquer request, desmarque[\s\S]{0,140}Salvar credenciais de Auth[\s\S]{0,100}(?:histórico|histórico é gravado)/i);
   assert.match(guide, /Nunca.*(?:endpoint|fetch|guard)/i);
   assert.match(readme, /## Automação por IA com Maestri Portal/);
   assert.match(readme, /\[guia para agentes no Maestri Portal\]\(docs\/maestri-portal\.md\)/i);
