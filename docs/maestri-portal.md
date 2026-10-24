@@ -17,16 +17,25 @@ O Vortix disponibiliza duas consultas somente de leitura:
 
 ```js
 window.vortixAgent.describe() // ações, campos, regiões e abas; sem valores
+window.vortixAgent.describe({ region: 'request-editor', includeState: true }) // descoberta focada, com estados seguros
 window.vortixAgent.snapshot() // estado resumido e seguro da tela atual
 ```
 
+`region` usa um nome existente em `data-vortix-region`; a consulta inclui apenas essa região e seus descendentes. Uma região desconhecida retorna listas vazias, sem fallback para o catálogo completo. `includeState: true` acrescenta somente estados booleanos disponíveis, como `disabled` e `expanded`; `selected` das abas já aparece no contrato. A resposta não inclui valores, texto ou conteúdo dos controles. Omitir `includeState` mantém o formato legado de `describe()`.
+
 `snapshot()` informa método, presença de campos, contagens, tipo Auth e metadados da resposta (status HTTP e estado). Omite conteúdo da resposta, URL, rota, valores de Params/Headers/Body/Auth e variáveis do ambiente. O painel **Estado seguro para IA**, dentro de **Referências e origens**, mostra o mesmo JSON ao ser solicitado. Esse estado serve para orientar a navegação; não dispara chamadas e não comprova consentimento nem autorização para gravar.
+
+Estados dos controles não comprovam consentimento ou autorização. Em particular, nenhum estado do bridge substitui a autorização explícita e as confirmações exigidas antes de enviar uma escrita.
 
 ## Ajuda dentro do Vortix
 
 O selo **IA v2 pronta** na barra superior verifica se o bridge compatível está carregado. Se estiver ausente ou desatualizado, o selo mostra esse estado. Clique nele para abrir instruções, links para a documentação e um prompt copiável.
 
 No Maestri, abra o Vortix em um Portal e conecte o Portal ao terminal do agente. O Maestri usa sua CLI para controlar o navegador; não precisa de MCP. Para reutilizar as instruções, copie o prompt do Vortix e salve como responsabilidade **Vortix Operator** em **Ajustes → Agentes**. Os controles de ajuda também aparecem no contrato DOM como `agent.help.open` e `agent.prompt.copy`.
+
+O botão **Copiar contexto seguro** copia o JSON atual de `snapshot()` para a área de transferência. Ele não envia requests nem concede autorização. Se o navegador bloquear a cópia, o JSON atual aparece em um campo somente leitura selecionado para cópia manual. Bridge ausente, incompatível ou snapshot fora do contrato v2 não copia estado anterior.
+
+O botão **Tela cheia** usa a Fullscreen API e acompanha `document.fullscreenElement` por `fullscreenchange`. Esc permanece como saída nativa. O estado do botão não tenta inferir o modo F11 do navegador.
 
 Prefira localizar elementos por papel e nome acessível. `data-vortix-action`, `data-vortix-field` e `data-vortix-region` são referências estáveis para encontrar controles, campos e áreas:
 
