@@ -50,23 +50,50 @@
     return match ? Number(match[1]) : null;
   };
 
-  function describe() {
+  const controlState = element => {
+    const state = {};
+    if ('disabled' in element) state.disabled = Boolean(element.disabled);
+    const expanded = element.getAttribute?.('aria-expanded');
+    if (expanded === 'true' || expanded === 'false') state.expanded = expanded === 'true';
+    else if ('open' in element) state.expanded = Boolean(element.open);
+    return state;
+  };
+
+  function describe(options) {
+    const regionName = options?.region;
+    const hasRegion = regionName !== undefined;
+    const region = typeof regionName === 'string'
+      ? all('[data-vortix-region]').find(element => nameOf(element, 'vortixRegion') === regionName)
+      : null;
+    const includeState = options?.includeState === true;
+    const select = selector => {
+      const elements = all(selector);
+      if (!hasRegion) return elements;
+      if (!region) return [];
+      return elements.filter(element => element === region || region.contains?.(element));
+    };
+    const withState = (element, description) => {
+      if (!includeState) return description;
+      const state = controlState(element);
+      return Object.keys(state).length ? { ...description, state } : description;
+    };
+
     return {
       contractVersion: contractVersion(),
       readOnly: true,
-      actions: all('[data-vortix-action]').map(element => ({
+      actions: select('[data-vortix-action]').map(element => withState(element, {
         name: nameOf(element, 'vortixAction'), id: element.id || null
       })),
-      fields: all('[data-vortix-field]').map(element => ({
+      fields: select('[data-vortix-field]').map(element => withState(element, {
         name: nameOf(element, 'vortixField'),
         id: element.id || null,
         kind: element.type || element.tagName?.toLowerCase() || null,
         sensitive: element.type === 'password' || /auth|body|header|key|password|secret|token/i.test(nameOf(element, 'vortixField') || '')
       })),
-      regions: all('[data-vortix-region]').map(element => ({
+      regions: select('[data-vortix-region]').map(element => withState(element, {
         name: nameOf(element, 'vortixRegion'), id: element.id || null
       })),
-      editorTabs: all('[data-editor-tab]').map(element => ({
+      editorTabs: select('[data-editor-tab]').map(element => ({
         name: element.dataset?.editorTab || null,
         id: element.id || null,
         panelId: element.getAttribute('aria-controls'),
