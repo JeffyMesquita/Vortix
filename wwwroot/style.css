@@ -456,7 +456,6 @@ textarea.compact { min-height: 165px; }
 .toast--info .toast-title { color: #9cc9e5; }
 .toast-close { grid-column: 2; grid-row: 1 / span 2; align-self: center; border: 0; border-radius: 4px; padding: 5px; color: #9ba7b3; background: transparent; font-size: 12px; pointer-events: auto; }
 .toast-close:hover, .toast-close:focus-visible { background: #ffffff12; }
-.app-dialog { width: min(470px, calc(100vw - 28px)); max-height: min(760px, calc(100vh - 36px)); overflow: auto; border: 1px solid #3a4551; border-radius: 10px; padding: 0; color: var(--text); background: #1c222a; box-shadow: 0 22px 80px #000b; }
 .app-dialog::backdrop { background: #090b0fcc; backdrop-filter: blur(3px); }
 .app-dialog form { padding: 20px; }
 .settings-section { padding: 2px 24px 0; }
@@ -523,9 +522,8 @@ textarea.compact { min-height: 165px; }
 @media (max-width: 1100px) {
   .app-shell { grid-template-columns: 226px minmax(0, 1fr); }
   .workspace-bar { padding-inline: 16px; }
-  .editor-column, .response-column { padding: 16px 14px; }
+  .editor-column, .response-column { padding: 16px 14px; overflow: visible; }
   .workspace-grid { display: block; overflow: auto; }
-  .editor-column, .response-column { overflow: visible; }
   .editor-column { border-right: 0; border-bottom: 1px solid var(--border); }
   .response-column { min-height: 0; }
 }
@@ -664,7 +662,7 @@ textarea.compact { min-height: 165px; }
 .export-token-option { margin: 12px 0 0; }
 
 /* shadcn-inspired dialog surfaces, using the existing native dialog and theme tokens. */
-.app-dialog { width: min(560px, calc(100vw - 32px)); max-width: calc(100vw / var(--ui-scale, 1) - 24px); max-height: min(820px, calc(100dvh / var(--ui-scale, 1) - 32px)); overflow: hidden; border: 1px solid var(--border); border-radius: 14px; color: var(--text); background: var(--surface); box-shadow: 0 28px 90px #000b; }
+.app-dialog { width: min(560px, calc(100vw - 32px)); max-width: calc(100vw / var(--ui-scale, 1) - 24px); max-height: min(820px, calc(100dvh / var(--ui-scale, 1) - 32px)); overflow: hidden; border: 1px solid var(--border); border-radius: 14px; padding: 0; color: var(--text); background: var(--surface); box-shadow: 0 28px 90px #000b; }
 .environment-dialog { width: min(680px, calc(100vw - 32px)); }
 .app-dialog::backdrop { background: #07090dcc; backdrop-filter: blur(6px); }
 .app-dialog form { display: flex; max-height: inherit; flex-direction: column; overflow-y: auto; padding: 0; }
@@ -734,6 +732,7 @@ textarea.compact { min-height: 165px; }
 .ai-help-prompt { border-top: 1px solid var(--border); padding-top: 12px; }
 .ai-help-prompt summary { color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer; }
 .ai-help-prompt pre { max-height: 190px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; margin: 10px 0; padding: 11px; color: var(--text); background: var(--code); font: 12px/1.55 var(--app-font-family); white-space: pre-wrap; overflow-wrap: anywhere; }
+#ai-safe-context-status:not([hidden]) { display: block; margin: 1em 0; }
 .ai-help-links { display: flex; flex-wrap: wrap; gap: 10px 16px; border-top: 1px solid var(--border); padding-top: 13px; }
 .ai-help-links a { color: var(--accent); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
 .ai-help-links a:hover { color: var(--text); }

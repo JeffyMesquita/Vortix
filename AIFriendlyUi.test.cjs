@@ -279,14 +279,17 @@ test('fullscreen button starts windowed, follows Fullscreen API events, and leav
   assert.equal(typeof button.onclick, 'function');
   assert.equal(button.disabled, false);
   assert.equal(button.getAttribute('aria-pressed'), 'false');
+  assert.match(button.title, /Entrar em tela cheia/);
   assert.deepEqual(Object.keys(listeners), ['fullscreenchange']);
 
   await button.onclick();
   assert.equal(requests, 1);
   assert.equal(button.getAttribute('aria-pressed'), 'true');
+  assert.match(button.title, /Sair da tela cheia/);
   await button.onclick();
   assert.equal(exits, 1);
   assert.equal(button.getAttribute('aria-pressed'), 'false');
+  assert.match(button.title, /Entrar em tela cheia/);
 
   await button.onclick();
   document.fullscreenElement = null;
@@ -366,6 +369,10 @@ test('clipboard denial selects readonly snapshot fallback; missing or old bridge
   const helpStart = html.indexOf('<dialog class="app-dialog ai-help-dialog"');
   const helpEnd = html.indexOf('</dialog>', helpStart);
   const helpHtml = html.slice(helpStart, helpEnd);
+  const statusTag = helpHtml.match(/<output\b[^>]*\bid="ai-safe-context-status"[^>]*>/)?.[0];
+  assert.ok(statusTag, 'copy feedback should use the implicit status role of output');
+  assert.match(statusTag, /aria-live="polite"/);
+  assert.match(statusTag, /hidden/);
   const fallbackTag = helpHtml.match(/<textarea\b[^>]*\bid="ai-safe-context-fallback"[^>]*>/)?.[0];
   assert.ok(fallbackTag, 'AI help should contain the manual-copy field');
   assert.match(fallbackTag, /readonly/);
@@ -391,8 +398,9 @@ test('clipboard denial selects readonly snapshot fallback; missing or old bridge
   assert.equal(JSON.stringify(messages).includes('OLD_SNAPSHOT_SENTINEL'), false);
   assert.equal(sends, 0);
 
-  const incompatibleSnapshot = { contractVersion: 2, describe() {}, snapshot: () => ({ contractVersion: 1, request: { method: 'DELETE' } }) };
-  for (const agent of [null, { contractVersion: 1, describe() {}, snapshot() { throw Error('must not read an old snapshot'); } }, incompatibleSnapshot]) {
+  const incompatibleSnapshots = [null, undefined, { contractVersion: 1, request: { method: 'DELETE' } }]
+    .map(snapshot => ({ contractVersion: 2, describe() {}, snapshot: () => snapshot }));
+  for (const agent of [null, { contractVersion: 1, describe() {}, snapshot() { throw Error('must not read an old snapshot'); } }, ...incompatibleSnapshots]) {
     let clipboardWrites = 0;
     let rejectedSends = 0;
     const oldFallback = { value: 'OLD_SNAPSHOT_SENTINEL', hidden: false };

@@ -2525,7 +2525,10 @@ function syncFullscreenControl(){
   const button=byId('workspace-fullscreen-toggle');if(!button)return false;
   const root=document.documentElement,available=document.fullscreenEnabled===true&&typeof root?.requestFullscreen==='function'&&typeof document.exitFullscreen==='function',active=document.fullscreenElement===root;
   button.disabled=!available;button.setAttribute('aria-pressed',String(active));button.setAttribute('aria-label',available?'Tela cheia':'Tela cheia indisponível');
-  button.title=available?(active?'Sair da tela cheia. Esc também sai.':'Entrar em tela cheia. Pressione Esc para sair.'):'Tela cheia indisponível ou bloqueada pelo navegador.';
+  let title='Tela cheia indisponível ou bloqueada pelo navegador.';
+  if(available)title='Entrar em tela cheia. Pressione Esc para sair.';
+  if(available&&active)title='Sair da tela cheia. Esc também sai.';
+  button.title=title;
   return available;
 }
 async function toggleWorkspaceFullscreen(){
@@ -2555,7 +2558,7 @@ async function copyAiSafeContext(){
   let context;
   try{
     const snapshot=agent.snapshot();
-    if(!snapshot||snapshot.contractVersion!==2)throw Error('O estado seguro não corresponde ao contrato v2. Atualize o Vortix.');
+    if(snapshot?.contractVersion!==2)throw new Error('O estado seguro não corresponde ao contrato v2. Atualize o Vortix.');
     context=JSON.stringify(snapshot,null,2);
   }catch(error){
     const message=error.message||'Atualize a página e tente novamente.';
