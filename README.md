@@ -80,7 +80,7 @@ O modo público permite uso sem senha compartilhada. Cada navegador recebe uma s
 - **OAuth 2.0:** Client Credentials e Authorization Code com PKCE S256; tokens salvos por ambiente com consentimento e proteção local.
 - **Testes de resposta:** valide status HTTP, existência de campo JSON, igualdade ou presença de texto.
 - **Runner:** execute requests de uma coleção ou pasta em sequência, com conjuntos de dados, intervalo, parada por falha, repetição das falhas e um histórico local seguro das rodadas.
-- **Temas e fontes:** Dracula, Monokai, One Dark, Nord, Solarized Dark e GitHub Dark; Fira Code, JetBrains Mono, Cascadia Code, Cascadia Mono e IBM Plex Mono.
+- **Temas e fontes:** Papel (claro), Grafite, Maré, Dracula, Monokai, One Dark, Nord, Solarized Dark e GitHub Dark; Fira Code, JetBrains Mono, Cascadia Code, Cascadia Mono e IBM Plex Mono.
 - **Editor JSON:** destaque de sintaxe e formatação com indentação de dois espaços.
 - **Intercâmbio:** Vortix JSON, ambientes Postman, Insomnia v4, Postman Collection v2.1, cURL, HTTPie, importação de OpenAPI 3 e exportação de coleção como OpenAPI 3.1 JSON.
 - **Backups:** exportação simples em JSON ou arquivo protegido por senha.
@@ -245,11 +245,27 @@ Os filtros podem ser combinados e também funcionam sem texto:
 
 O status vem dos exemplos já salvos; a busca não envia requests nem altera o histórico. A lista mostra até 30 resultados por vez.
 
+## Workspace desktop e aparência
+
+Em **Configurações → Aparência**, escolha **Papel** para uma superfície clara, **Grafite** para tons escuros neutros ou **Maré** para azul profundo com destaque âmbar. A escolha é salva no workspace, mantendo os seis temas anteriores disponíveis. Os novos temas incluem cores de sintaxe JSON, estados e foco por teclado.
+
+O botão **Tela cheia** usa a Fullscreen API do navegador. Clique novamente ou pressione **Esc** para sair. O controle informa o estado por `aria-pressed`; fica desativado quando o navegador não oferece suporte e mostra um aviso se a solicitação for recusada. A disponibilidade depende do navegador e das permissões do portal.
+
+As capturas abaixo usam somente conteúdo fictício em uma fixture local, sem banco pessoal ou execução de API. O antes representa `origin/master` em 1920×1080; o depois mostra o novo tema Grafite e a toolbar desktop.
+
+| Antes | Depois |
+|---|---|
+| ![Workspace desktop antes das mudanças, com dados fictícios](docs/images/desktop-workspace-before.png) | ![Workspace desktop com tema Grafite, com dados fictícios](docs/images/desktop-workspace-after.png) |
+
 ## Automação por IA com Maestri Portal
 
 O Vortix expõe um contrato DOM versão 2 (`vortix-agent-contract: 2`) com nomes estáveis em `data-vortix-action` e `data-vortix-field`, regiões identificadas, abas ligadas aos painéis e `window.vortixAgent.describe()` / `snapshot()` para descoberta e estado seguro. O selo **Bridge v2 ativo** confirma que o bridge e o contrato compatível carregaram nesta página; não detecta se um agente está conectado ao Portal do Maestri. Clique para abrir a ajuda no app, copiar o prompt recomendado ou acessar os guias. O snapshot retorna metadados, incluindo status HTTP; omite URLs, valores de requisição, credenciais e conteúdo da resposta.
 
 O [guia para agentes no Maestri Portal](docs/maestri-portal.md) traz um fluxo copiável para localizar controles, consultar estado seguro, preparar requests, ler respostas e seguir as proteções de escrita. No Maestri, conecte o Portal ao terminal do agente; o controle do navegador usa a CLI nativa, sem servidor MCP. Você também pode salvar o prompt como responsabilidade **Vortix Operator** em **Ajustes → Agentes**. O skill repo-local [vortix-maestri-operator](.agents/skills/vortix-maestri-operator/SKILL.md) orienta agentes que trabalham no repositório. Use o Portal para interagir com o Vortix; não chame o proxy da API diretamente nem tente contornar as confirmações da interface. O guia e o skill proíbem ler ou repetir credenciais e valores do cofre.
+
+Use `window.vortixAgent.describe({ region: 'request-editor', includeState: true })` para descobrir somente a região necessária. Regiões desconhecidas retornam listas vazias; os estados expostos não comprovam consentimento.
+
+Na ajuda de IA, **Copiar contexto seguro** copia somente o JSON de `snapshot()`, sem enviar requests. O contexto omite URLs, headers, body, credenciais e conteúdo da resposta; inclui metadados como método, contagens e status. Se o navegador bloquear o clipboard, um campo readonly com o JSON selecionado permite cópia manual. Confira o contexto antes de compartilhá-lo.
 
 ### Instalar a skill pelo skills.sh
 

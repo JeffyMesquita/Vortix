@@ -66,6 +66,7 @@
           <button class="ai-friendly-trigger" id="ai-friendly-trigger" data-state="checking" data-vortix-action="agent.help.open" type="button" aria-haspopup="dialog" aria-controls="ai-help-dialog" aria-label="Verificando bridge">
             <span class="ai-friendly-dot" aria-hidden="true"></span><span id="ai-friendly-trigger-label">Verificando bridge</span>
           </button>
+          <button class="button secondary compact-button" id="workspace-fullscreen-toggle" data-vortix-action="workspace.fullscreen.toggle" type="button" aria-pressed="false" title="Tela cheia indisponível" disabled>Tela cheia</button>
           <label class="environment-picker" for="environment-select"><span>AMBIENTE</span><select id="environment-select" data-vortix-action="environment.select" data-vortix-region="environment" aria-label="Ambiente ativo" disabled><option value="" selected disabled>Carregando ambientes…</option></select></label>
           <button class="button secondary manage-environments-direct" id="manage-environments-direct" data-vortix-action="environment.manage" type="button">Gerenciar ambientes</button>
           <button class="icon-button environment-settings" id="manage-environments" data-vortix-action="settings.open" type="button" title="Configurações" aria-label="Configurações"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"></circle><path d="m19.4 13.5 1.1.8-1.3 2.3-1.3-.5a8 8 0 0 1-1.5.8l-.2 1.5h-2.6l-.2-1.5a8 8 0 0 1-1.5-.8l-1.3.5-1.3-2.3 1.1-.8a8 8 0 0 1 0-1.6l-1.1-.8 1.3-2.3 1.3.5a8 8 0 0 1 1.5-.8l.2-1.5h2.6l.2 1.5a8 8 0 0 1 1.5.8l1.3-.5 1.3 2.3-1.1.8a8 8 0 0 1 0 1.6z"></path></svg></button>
@@ -440,12 +441,18 @@ insomnia.environment.set("token", body.access_token);</code></pre>
       </div>
       <ol class="ai-help-steps">
         <li>Abra o Vortix em um Portal do Maestri e conecte o Portal ao terminal do agente.</li>
-        <li>O agente pode usar <code>window.vortixAgent.describe()</code> para descobrir controles e <code>window.vortixAgent.snapshot()</code> para consultar metadados sem valores.</li>
+        <li>O agente pode usar <code>window.vortixAgent.describe({ region: 'request-editor', includeState: true })</code> para descobrir controles da região necessária e seus estados seguros; <code>window.vortixAgent.snapshot()</code> resume metadados sem valores.</li>
         <li>Use o prompt abaixo ou salve-o nas instruções da responsabilidade <strong>Vortix Operator</strong> em Ajustes → Agentes.</li>
       </ol>
+      <div class="agent-safe-context-copy">
+        <button class="button secondary compact-button" id="copy-ai-safe-context" data-vortix-action="agent.context.copy" type="button">Copiar contexto seguro</button>
+        <output id="ai-safe-context-status" class="hint" aria-live="polite" hidden></output>
+        <label class="visually-hidden" for="ai-safe-context-fallback">Contexto seguro para copiar manualmente</label>
+        <textarea id="ai-safe-context-fallback" class="compact" rows="8" readonly hidden></textarea>
+      </div>
       <details class="ai-help-prompt" open>
         <summary>Prompt recomendado</summary>
-        <pre id="maestri-agent-prompt">Use o Vortix somente pela interface do Portal do Maestri. Leia window.vortixAgent.describe() para descobrir controles e window.vortixAgent.snapshot() para consultar o estado sem valores. Prepare e envie chamadas pela interface visível; confira ambiente, método e destino antes de cada envio. Desative “Salvar credenciais de Auth nas requests deste workspace” antes de enviar. POST, PUT, PATCH e DELETE exigem minha autorização explícita para aquela operação e a confirmação da interface. Peça autorização antes de salvar, importar, exportar, apagar dados ou executar Runner em lote. Nunca leia nem repita tokens, senhas ou valores do cofre. Não use fetch, curl, scripts ou endpoints para enviar chamadas.</pre>
+        <pre id="maestri-agent-prompt">Use o Vortix somente pela interface do Portal do Maestri. Consulte window.vortixAgent.describe({region:'request-editor',includeState:true}) apenas para descobrir controles da região necessária; use window.vortixAgent.snapshot() para estado resumido sem valores. Estados dos controles não comprovam consentimento. Prepare e envie chamadas pela interface visível; confira ambiente, método e destino antes de cada envio. Desative “Salvar credenciais de Auth nas requests deste workspace” antes de enviar. POST, PUT, PATCH e DELETE exigem minha autorização explícita para aquela operação e a confirmação da interface. Peça autorização antes de salvar, importar, exportar, apagar dados ou executar Runner em lote. Nunca leia nem repita tokens, senhas ou valores do cofre. Não use fetch, curl, scripts ou endpoints para enviar chamadas.</pre>
         <button class="button secondary compact-button" id="copy-maestri-agent-prompt" data-vortix-action="agent.prompt.copy" type="button">Copiar prompt</button>
       </details>
       <nav class="ai-help-links" aria-label="Documentação de IA">
@@ -491,7 +498,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
       <section class="settings-section" aria-labelledby="settings-appearance-title">
         <h3 id="settings-appearance-title">Aparência</h3>
         <div class="settings-grid">
-          <label for="theme-select">Tema<select id="theme-select" aria-label="Tema"><option value="dracula">Dracula</option><option value="monokai">Monokai</option><option value="one-dark">One Dark</option><option value="nord">Nord</option><option value="solarized-dark">Solarized Dark</option><option value="github-dark">GitHub Dark</option></select></label>
+          <label for="theme-select">Tema<select id="theme-select" aria-label="Tema"><option value="dracula">Dracula</option><option value="monokai">Monokai</option><option value="one-dark">One Dark</option><option value="nord">Nord</option><option value="solarized-dark">Solarized Dark</option><option value="github-dark">GitHub Dark</option><option value="paper">Papel</option><option value="graphite">Grafite</option><option value="tide">Maré</option></select></label>
           <label for="font-select">Fonte global<select id="font-select" aria-label="Fonte global"><option value="fira-code">Fira Code</option><option value="jetbrains-mono">JetBrains Mono</option><option value="cascadia-code">Cascadia Code</option><option value="cascadia-mono">Cascadia Mono</option><option value="ibm-plex-mono">IBM Plex Mono</option></select></label>
         </div>
         <div class="settings-scale">

@@ -6,14 +6,18 @@ const vm = require('node:vm');
 
 const root = __dirname;
 
-function element({ id = '', dataset = {}, value = '', checked = false, disabled = false, hidden = false, textContent = '', className = '', type = '', label = '' } = {}) {
-  const attributes = label ? { 'aria-label': label } : {};
-  return {
-    id, dataset, value, checked, disabled, hidden, textContent, className, type,
-    children: [], options: [],
-    getAttribute(name) { return attributes[name] ?? null; },
+function element({ id = '', dataset = {}, value = '', checked = false, disabled, hidden = false, textContent = '', className = '', type = '', label = '', attributes = {}, open } = {}) {
+  const elementAttributes = { ...attributes, ...(label ? { 'aria-label': label } : {}) };
+  const result = {
+    id, dataset, value, checked, hidden, textContent, className, type,
+    children: [], options: [], descendants: [],
+    getAttribute(name) { return elementAttributes[name] ?? null; },
+    contains(target) { return target === this || this.descendants.includes(target); },
     classList: { contains(name) { return className.split(/\s+/).includes(name); } }
   };
+  if (disabled !== undefined) result.disabled = disabled;
+  if (open !== undefined) result.open = open;
+  return result;
 }
 
 function createDocument() {
@@ -58,21 +62,26 @@ function createDocument() {
   elements.get('environment-select').options = [{}, {}, {}];
 
   const actions = [
-    element({ id: 'send-request', dataset: { vortixAction: 'request.send' }, label: 'Enviar' }),
-    element({ id: 'refresh-agent-safe-state', dataset: { vortixAction: 'agent.snapshot.refresh' }, label: 'Gerar estado seguro' }),
-    element({ id: 'ai-friendly-trigger', dataset: { vortixAction: 'agent.help.open' }, label: 'Bridge v2 ativo' }),
-    element({ id: 'copy-maestri-agent-prompt', dataset: { vortixAction: 'agent.prompt.copy' }, label: 'Copiar prompt' })
+    element({ id: 'send-request', dataset: { vortixAction: 'request.send' }, label: 'Enviar', disabled: true }),
+    element({ id: 'refresh-agent-safe-state', dataset: { vortixAction: 'agent.snapshot.refresh' }, label: 'Gerar estado seguro', disabled: false }),
+    element({ id: 'ai-friendly-trigger', dataset: { vortixAction: 'agent.help.open' }, label: 'Bridge v2 ativo', disabled: false }),
+    element({ id: 'copy-maestri-agent-prompt', dataset: { vortixAction: 'agent.prompt.copy' }, label: 'Copiar prompt', disabled: false })
   ];
   const fields = [
-    element({ id: 'method', dataset: { vortixField: 'request.method' }, value: 'PATCH' }),
-    element({ id: 'bearer-token', dataset: { vortixField: 'request.auth.bearer' }, value: values.auth, type: 'password' }),
+    element({ id: 'method', dataset: { vortixField: 'request.method' }, value: 'PATCH', disabled: false }),
+    element({ id: 'bearer-token', dataset: { vortixField: 'request.auth.bearer' }, value: values.auth, type: 'password', disabled: false }),
     element({ id: 'ai-friendly-status', dataset: { vortixField: 'agent.capability-status' }, textContent: 'Bridge v2 ativo' })
   ];
-  const regions = [element({ id: 'request-editor', dataset: { vortixRegion: 'request-editor' } })];
+  const requestEditor = element({ id: 'request-editor', dataset: { vortixRegion: 'request-editor' } });
+  const historyRegion = element({ id: 'history-panel', dataset: { vortixRegion: 'history' }, open: true });
+  const regions = [requestEditor, historyRegion];
   const tabs = [element({ id: 'workspace-tab-0', dataset: { workspaceTabId: 'tab-1' }, label: 'Users' })];
   tabs[0].getAttribute = name => name === 'aria-selected' ? 'true' : null;
-  const activeEditorTab = element({ id: 'editor-tab-params', dataset: { editorTab: 'params' } });
-  activeEditorTab.getAttribute = name => name === 'aria-selected' ? 'true' : null;
+  const activeEditorTab = element({
+    id: 'editor-tab-params', dataset: { editorTab: 'params' },
+    attributes: { 'aria-selected': 'true', 'aria-controls': 'params-panel' }
+  });
+  requestEditor.descendants = [actions[0], actions[1], fields[0], fields[1], activeEditorTab];
 
   const meta = element();
   meta.content = '2';
@@ -87,11 +96,12 @@ function createDocument() {
       if (selector === '[data-vortix-action]') return actions;
       if (selector === '[data-vortix-field]') return fields;
       if (selector === '[data-vortix-region]') return regions;
+      if (selector === '[data-editor-tab]') return [activeEditorTab];
       if (selector === '#workspace-tabs [role="tab"]') return tabs;
       return [];
     }
   };
-  return { document: doc, values, elements };
+  return { document: doc, values, elements, actions, fields, regions, activeEditorTab };
 }
 
 test('Vortix loads contract v2 bridge and safe snapshot leaks no user values', async () => {
@@ -115,13 +125,30 @@ test('Vortix loads contract v2 bridge and safe snapshot leaks no user values', a
   const api = window.vortixAgent;
   assert.deepEqual(Object.keys(api).sort(), ['contractVersion', 'describe', 'snapshot']);
   assert.equal(api.contractVersion, 2);
-  const description = api.describe();
-  assert.equal(description.contractVersion, 2);
-  assert.ok(description.actions.some(action => action.name === 'request.send'));
-  assert.ok(description.actions.some(action => action.name === 'agent.help.open'));
-  assert.ok(description.actions.some(action => action.name === 'agent.prompt.copy'));
-  assert.ok(description.fields.some(field => field.name === 'request.method'));
-  assert.ok(description.regions.some(region => region.name === 'request-editor'));
+  const description = JSON.parse(JSON.stringify(api.describe()));
+  assert.deepEqual(description, {
+    contractVersion: 2,
+    readOnly: true,
+    actions: [
+      { name: 'request.send', id: 'send-request' },
+      { name: 'agent.snapshot.refresh', id: 'refresh-agent-safe-state' },
+      { name: 'agent.help.open', id: 'ai-friendly-trigger' },
+      { name: 'agent.prompt.copy', id: 'copy-maestri-agent-prompt' }
+    ],
+    fields: [
+      { name: 'request.method', id: 'method', kind: null, sensitive: false },
+      { name: 'request.auth.bearer', id: 'bearer-token', kind: 'password', sensitive: true },
+      { name: 'agent.capability-status', id: 'ai-friendly-status', kind: null, sensitive: false }
+    ],
+    regions: [
+      { name: 'request-editor', id: 'request-editor' },
+      { name: 'history', id: 'history-panel' }
+    ],
+    editorTabs: [
+      { name: 'params', id: 'editor-tab-params', panelId: 'params-panel', selected: true }
+    ]
+  });
+  assert.equal(Object.hasOwn(description.actions[0], 'state'), false);
 
   const snapshot = api.snapshot();
   assert.equal(snapshot.request.method, 'PATCH');
@@ -140,6 +167,36 @@ test('Vortix loads contract v2 bridge and safe snapshot leaks no user values', a
 
   const serialized = JSON.stringify({ description, snapshot });
   for (const secret of Object.values(values)) assert.equal(serialized.includes(secret), false, `bridge leaked ${secret}`);
+});
+
+test('describe scopes regions, exposes safe control state, handles unknown regions, and leaks no values', async () => {
+  const source = await fs.readFile(path.join(root, 'wwwroot', 'agent-bridge.js'), 'utf8');
+  const { document, values } = createDocument();
+  const window = {};
+  vm.runInNewContext(source, { window, document }, { filename: 'agent-bridge.js' });
+
+  const api = window.vortixAgent;
+  const full = api.describe();
+  const scoped = JSON.parse(JSON.stringify(api.describe({ region: 'request-editor', includeState: true })));
+  assert.deepEqual(scoped.actions.map(action => action.name), ['request.send', 'agent.snapshot.refresh']);
+  assert.deepEqual(scoped.actions[0].state, { disabled: true });
+  assert.equal(scoped.fields[0].state.disabled, false);
+  assert.deepEqual(scoped.editorTabs[0].selected, true);
+  assert.deepEqual(scoped.regions.map(region => region.name), ['request-editor']);
+  assert.ok(Buffer.byteLength(JSON.stringify(scoped), 'utf8') < Buffer.byteLength(JSON.stringify(full), 'utf8'));
+
+  const history = JSON.parse(JSON.stringify(api.describe({ region: 'history', includeState: true })));
+  assert.deepEqual(history.regions[0].state, { expanded: true });
+
+  const unknown = JSON.parse(JSON.stringify(api.describe({ region: 'not-a-region', includeState: true })));
+  assert.deepEqual(unknown, {
+    contractVersion: 2, readOnly: true, actions: [], fields: [], regions: [], editorTabs: []
+  });
+
+  const serialized = JSON.stringify({ scoped, history, unknown });
+  for (const secret of Object.values(values)) assert.equal(serialized.includes(secret), false, `describe leaked ${secret}`);
+  assert.equal(serialized.includes('"checked"'), false, 'describe must not expose confirmation state');
+  assert.equal(serialized.includes('"value"'), false, 'describe must not expose control values');
 });
 
 test('safe snapshot detects a GraphQL body from the active editor without exposing it', async () => {

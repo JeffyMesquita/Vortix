@@ -11,7 +11,7 @@ const DB_STORES = ['history','collections','environments','settings'];
 const writeMethods = new Set(['POST','PUT','PATCH','DELETE']), toastTimers = new Map();
 const RunnerLogic = window.ApiStudioRunner;
 const parseJsonPath = RunnerLogic.parseJsonPath, jsonPathValue = RunnerLogic.jsonPathValue;
-const themes = new Set(['dracula','monokai','one-dark','nord','solarized-dark','github-dark']);
+const themes = new Set(['dracula','monokai','one-dark','nord','solarized-dark','github-dark','paper','graphite','tide']);
 const fontFamilies = new Map([
   ['fira-code','"Fira Code", "Cascadia Code", "IBM Plex Mono", monospace'],
   ['jetbrains-mono','"JetBrains Mono", "Cascadia Code", "IBM Plex Mono", monospace'],
@@ -2521,7 +2521,60 @@ function updateAiFriendlyStatus(){
   if(message)message.textContent=status.message;
   return status;
 }
+function syncFullscreenControl(){
+  const button=byId('workspace-fullscreen-toggle');if(!button)return false;
+  const root=document.documentElement,available=document.fullscreenEnabled===true&&typeof root?.requestFullscreen==='function'&&typeof document.exitFullscreen==='function',active=document.fullscreenElement===root;
+  button.disabled=!available;button.setAttribute('aria-pressed',String(active));button.setAttribute('aria-label',available?'Tela cheia':'Tela cheia indisponível');
+  let title='Tela cheia indisponível ou bloqueada pelo navegador.';
+  if(available)title='Entrar em tela cheia. Pressione Esc para sair.';
+  if(available&&active)title='Sair da tela cheia. Esc também sai.';
+  button.title=title;
+  return available;
+}
+async function toggleWorkspaceFullscreen(){
+  if(!syncFullscreenControl())return;
+  try{
+    if(document.fullscreenElement===document.documentElement)await document.exitFullscreen();
+    else await document.documentElement.requestFullscreen();
+    syncFullscreenControl();
+  }catch{
+    syncFullscreenControl();showToast('Não foi possível alterar a tela cheia','O navegador recusou a solicitação. Verifique as permissões da página e tente novamente.','error');
+  }
+}
+function setupFullscreenControl(){
+  const button=byId('workspace-fullscreen-toggle');if(button)button.onclick=toggleWorkspaceFullscreen;
+  document.addEventListener('fullscreenchange',syncFullscreenControl);syncFullscreenControl();
+}
 function openAiFriendlyHelp(){updateAiFriendlyStatus();byId('ai-help-dialog').showModal();}
+async function copyAiSafeContext(){
+  const fallback=byId('ai-safe-context-fallback'),status=byId('ai-safe-context-status');
+  if(fallback){fallback.value='';fallback.hidden=true;}
+  if(status){status.textContent='';status.hidden=true;}
+  const agent=window.vortixAgent,readiness=resolveAiFriendlyStatus(agent);
+  if(readiness.state!=='ready'){
+    if(status){status.textContent=readiness.message;status.hidden=false;}
+    showToast('Contexto seguro indisponível',readiness.message,'error');return;
+  }
+  let context;
+  try{
+    const snapshot=agent.snapshot();
+    if(snapshot?.contractVersion!==2)throw new Error('O estado seguro não corresponde ao contrato v2. Atualize o Vortix.');
+    context=JSON.stringify(snapshot,null,2);
+  }catch(error){
+    const message=error.message||'Atualize a página e tente novamente.';
+    if(status){status.textContent=message;status.hidden=false;}
+    showToast('Contexto seguro indisponível',message,'error');return;
+  }
+  try{
+    await navigator.clipboard.writeText(context);
+    showToast('Contexto seguro copiado','JSON seguro copiado para a área de transferência. Nenhuma request foi enviada.','success');
+  }catch{
+    const message='O navegador bloqueou a área de transferência. O JSON seguro está selecionado para cópia manual.';
+    if(fallback){fallback.value=context;fallback.hidden=false;fallback.focus();fallback.select();}
+    if(status){status.textContent=message;status.hidden=false;}
+    showToast('Falha ao copiar contexto seguro',message,'error');
+  }
+}
 async function copyMaestriAgentPrompt(){
   const prompt=byId('maestri-agent-prompt')?.textContent?.trim();
   if(!prompt){showToast('Prompt indisponível','Atualize a página e tente novamente.','error');return;}
@@ -3132,7 +3185,8 @@ async function requestTokenFromHelper(){
 }
 function addEventListeners(){
   const quickOpenDialog = byId('quick-open-dialog'), quickOpenQuery = byId('quick-open-query');
-  byId('ai-friendly-trigger').onclick=openAiFriendlyHelp;byId('close-ai-help').onclick=()=>byId('ai-help-dialog').close();byId('close-ai-help-done').onclick=()=>byId('ai-help-dialog').close();byId('copy-maestri-agent-prompt').onclick=()=>void copyMaestriAgentPrompt();
+  byId('ai-friendly-trigger').onclick=openAiFriendlyHelp;byId('close-ai-help').onclick=()=>byId('ai-help-dialog').close();byId('close-ai-help-done').onclick=()=>byId('ai-help-dialog').close();byId('copy-ai-safe-context').onclick=()=>void copyAiSafeContext();byId('copy-maestri-agent-prompt').onclick=()=>void copyMaestriAgentPrompt();
+  setupFullscreenControl();
   byId('compare-history-responses').onclick=()=>void openHistoryComparison();byId('close-history-compare').onclick=()=>byId('history-compare-dialog').close();byId('close-history-compare-done').onclick=()=>byId('history-compare-dialog').close();
   byId('quick-open-button').onclick = openQuickOpen;quickOpenQuery.addEventListener('input', renderQuickOpenResults);quickOpenQuery.addEventListener('keydown', handleQuickOpenQueryKeydown);['quick-open-method-filter','quick-open-status-filter','quick-open-scope-filter'].forEach(id=>byId(id).addEventListener('change',renderQuickOpenResults));
   quickOpenDialog.addEventListener('click', event => { if (event.target === quickOpenDialog) quickOpenDialog.close(); });
