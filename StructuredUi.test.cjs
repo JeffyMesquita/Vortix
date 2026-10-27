@@ -18,14 +18,14 @@ function harness(method = 'GET') {
   });
   for (const file of ['structured-execution.js', 'structured-ui.js']) vm.runInContext(fs.readFileSync(`./wwwroot/${file}`, 'utf8'), context);
   vm.runInContext(`
-    var calls = 0, revision = 0, canConfirm = true, pendingResult = null, completeRun;
+    var calls = 0, revision = 0, canConfirm = true, pendingResult = null, completeRun, pendingConfirmation = null, completeConfirmation;
     var finalFacts = {delivery:'response_received', httpStatus:200, proxyStatus:200, durationMs:1, assertions:{passed:1,failed:0,partial:0},capture:'not_requested',persistence:'completed'};
     var target = { collectionId:'c1', folderId:null, requestId:'r1', environmentId:'e1' };
     StructuredUi.attach({
       getTarget: () => target, isBusy: () => false,
       readSources: () => ({ revision, method }),
       materialize: source => ({request: {method:source.method}, warnings:[], review: {method:source.method,destination:'http://127.0.0.1',capture:false,saveResponseBody:false}}),
-      confirmReview: async () => canConfirm,
+      confirmReview: async () => pendingConfirmation || canConfirm,
       run: async () => { calls++; return pendingResult || finalFacts; }
     });
   `, context);
@@ -156,4 +156,19 @@ test('permanent page teardown stops timers and disables stale controls', () => {
   page.emit('pageshow', { persisted: false });
   assert.equal(page.timerCount(), 0);
   for (const name of ['prepare', 'approve', 'execute', 'cancel']) assert.equal(page.field(name).disabled, true);
+});
+
+test('a confirmation completing after cache restoration cannot approve a new preparation', async () => {
+  const page = harness();
+  vm.runInContext('pendingConfirmation = new Promise(resolve => { completeConfirmation = resolve; })', page.context);
+  page.field('prepare').onclick();
+  const oldApproval = page.field('approve').onclick();
+  page.emit('pagehide', { persisted: true });
+  page.emit('pageshow', { persisted: true });
+  page.field('prepare').onclick();
+  vm.runInContext('completeConfirmation(true)', page.context);
+  await oldApproval;
+  assert.equal(page.field('execute').disabled, true);
+  assert.equal(page.field('approve').disabled, false);
+  assert.equal(page.context.calls, 0);
 });
