@@ -347,6 +347,20 @@ Referências: [exportar um ambiente no Postman](https://learning.postman.com/doc
 - [x] Adicionar testes de regressão para os seis achados dos PRs #25 e #26 e preservar o marcador de base path no contrato persistido.
 - [x] Rodar 281 testes Node (280 passaram; 1 teste de symlink ignorado por `EPERM` no Windows), build Release sem avisos/erros, `node --check` e `git diff --check`.
 
+### 22. Execução estruturada interna e revisão visual
+
+**Status: implementada com testes automatizados e smoke visual isolado. Sem transporte externo ou MCP.**
+
+- [x] Preparar request salva por IDs explícitos, sem HTTP, histórico ou alteração do formulário.
+- [x] Aprovação visual por preparação, inclusive GET; escrita com confirmação de dados descartáveis e `TESTE`; expiração em cinco minutos e invalidação por alterações.
+- [x] Executar uma única vez por preparação; consultar resumo em memória, sem payloads/credenciais e sem replay automático.
+- [x] Separar entrega, status HTTP de destino, status do proxy, testes parciais, captura e persistência; preservar evidência de resposta após falha local.
+- [x] Reutilizar proxy e helpers de testes/histórico/captura; manter bridge v2 somente leitura e encapsular dados da aplicação.
+- [x] Validar GET, POST, teste visual, captura no ambiente descartável, teclado, invalidação após edição, troca de aba, temas claro/escuro e viewport estreito.
+- [x] Registrar evidência e limites em `docs/superpowers/validation/2026-10-27-structured-execution.md`.
+- [ ] Decidir transporte externo e sua fronteira de autorização em recorte posterior.
+- [ ] Medir economia de tokens e chamadas com tarefas equivalentes; comparação de caracteres de uma tela não comprova economia total.
+
 ## Regra de sequência
 
 Fechamos cada feature com teste, documentação e revisão. Busca, histórico, comparação, HTTPie, schema GraphQL e fluxo PKCE visual foram validados em ambiente local/mock.

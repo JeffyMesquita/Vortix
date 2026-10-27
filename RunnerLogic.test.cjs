@@ -1793,7 +1793,7 @@ test('Insomnia export maps collection Auth to a top-level inherited-auth folder'
 
 test('history restores environment and clears stale collection scope before resolving inherited Auth', () => {
   const app = fs.readFileSync(path.join(__dirname, 'wwwroot', 'app.js'), 'utf8');
-  const saveStart = app.indexOf('async function saveHistory(request){'), saveEnd = app.indexOf('function applyHistoryEntry', saveStart);
+  const saveStart = app.indexOf('async function saveHistory(request,options={}){'), saveEnd = app.indexOf('function applyHistoryEntry', saveStart);
   const applyStart = app.indexOf('function applyHistoryEntry(entry,notify=true){'), applyEnd = app.indexOf('function tokenHistorySnapshot', applyStart);
   const save = app.slice(saveStart, saveEnd), apply = app.slice(applyStart, applyEnd);
   assert.ok(save.includes('environmentId:String(request.environmentId||\'default\')'));
@@ -2231,7 +2231,7 @@ test('hosted workspace limit guidance reaches the primary save toasts', () => {
     ['async function addCollection(){', '\nasync function addFolder('],
     ['async function saveCollectionRequest(event){', '\nfunction loadCollectionRequest('],
     ['async function saveEnvironmentDraft(event){', '\nfunction tokenCandidate('],
-    ['async function saveHistory(request){', '\nfunction applyHistoryEntry(']
+    ['async function saveHistory(request,options={}){', '\nfunction applyHistoryEntry(']
   ];
 
   for (const [startMarker, endMarker] of saveFlows) {

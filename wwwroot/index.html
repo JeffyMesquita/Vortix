@@ -12,6 +12,9 @@
   <link rel="stylesheet" href="/style.css">
   <script src="/runner-logic.js" defer></script>
   <script src="/agent-bridge.js" defer></script>
+  <script src="/structured-execution.js" defer></script>
+  <script src="/structured-request.js" defer></script>
+  <script src="/structured-ui.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -27,7 +30,7 @@
         <button class="icon-button" id="add-collection" data-vortix-action="collection.new" type="button" aria-label="Nova coleção" title="Nova coleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg></button>
       </div>
 
-      <section class="side-section collections-section" aria-labelledby="collections-heading">
+      <section class="side-section collections-section" aria-labelledby="collections-heading" data-vortix-region="collections">
         <div class="side-section-heading">
           <h2 id="collections-heading">Coleções</h2>
           <div class="collection-tools">
@@ -41,7 +44,7 @@
           </div>
           <input id="import-collection-file" type="file" accept=".json,application/json" hidden>
         </div>
-        <div id="collections-tree" class="collections-tree" data-vortix-region="collections"></div>
+        <div id="collections-tree" class="collections-tree"></div>
         <p id="collections-empty" class="sidebar-empty" hidden>Organize requests em coleções e pastas.</p>
       </section>
 
@@ -91,8 +94,30 @@
             <label class="visually-hidden" for="route">Rota</label>
             <input id="route" data-vortix-field="request.route" class="route-input" type="text" autocomplete="off" spellcheck="false" aria-label="Rota da API" placeholder="/v1/resource">
             <button class="button secondary request-curl-button" id="generate-curl" type="button" title="Gerar comando cURL">cURL</button>
-            <button class="button primary send-button" id="send-request" data-vortix-action="request.send" type="button"><span aria-hidden="true">▶</span> Enviar</button>
+            <button class="button primary send-button" id="send-request" data-vortix-action="request.send" aria-describedby="request-send-status" type="button"><span aria-hidden="true">▶</span> Enviar</button>
           </div>
+          <output id="request-send-status" class="hint request-send-status" data-vortix-field="request.send-status" aria-live="polite" aria-atomic="true">Informe uma rota para enviar a requisição.</output>
+          <details id="structured-card" class="structured-card" data-vortix-region="structured-execution">
+            <summary>Execução revisada <span class="hint">Preparar · aprovar · executar</span></summary>
+            <p class="hint">Use uma request salva, sem alterações pendentes, e confira o ambiente ativo. Preparar não chama a API.</p>
+            <output id="structured-status" class="structured-status" data-vortix-field="execution.status" aria-live="polite" aria-atomic="true">Salve e selecione uma request para preparar.</output>
+            <div id="structured-review" hidden>
+              <strong id="structured-destination"></strong>
+              <p id="structured-effects" class="hint"></p>
+              <fieldset id="structured-write-guard" hidden>
+                <legend>Proteção para escrita</legend>
+                <label><input id="structured-confirm" type="checkbox"> Confirmo que URL e dados são descartáveis de teste.</label>
+                <label for="structured-phrase">Digite TESTE para aprovar a escrita</label>
+                <input id="structured-phrase" type="text" autocomplete="off" maxlength="32">
+              </fieldset>
+            </div>
+            <div class="structured-actions">
+              <button id="structured-prepare" class="button secondary" data-vortix-action="execution.prepare" type="button" disabled>Preparar salva</button>
+              <button id="structured-approve" class="button secondary" data-vortix-action="execution.review" type="button" disabled>Revisar e aprovar</button>
+              <button id="structured-execute" class="button primary" data-vortix-action="execution.execute" type="button" aria-describedby="structured-status" disabled>Executar preparação</button>
+              <button id="structured-cancel" class="button secondary" data-vortix-action="execution.cancel" type="button" disabled>Cancelar preparação</button>
+            </div>
+          </details>
           <label class="base-url-label" for="base-url">URL base</label>
           <div class="base-url-wrap"><span class="base-url-icon" aria-hidden="true">↗</span><input id="base-url" data-vortix-field="request.base-url" type="url" autocomplete="off" placeholder="https://api.example.com/" spellcheck="false"></div>
           <p class="hint base-url-hint">Use URL base por ambiente. HTTPS é recomendado; HTTP em localhost funciona sem configuração adicional.</p>
