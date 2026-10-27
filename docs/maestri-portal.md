@@ -27,6 +27,10 @@ window.vortixAgent.snapshot() // estado resumido e seguro da tela atual
 
 Estados dos controles não comprovam consentimento ou autorização. Em particular, nenhum estado do bridge substitui a autorização explícita e as confirmações exigidas antes de enviar uma escrita.
 
+A região `collections` cobre a seção inteira de Coleções: toolbar de busca, importação, exportação, Runner e criação, além da árvore. `describe({ region: 'collections', includeState: true })` apenas descreve esses controles; não os executa.
+
+O campo `request.send-status` (`#request-send-status`) exibe a mesma mensagem de orientação para a pessoa e para o agente, sem valores da requisição. Ele indica o que precisa ser revisto e não autoriza o envio; consentimento explícito e o guard continuam obrigatórios.
+
 ## Ajuda dentro do Vortix
 
 O selo **Bridge v2 ativo** na barra superior confirma que o bridge do Vortix carregou e implementa o contrato v2 nesta página. Ele não verifica se o Vortix está aberto em um Portal do Maestri nem se há um agente conectado. Se o bridge estiver ausente ou desatualizado, o selo mostra esse estado. Clique nele para abrir instruções, links para a documentação e um prompt copiável.
@@ -60,7 +64,17 @@ Campos úteis usam `data-vortix-field`: `request.method`, `request.route`, `requ
 
 As áreas principais usam `data-vortix-region`: `collections`, `history`, `environment`, `request-workspace`, `request-editor`, `request-editor-tabs`, `request-response`, `agent-safe-state` e `agent-help`. As abas Params, Headers, Body, Auth, Scripts e Testes são `tab`; cada uma aponta para seu painel por `aria-controls`, e cada painel retorna a referência por `aria-labelledby`. Use as teclas ←/→, Home e End para navegar pelas abas.
 
-## Fluxo recomendado
+## Execução revisada pela interface
+
+Para uma request já salva e sem alterações pendentes, o painel **Execução revisada** oferece preparação sem HTTP, aprovação contextual e execução única. Os controles são `execution.prepare`, `execution.review`, `execution.execute` e `execution.cancel` em `data-vortix-action`. A região é `structured-execution`; `execution.status` expõe somente o resumo operacional visível, sem payloads.
+
+Confira ambiente, método, rota salva, destino e efeitos de captura/histórico antes da aprovação. GET também exige aprovação neste fluxo. Escritas mantêm confirmação de dados descartáveis e `TESTE`, específicos daquela preparação. Alterações invalidam a aprovação; ela expira após cinco minutos. Não reative controles desabilitados nem invoque funções internas.
+
+O fluxo revisado não persiste credenciais de Auth e não altera a preferência global do envio manual. Capturas configuradas e retenção de body precisam ser revisadas explicitamente. O bridge v2 continua somente leitura; este recorte não oferece MCP ou execução externa. Resultado desconhecido exige conferir a API, nunca repetir automaticamente uma escrita. Recarregar a aba perde os IDs de execução em memória.
+
+Veja o [fluxo completo de execução revisada](structured-execution.md). Use os controles visíveis; as três operações do controlador continuam internas.
+
+## Fluxo recomendado de envio manual
 
 1. Confirme que está no Vortix e confira o ambiente ativo. Se não existir ambiente, abra **Gerenciar ambientes** e peça a URL base e os dados que faltarem; não invente valores.
 2. Consulte `window.vortixAgent.snapshot()` ou clique **Gerar estado seguro** para ver método, campos preenchidos e status sem ler os valores. Prepare a request pelos campos acessíveis **Método HTTP**, **Rota** e **URL base**. Configure Params, Headers, Body e Auth nas abas correspondentes. Antes de enviar, confirme o destino e o método solicitados.

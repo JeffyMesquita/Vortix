@@ -170,6 +170,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .editor-column, .response-column { min-width: 0; min-height: 0; overflow: auto; padding: var(--space-5); }
 .editor-column { border-right: 1px solid var(--border); }
 .request-line { display: flex; align-items: stretch; gap: 0; min-height: 52px; border: 1px solid #3a444f; border-radius: 8px; padding: 6px; background: #20262f; }
+.request-send-status { display: block; margin: 6px 0 0; font-size: 12px; line-height: 1.4; }
 .method-select { width: 88px; flex: 0 0 88px; border: 0; border-right: 1px solid #38414d; border-radius: 6px 0 0 6px; padding: 0 10px; background: #252c35; font-size: 12px; font-weight: 800; }
 .route-input { min-width: 0; flex: 1; border: 0; border-radius: 0; padding: 0 12px; color: #dce4ec; background: transparent; font: 12px var(--app-font-family); }
 .request-curl-button { min-width: 54px; margin-left: 6px; padding-inline: 9px; }
@@ -1069,3 +1070,11 @@ textarea.compact { min-height: 165px; }
   :root:is([data-theme="paper"], [data-theme="graphite"], [data-theme="tide"]) .base-url-label { margin-top: 12px; }
   :root:is([data-theme="paper"], [data-theme="graphite"], [data-theme="tide"]) .tab-panel { padding-top: 12px; }
 }
+.structured-card { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--raised); }
+.structured-card summary { cursor: pointer; font-weight: 600; }
+.structured-card summary .hint { display: inline-block; margin-left: 8px; font-weight: 400; }
+.structured-status { display: block; margin: 12px 0; overflow-wrap: anywhere; }
+.structured-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.structured-card fieldset { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.structured-card fieldset label { display: block; margin: 8px 0; }
+.structured-card input[type="text"] { max-width: 100%; }

@@ -25,6 +25,7 @@
 - [Hospedagem pessoal no Render](#hospedagem-pessoal-no-render)
 - [Primeiro fluxo](#primeiro-fluxo)
 - [Busca rápida](#busca-rápida)
+- [Execução revisada de requests salvas](#execução-revisada-de-requests-salvas)
 - [Automação por IA com Maestri Portal](#automação-por-ia-com-maestri-portal)
 - [Autenticação](#autenticação)
   - [Auth herdada por coleção e pasta](#auth-herdada-por-coleção-e-pasta)
@@ -256,6 +257,22 @@ As capturas abaixo usam somente conteúdo fictício em uma fixture local, sem ba
 | Antes | Depois |
 |---|---|
 | ![Workspace desktop antes das mudanças, com dados fictícios](docs/images/desktop-workspace-before.png) | ![Workspace desktop com tema Grafite, com dados fictícios](docs/images/desktop-workspace-after.png) |
+
+## Execução revisada de requests salvas
+
+No editor, abra **Execução revisada** para preparar uma request salva sem chamar a API. Salve alterações pendentes e confira o ambiente ativo antes de começar.
+
+1. **Preparar salva:** resolve variáveis e ações locais uma vez; mostra destino, ambiente, quantidade de testes e efeitos de captura/histórico.
+2. **Revisar e aprovar:** exige confirmação contextual inclusive para GET. Escritas também exigem a caixa de dados descartáveis e `TESTE`. Aprovar ainda não envia.
+3. **Executar preparação:** consome a aprovação uma única vez e mostra HTTP, contagens de testes, captura e persistência. Uma validação parcial continua identificada como parcial.
+
+A preparação expira em cinco minutos. Alterações relevantes invalidam a aprovação; prepare novamente. Auth não é persistida neste fluxo, sem mudar a preferência global do envio manual. Histórico, retenção de body e capturas seguem os efeitos revisados. Requests de token e multipart com arquivos efêmeros precisam do envio manual.
+
+O controlador possui `prepare_request`, `execute_prepared` e `get_execution` internamente; não há endpoint ou ferramenta MCP nova. `window.vortixAgent` continua somente leitura. Agentes operam pelos controles visíveis; não invoque funções privadas ou o proxy diretamente.
+
+Os identificadores e resumos de execução ficam em memória na aba. Recarregar perde esse registro; timeout ou perda de conexão não provam que a API deixou de executar uma escrita. Confira o destino antes de repetir. Não há recuperação durável ou reenvio automático. O resumo compacto omite payloads e credenciais; o resultado visual continua disponível na bancada, sem sobrescrever outra request aberta durante o envio.
+
+Consulte o [guia completo da execução revisada](docs/structured-execution.md), com diagrama, seletores para agentes, recuperação de falhas e limites de segurança.
 
 ## Automação por IA com Maestri Portal
 
@@ -996,7 +1013,7 @@ As variáveis valem para o processo iniciado nesse terminal.
 ~~~powershell
 dotnet restore ./VortixApiClient.csproj
 dotnet build ./VortixApiClient.csproj -c Release
-node --test ./RunnerLogic.test.cjs ./VortixRunner.test.cjs ./AIFriendlyUi.test.cjs ./AIAgentBridge.test.cjs
+node --test ./RunnerLogic.test.cjs ./VortixRunner.test.cjs ./AIFriendlyUi.test.cjs ./AIAgentBridge.test.cjs ./StructuredExecution.test.cjs ./StructuredRequest.test.cjs ./StructuredUi.test.cjs ./StructuredIntegration.test.cjs
 powershell -NoProfile -ExecutionPolicy Bypass -File ./HostingMode.test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File ./WorkspaceProtection.test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File ./AuthorizationCodePkce.test.ps1

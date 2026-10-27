@@ -1,3 +1,4 @@
+(() => {
 const byId = id => document.getElementById(id);
 const method = byId('method'), route = byId('route'), body = byId('body');
 const sendButton = byId('send-request'), writeGuard = byId('write-guard'), queryParams = byId('query-params');
@@ -35,6 +36,7 @@ let graphqlSchema = null, graphqlSchemaEndpointKey = '', graphqlSchemaLoading = 
 let tokenRequestConfig = RunnerLogic.normalizeTokenRequestConfig(), oauth2TokenConfig = RunnerLogic.normalizeOAuthClientCredentialsConfig();
 let oauthPkceConfig = RunnerLogic.normalizeOAuthPkceConfig(), oauthPkceBusy = false, oauthPkceCancelRequested = false, oauthPkcePopup = null, oauthPkcePreviewTimer = 0;
 let hostedMode = false;
+let requestSendInProgress = false;
 let secretVault = null, secretVaultValues = null, secretVaultEnvelope = null, secretVaultNames = [], secretVaultBusy = false, secretVaultEnvironmentId = '', secretVaultUnavailable = null, secretVaultLoading = false;
 let lastResolutionProvenance = {};
 
@@ -927,12 +929,12 @@ async function renderHistory(){
     }
   }catch{byId('history-count').textContent='–';byId('clear-history').disabled=true;updateHistoryComparisonControls();const e=document.createElement('p');e.className='history-empty';e.textContent='Banco local indisponível.';list.append(e);}
 }
-async function saveHistoryResponse(entry,result,durationMs,responseVaultSecrets){
+async function saveHistoryResponse(entry,result,durationMs,responseVaultSecrets,options={}){
   if(!entry||!result)return;
-  try{entry.response=RunnerLogic.createResponseHistorySnapshot(result,durationMs,{...historySettings,tokenRequest:entry.tokenRequest===true},responseVaultSecrets);await dbWrite('history',entry);await renderHistory();byId('response-persistence-note').textContent='Resposta salva no histórico';}
-  catch(error){showToast('Resposta não salva no histórico',error.message||'A request foi mantida, mas os metadados da resposta não puderam ser gravados.','warning');}
+  try{entry.response=RunnerLogic.createResponseHistorySnapshot(result,durationMs,{...(options.historySettings||historySettings),tokenRequest:entry.tokenRequest===true},responseVaultSecrets);await dbWrite('history',entry);await renderHistory();if(!options.quiet)byId('response-persistence-note').textContent='Resposta salva no histórico';return true;}
+  catch(error){if(!options.quiet)showToast('Resposta não salva no histórico',error.message||'A request foi mantida, mas os metadados da resposta não puderam ser gravados.','warning');return false;}
 }
-async function saveHistory(request){
+async function saveHistory(request,options={}){
   const base=sanitizeBase(request.baseUrl),path=sanitizeRoute(request.route),headers=sanitizeHeaders(request.headers),payload=sanitizeBody(request.body),multipart=normalizePersistableMultipartFields(request.multipartFields,true),graphql=normalizePersistableGraphqlFields(request);
   const saveAuth=request.saveBearerToken===true,storedAuth=RunnerLogic.persistAuthFields({...request,authMode:request.authMode},saveAuth),authType=storedAuth.authType,preRequest=exportPreRequestActions(request,request.preRequestActionsLiteralConsent===true);
   const {authOmitted:storedAuthOmitted,...authFields}=storedAuth,bearerToken=authFields.bearerToken,basicUsername=authFields.basicUsername,basicPassword=authFields.basicPassword,apiKeyName=authFields.apiKeyName,apiKeyLocation=authFields.apiKeyLocation,apiKeyValue=authFields.apiKeyValue,authMode=authFields.authMode;
@@ -951,11 +953,11 @@ async function saveHistory(request){
     ...(responseContract?{responseContract}:{})
   };
   try{
-    const retention=await dbWrite('history',entry);byId('history-panel').open=true;
+    const retention=await dbWrite('history',entry);if(!options.quiet)byId('history-panel').open=true;
     const removed=retention?.removed||0;
      await renderHistory();const message=entry.redacted?'Campos sensíveis ou textos literais pré-request foram omitidos conforme o consentimento.':saveAuth&&hasAuthCredentials(entry)?'Request e credenciais de Auth salvas no banco local.':'Request salva sem credenciais de Auth.';
-    showToast('Histórico salvo',removed?`${message} ${removed} registros antigos foram removidos pela retenção.`:message,'success',3500);return entry;
-  }catch(error){showToast('Histórico indisponível',error.message||'A chamada terminou, mas o registro não pôde ser salvo.','warning');return null;}
+    if(!options.quiet)showToast('Histórico salvo',removed?`${message} ${removed} registros antigos foram removidos pela retenção.`:message,'success',3500);return entry;
+  }catch(error){if(!options.quiet)showToast('Histórico indisponível',error.message||'A chamada terminou, mas o registro não pôde ser salvo.','warning');return null;}
 }
 function applyHistoryEntry(entry,notify=true){
   selectedContainer={collectionId:'',folderId:''};let environmentChanged=false;
@@ -2139,7 +2141,14 @@ function clearWriteConfirmation(){byId('confirm-test-data').checked=false;byId('
 function writeConfirmationValid(){return byId('confirm-test-data').checked&&byId('test-data-phrase').value.trim()==='TESTE';}
 function updateGuard(){
   const isWrite=writeMethods.has(method.value);method.className=`method-select method-${method.value.toLowerCase()}`;
-  writeGuard.hidden=!isWrite;sendButton.disabled=!route.value.trim()||(isWrite&&!writeConfirmationValid());
+  writeGuard.hidden=!isWrite;
+  let disabled=false,message='Revise ambiente e dados antes de enviar.';
+  if(requestSendInProgress){disabled=true;message='Envio em andamento. Aguarde a resposta.';}
+  else if(!route.value.trim()){disabled=true;message='Informe uma rota para enviar a requisição.';}
+  else if(isWrite&&!writeConfirmationValid()){disabled=true;message='Confirme que os dados são de teste e digite TESTE.';}
+  sendButton.disabled=disabled;
+  const status=byId('request-send-status');
+  if(status&&status.textContent!==message)status.textContent=message;
   refreshRequestInspector();
 }
 function escHtml(value){return String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');}
@@ -2996,10 +3005,10 @@ function validateResponseCaptureForm(){
   if(byId('response-capture-target').value==='vault')assertVaultCaptureAvailable({environmentId:activeEnvironmentId||'default'});
 }
 function showResponseVariableResult(title,kind='success'){const section=byId('response-variable-result');section.hidden=false;section.dataset.kind=kind;byId('response-variable-result-title').textContent=title;}
-async function saveEnvironmentVariable(name,value){
+async function saveEnvironmentVariable(name,value,environmentId=activeEnvironmentId){
   if(!/^[A-Za-z0-9_.-]{1,80}$/.test(name)||['__proto__','prototype','constructor'].includes(name))throw Error('Nome da variável inválido.');
   const serialized=typeof value==='string'?value:JSON.stringify(value);if(serialized===undefined||serialized.length>100000)throw Error('O valor está vazio ou excede 100 KB.');
-  const current=getEnvironment(),updated={...current,variables:{...(current.variables||{})}};Object.defineProperty(updated.variables,name,{value:serialized,writable:true,enumerable:true,configurable:true});
+  const current=environments.find(environment=>environment.id===environmentId);if(!current)throw Error('Ambiente de captura indisponível.');const updated={...current,variables:{...(current.variables||{})}};Object.defineProperty(updated.variables,name,{value:serialized,writable:true,enumerable:true,configurable:true});
   await dbWrite('environments',updated);environments=environments.map(environment=>environment.id===updated.id?updated:environment);renderEnvironmentSelect();return updated;
 }
 async function captureResponseVariable(request,result,quiet=false){
@@ -3023,10 +3032,74 @@ async function captureResponseVariable(request,result,quiet=false){
       if(!quiet){showResponseVariableResult(`{{${name}}} salva no cofre do ambiente “${getEnvironment().name}”.`);showToast('Segredo salvo',`{{${name}}} está no cofre cifrado. O valor não é exibido.`,'success');}
       return{ok:true,captured:true,name,target:'vault',environment:getEnvironment().name};
     }
-    const updated=await saveEnvironmentVariable(name,value);
+    const updated=await saveEnvironmentVariable(name,value,request.environmentId||activeEnvironmentId);
     if(!quiet){showResponseVariableResult(`{{${name}}} salva no ambiente “${updated.name}”.`);showToast('Variável salva',`{{${name}}} já pode ser usada nas próximas requests.`,'success');}
     return{ok:true,captured:true,name,target:'environment',environment:updated.name};
   }catch(error){const message=error.message||'Não foi possível ler o valor da resposta.';if(!quiet){showResponseVariableResult(message,'error');showToast('Variável não salva',message,'error');}return{ok:false,captured:true,error:message};}
+}
+function getStructuredSources(input){
+  const collection=findCollection(input.collectionId),container=findFolder(collection,input.folderId||'');
+  const saved=container?.requests?.find(item=>item.id===input.requestId);
+  if(!saved)throw Object.assign(Error('request_not_found'),{code:'request_not_found'});
+  const environment=environments.find(item=>item.id===input.environmentId);
+  if(!environment)throw Object.assign(Error('environment_not_found'),{code:'environment_not_found'});
+  const current=activeWorkspaceTab();
+  return structuredClone({saved,environment,authScopes:authScopesForContainer(input.collectionId,input.folderId||''),
+    vault:input.environmentId===activeEnvironmentId?vaultResolutionInput():{unavailable:true},
+    vaultCaptureReady:!vaultCaptureError({environmentId:input.environmentId}),historySettings,
+    origin:{tabId:current?.id||'',requestId:input.requestId,collectionId:input.collectionId,folderId:input.folderId||''},
+    editorDirty:!!current?.dirty,activeEnvironmentId,activeSaved});
+}
+async function runStructuredRequest(prepared){
+  const call={...prepared.call},started=performance.now();
+  const facts={delivery:'not_sent',httpStatus:null,proxyStatus:null,durationMs:0,assertions:{passed:0,failed:0,partial:0},capture:call.captureResponseVariable?'skipped':'not_requested',persistence:'not_requested'};
+  if(requestSendInProgress)return{...facts,outcome:'local_error'};
+  requestSendInProgress=true;updateGuard();
+  const isCurrent=()=>activeWorkspaceTab()?.id===prepared.origin.tabId&&activeSaved?.id===prepared.origin.requestId&&!activeWorkspaceTab()?.dirty;
+  try{
+    call.confirmTestData=writeMethods.has(call.method);call.testDataPhrase=call.confirmTestData?'TESTE':'';
+    const input={collectionId:prepared.origin.collectionId,folderId:prepared.origin.folderId||null,requestId:prepared.origin.requestId,environmentId:call.environmentId};
+    if(JSON.stringify(getStructuredSources(input))!==prepared.sourceStamp)return{...facts,outcome:'local_error',durationMs:performance.now()-started};
+    const historyEntry=await saveHistory(prepared.historyRequest,{quiet:true});
+    if(!historyEntry)return{...facts,outcome:'local_error',persistence:'failed',durationMs:performance.now()-started};
+    facts.persistence='completed';
+    if(JSON.stringify(getStructuredSources(input))!==prepared.sourceStamp)return{...facts,outcome:'local_error',durationMs:performance.now()-started};
+    if(isCurrent()){clearCurrentResponseExample();showResponse('Enviando…','pending','','');renderResponseTestResults([]);}
+    facts.delivery='unknown';
+    const {proxyStatus,result}=await executeApiRequest(call);
+    facts.proxyStatus=proxyStatus;
+    const status=Number(result?.status);
+    const received=!result?.error&&proxyStatus<400&&Number.isInteger(status)&&status>=100&&status<=599;
+    if(received){facts.delivery='response_received';facts.httpStatus=status;}
+    const persisted=await saveHistoryResponse(historyEntry,result,performance.now()-started,prepared.secrets,{quiet:true,historySettings:prepared.historySettings});
+    facts.persistence=persisted?'completed':'failed';
+    if(!received){
+      if(isCurrent())showResponse('Falha de transporte','bad','','Resultado remoto desconhecido. Não repita uma escrita sem conferir a API.');
+      return{...facts,outcome:'transport_error',durationMs:performance.now()-started};
+    }
+    const bodyValidation=requestBodyContractTestResult(call),tests=[...(bodyValidation?[bodyValidation]:[]),...responseResultsForRequest(call,result)];
+    facts.assertions={passed:tests.filter(item=>item.passed&&!item.partial).length,failed:tests.filter(item=>!item.passed&&!item.partial).length,partial:tests.filter(item=>item.partial).length};
+    if(isCurrent()){
+      const redact=value=>RunnerLogic.redactSecretValues(String(value??''),prepared.secrets);
+      showResponse(String(status),status>=200&&status<300?'ok':'bad',redact(JSON.stringify(result.headers||{},null,2)),redact(result.body));
+      renderResponseTestResults(tests);renderRequestBodyContractResult(bodyValidation);
+      byId('response-persistence-note').textContent=facts.persistence==='completed'?'Resposta salva no histórico':'Resposta recebida; histórico não confirmado';
+    }
+    if(call.captureResponseVariable){
+      const capture=await captureResponseVariable(call,result,true);
+      facts.capture=capture.ok?'completed':capture.captured?'failed':'skipped';
+    }
+    return facts;
+  }catch{return{...facts,outcome:facts.delivery==='not_sent'?'local_error':facts.delivery==='response_received'?'local_error':'transport_error',durationMs:performance.now()-started};}
+  finally{facts.durationMs=Math.max(0,performance.now()-started);requestSendInProgress=false;updateGuard();}
+}
+function initializeStructuredExecution(){
+  StructuredUi.attach({
+    getTarget:()=>activeSaved&&!activeWorkspaceTab()?.dirty?{collectionId:activeSaved.collectionId,folderId:activeSaved.folderId||null,requestId:activeSaved.id,environmentId:activeEnvironmentId}:null,
+    isBusy:()=>requestSendInProgress,
+    readSources:getStructuredSources,materialize:StructuredRequest.materializeSavedRequest,run:runStructuredRequest,
+    confirmReview:review=>confirmWithDialog({eyebrow:'EXECUÇÃO REVISADA',title:'Aprovar preparação '+review.method+'?',description:review.destination,warning:'Confira a rota na request salva e os efeitos de histórico e captura indicados. Aprovar não envia; a autorização vale uma vez por cinco minutos.',confirmLabel:'Aprovar preparação',danger:writeMethods.has(review.method)})
+  });
 }
 async function executeApiRequest(request){
   const {graphqlQuery,graphqlVariables,graphqlOperationName,...proxyRequest}=request;delete proxyRequest.authMode;delete proxyRequest.authSource;delete proxyRequest.collectionId;delete proxyRequest.folderId;delete proxyRequest.saveBearerToken;delete proxyRequest.resolutionProvenance;delete proxyRequest.responseCaptureTarget;delete proxyRequest.preRequestActions;delete proxyRequest.preRequestActionsEnabled;delete proxyRequest.preRequestActionsLiteralConsent;delete proxyRequest.preRequestSecretValues;delete proxyRequest.preRequestProvenance;delete proxyRequest.responseContract;
@@ -3038,6 +3111,7 @@ async function executeApiRequest(request){
 async function performApiRequest(request,button,save,historyRequest=request){
   clearCurrentResponseExample();
   const requestBodyValidation=requestBodyContractTestResult(request);renderRequestBodyContractResult(requestBodyValidation);
+  if(button===sendButton){requestSendInProgress=true;updateGuard();}
   button.disabled=true;byId('request-note').textContent='Aguardando resposta. Credenciais não serão armazenadas automaticamente.';showResponse('Enviando…','pending','','');renderResponseTestResults([]);
   const responseVaultSecrets={...RunnerLogic.secretValuesUsedByProvenance(request.resolutionProvenance,secretVaultValues||{}),...(request.preRequestSecretValues||{})};
   const vaultOrigins=Object.keys(responseVaultSecrets);
@@ -3052,7 +3126,7 @@ async function performApiRequest(request,button,save,historyRequest=request){
     else{const safeReason=RunnerLogic.redactSecretValues(result.reason||'',responseVaultSecrets),status=(result.status+' '+safeReason).trim(),output=RunnerLogic.redactSecretValues(result.body??'',responseVaultSecrets),headers=RunnerLogic.redactSecretValues(JSON.stringify(result.headers??{},null,2),responseVaultSecrets);showResponse(status,result.status>=200&&result.status<300?'ok':'bad',headers,output);apiStatusToast(result.status,safeReason);const testResults=[...(requestBodyValidation?[requestBodyValidation]:[]),...responseResultsForRequest(request,result)];renderResponseTestResults(testResults);if(testResults.length){const failed=testResults.filter(item=>!item.passed&&!item.partial),partial=testResults.filter(item=>item.partial).length,passed=testResults.filter(item=>item.passed).length;showToast(failed.length?'Validações falharam':partial?'Contrato OpenAPI parcial':'Validações passaram',`${passed}/${testResults.length} verificações passaram${partial?` · ${partial} parcial(is)`:''}.`,failed.length?'error':partial?'warning':'success');}await captureResponseVariable(request,result);}
     return result;
   }catch{dismissToast(toast);const message='Servidor local indisponível. Confira se está ativo e tente novamente.';showResponse('Falha local','bad','',message);showToast('Falha de conexão',message,'error');return null;}
-  finally{button.disabled=false;updateGuard();}
+  finally{if(button===sendButton)requestSendInProgress=false;button.disabled=false;updateGuard();}
 }
 function requestFromForm(selectedMethod,requestRoute,resolveValues=true,preRequestExecution=null){
   const preRequestVariables=preRequestExecution?.variables||{},resolve=value=>resolveValues?applyEnvironment(value,preRequestVariables):value,authMode=authModeFromForm(),auth={...authFieldsFromForm(resolve,true),authMode},bodyMode=byId('body-mode').value,graphql=getGraphqlFieldsFromForm();
@@ -3063,6 +3137,7 @@ function requestFromForm(selectedMethod,requestRoute,resolveValues=true,preReque
      preRequestActions:getPreRequestActionsFromForm(),preRequestActionsEnabled:byId('pre-request-actions-enabled').checked,preRequestActionsLiteralConsent:byId('pre-request-literal-consent').checked,preRequestSecretValues:preRequestExecution?.vaultSecrets||{},preRequestProvenance:preRequestExecution?.provenance||{},captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseCaptureTarget:byId('response-capture-target').value==='vault'?'vault':'environment',responseTests:getResponseTestsFromForm(),...(activeResponseContract?{responseContract:activeResponseContract}:{}),resolutionProvenance:{...lastResolutionProvenance,...(preRequestExecution?.provenance||{})}};
 }
 async function sendCurrentRequest(){
+  if(requestSendInProgress)return;
   clearCurrentResponseExample();
   lastResolutionProvenance={};
   const selectedMethod=method.value;let request;
@@ -3200,7 +3275,7 @@ function addEventListeners(){
     if (current < 0 || !tabs.length) return;
     event.preventDefault();const direction = event.key === 'ArrowRight' ? 1 : -1;const next = tabs[(current + direction + tabs.length) % tabs.length];next.focus();void activateWorkspaceTab(next.dataset.workspaceTabId);
   });
-  const editorColumn=document.querySelector('.editor-column'),trackDraft=event=>{if(['confirm-test-data','test-data-phrase','token-client-secret','token-route','token-client-id-field','token-client-secret-field','token-credential-mode','oauth2-token-url','oauth2-client-id','oauth2-client-secret','oauth2-scope','oauth2-client-auth-method','oauth2-allow-insecure-http','oauth2-save-token-environment','oauth-pkce-authorization-url','oauth-pkce-token-url','oauth-pkce-client-id','oauth-pkce-scope','oauth-pkce-redirect-uri','oauth-pkce-save-access-token','oauth-pkce-save-refresh-token','graphql-schema-type'].includes(event.target.id))return;if(['method','base-url','route','headers','body','body-mode'].includes(event.target.id)||event.target.matches('.query-param-row input, .pre-request-action-row input, .pre-request-action-row select'))clearRequestBodyContractResult();if(['base-url','route','headers','auth-inheritance-mode','auth-type','bearer-token','basic-username','basic-password','api-key-name','api-key-value','api-key-location'].includes(event.target.id)||event.target.matches('.query-param-row input'))clearGraphqlSchema('Endpoint, Auth ou Params alterados; carregue o schema GraphQL novamente.');syncActiveWorkspaceTab(true);};
+  const editorColumn=document.querySelector('.editor-column'),trackDraft=event=>{if(event.target.closest('#structured-card'))return;if(['confirm-test-data','test-data-phrase','token-client-secret','token-route','token-client-id-field','token-client-secret-field','token-credential-mode','oauth2-token-url','oauth2-client-id','oauth2-client-secret','oauth2-scope','oauth2-client-auth-method','oauth2-allow-insecure-http','oauth2-save-token-environment','oauth-pkce-authorization-url','oauth-pkce-token-url','oauth-pkce-client-id','oauth-pkce-scope','oauth-pkce-redirect-uri','oauth-pkce-save-access-token','oauth-pkce-save-refresh-token','graphql-schema-type'].includes(event.target.id))return;if(['method','base-url','route','headers','body','body-mode'].includes(event.target.id)||event.target.matches('.query-param-row input, .pre-request-action-row input, .pre-request-action-row select'))clearRequestBodyContractResult();if(['base-url','route','headers','auth-inheritance-mode','auth-type','bearer-token','basic-username','basic-password','api-key-name','api-key-value','api-key-location'].includes(event.target.id)||event.target.matches('.query-param-row input'))clearGraphqlSchema('Endpoint, Auth ou Params alterados; carregue o schema GraphQL novamente.');syncActiveWorkspaceTab(true);};
   editorColumn.addEventListener('input', trackDraft);editorColumn.addEventListener('change', trackDraft);
   document.querySelector('.editor-column').addEventListener('click', event => { if (event.target.closest('.query-param-row .button, .response-test-remove, .pre-request-action-remove')) syncActiveWorkspaceTab(true); });  byId('clear-history').onclick=clearHistory;byId('copy-headers').onclick=()=>copyOutput('response-headers','Cabeçalhos');byId('copy-body').onclick=()=>copyOutput('response-body','Body');document.querySelectorAll('[data-response-view]').forEach(button=>button.onclick=()=>setResponseView(button.dataset.responseView));byId('response-search').addEventListener('input',renderResponseBody);byId('response-tree').addEventListener('click',event=>{const button=event.target.closest('[data-copy-json-path]');if(button)copyResponsePath(button.dataset.copyJsonPath);});
   byId('save-response-example').onclick=openResponseExampleForm;
@@ -3248,9 +3323,10 @@ function addEventListeners(){
 async function startApp(){
   addEventListeners();updateAiFriendlyStatus();renderQueryParams([]);renderMultipartFields([]);renderGraphqlFields({});updateAuthTypeUi();updateBodyModeUi();renderBodyHighlight();
   try{await initializeHostingMode();await initializeDb();await loadSecretVaultForActiveEnvironment();await loadTokenRequestConfig();await loadOAuth2TokenConfig();applyTheme(activeTheme);applyTypography();applyUiScale();renderCollectionTree();renderEnvironmentSelect();await loadOAuthPkceConfig();if(!byId('base-url').value)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';await renderHistory();await initializeWorkspaceTabs();updateGuard();updateCopyButtons();updateTokenButton();updateJsonTools();updateResponseCaptureUi();
-    byId('protect-existing-secrets').hidden=hostedMode;
+    initializeStructuredExecution();byId('protect-existing-secrets').hidden=hostedMode;
     if(hostedMode){byId('sidebar-storage-note').textContent='Coleções e histórico neste navegador';document.querySelector('.sidebar-bottom strong').textContent='Workspace do navegador';byId('history-panel').querySelector('.history-hint').textContent='Histórico e dados ficam neste navegador; exporte backups para transferi-los.';byId('app-storage-note').textContent='Coleções, ambientes, requests e histórico ficam no IndexedDB deste navegador, sem criptografia automática. Use Backup com senha para transportar uma cópia protegida.';}
     else byId('sidebar-storage-note').textContent='SQLite local · proteção de dados';}
   catch(error){const environmentSelect=byId('environment-select');if(environmentSelect.options.length===1&&environmentSelect.options[0].textContent==='Carregando ambientes…')environmentSelect.options[0].textContent='Ambientes indisponíveis';showToast(hostedMode?'Armazenamento do navegador indisponível':'Banco local indisponível',error.message||'Confira o acesso ao armazenamento e tente recarregar.','error',0);updateGuard();updateCopyButtons();updateTokenButton();}
 }
 startApp();
+})();

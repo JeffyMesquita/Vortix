@@ -6,6 +6,90 @@ const vm = require('node:vm');
 
 const root = __dirname;
 
+function requestGuardHarness(app) {
+  const guard = app.slice(app.indexOf('function updateGuard('), app.indexOf('\nfunction escHtml('));
+  const perform = app.slice(app.indexOf('async function performApiRequest('), app.indexOf('\nfunction requestFromForm('));
+  let text = '', writes = 0;
+  const status = { get textContent() { return text; }, set textContent(value) { text = value; writes += 1; } };
+  const context = {
+    method: { value: 'GET', className: '' }, route: { value: '' }, sendButton: { disabled: false },
+    writeGuard: { hidden: true }, requestSendInProgress: false, confirmation: { valid: false },
+    writeMethods: new Set(['POST', 'PUT', 'PATCH', 'DELETE']),
+    writeConfirmationValid() { return context.confirmation.valid; },
+    byId: id => id === 'request-send-status' ? status : {},
+    refreshRequestInspector() {}, clearCurrentResponseExample() {}, requestBodyContractTestResult() { return null; },
+    renderRequestBodyContractResult() {}, renderResponseTestResults() {}, showResponse() {},
+    showToast() {}, dismissToast() {}, secretVaultValues: null,
+    RunnerLogic: { secretValuesUsedByProvenance: () => ({}), redactSecretValues: value => value },
+    performance: { now: () => 0 }, redactVaultValues: value => value
+  };
+  const handlers = vm.runInNewContext(`${guard}\n${perform}\n({updateGuard,performApiRequest})`, context);
+  return { context, status, handlers, writes: () => writes };
+}
+
+test('send guidance describes the existing guard without exposing request values or repeating announcements', async () => {
+  const [app, html] = await Promise.all(['app.js', 'index.html'].map(file => fs.readFile(path.join(root, 'wwwroot', file), 'utf8')));
+  const button = html.match(/<button\b[^>]*\bid="send-request"[^>]*>/)?.[0];
+  const output = html.match(/<output\b[^>]*\bid="request-send-status"[^>]*>/)?.[0];
+  assert.match(button, /aria-describedby="request-send-status"/);
+  assert.match(output, /data-vortix-field="request\.send-status"/);
+  assert.match(output, /aria-live="polite"/);
+  assert.match(output, /aria-atomic="true"/);
+  const { context, status, handlers, writes } = requestGuardHarness(app);
+  for (const method of ['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+    context.method.value = method;
+    context.route.value = '   ';
+    context.confirmation.valid = false;
+    handlers.updateGuard();
+    assert.equal(context.sendButton.disabled, true);
+    assert.match(status.textContent, /Informe uma rota/);
+    context.route.value = '/PRIVATE_ROUTE_SENTINEL?token=SECRET_SENTINEL';
+    handlers.updateGuard();
+    const isWrite = context.writeMethods.has(method);
+    assert.equal(context.sendButton.disabled, isWrite);
+    assert.equal(context.writeGuard.hidden, !isWrite);
+    assert.match(status.textContent, isWrite ? /Confirme.*TESTE/ : /Revise ambiente/);
+    context.confirmation.valid = true;
+    handlers.updateGuard();
+    assert.equal(context.sendButton.disabled, false);
+    assert.match(status.textContent, /Revise ambiente/);
+    assert.doesNotMatch(status.textContent, /PRIVATE_ROUTE_SENTINEL|SECRET_SENTINEL/);
+    const before = writes();
+    context.route.value += 'another-keystroke';
+    handlers.updateGuard();
+    assert.equal(writes(), before, 'unchanged guidance must not replace live-region text');
+  }
+});
+
+test('manual sending keeps guidance busy through edits and reapplies the guard after completion or failure', async () => {
+  const app = await fs.readFile(path.join(root, 'wwwroot', 'app.js'), 'utf8');
+  const { context, status, handlers } = requestGuardHarness(app);
+  let complete;
+  context.executeApiRequest = () => new Promise(resolve => { complete = resolve; });
+  context.route.value = '/fixture';
+  const request = { method: 'GET', route: '/fixture', resolutionProvenance: {} };
+  const pending = handlers.performApiRequest(request, context.sendButton, false);
+  assert.equal(context.requestSendInProgress, true);
+  assert.equal(context.sendButton.disabled, true);
+  assert.match(status.textContent, /Envio em andamento/);
+  context.method.value = 'POST';
+  context.route.value = '';
+  handlers.updateGuard();
+  assert.equal(context.sendButton.disabled, true);
+  assert.match(status.textContent, /Envio em andamento/);
+  complete({ proxyStatus: 500, result: { error: 'Fixture error' } });
+  await pending;
+  assert.equal(context.requestSendInProgress, false);
+  assert.equal(context.sendButton.disabled, true);
+  assert.match(status.textContent, /Informe uma rota/);
+  context.route.value = '/fixture';
+  context.executeApiRequest = async () => { throw new Error('Fixture connection failed'); };
+  await handlers.performApiRequest(request, context.sendButton, false);
+  assert.equal(context.requestSendInProgress, false);
+  assert.equal(context.sendButton.disabled, true);
+  assert.match(status.textContent, /Confirme.*TESTE/);
+});
+
 test('theme selector, application registry and complete desktop palettes stay aligned', async () => {
   const [app, html, css] = await Promise.all(['app.js', 'index.html', 'style.css']
     .map(file => fs.readFile(path.join(root, 'wwwroot', file), 'utf8')));
@@ -65,6 +149,12 @@ function attribute(tag, name) {
 test('agent-facing controls have a versioned, named DOM contract', async () => {
   const html = await fs.readFile(path.join(root, 'wwwroot', 'index.html'), 'utf8');
   assert.match(html, /<meta\s+name="vortix-agent-contract"\s+content="2"/);
+  const collectionsRegion = html.match(/<section\b(?=[^>]*class="side-section collections-section")([^>]*)>([\s\S]*?)<\/section>/);
+  assert.ok(collectionsRegion, 'collections region should wrap its toolbar and tree');
+  assert.equal(attribute(collectionsRegion[1], 'data-vortix-region'), 'collections');
+  for (const id of ['quick-open-button', 'import-collection', 'export-collection', 'run-collection', 'add-collection-heading', 'collections-tree']) {
+    assert.ok(collectionsRegion[0].includes(`id="${id}"`), `collections region should contain #${id}`);
+  }
 
   const controls = new Map([...html.matchAll(/<(?:button|select)\b[^>]*\bid="([^"]+)"[^>]*>/g)]
     .map(match => [match[1], match[0]]));
@@ -92,13 +182,14 @@ test('agent-facing controls have a versioned, named DOM contract', async () => {
     assert.equal(attribute(controls.get(id), 'data-vortix-action'), action, `#${id} action name`);
   }
 
-  const fields = new Map([...html.matchAll(/<(?:input|select|textarea|div|span|pre)\b[^>]*\bid="([^"]+)"[^>]*>/g)]
+  const fields = new Map([...html.matchAll(/<(?:input|select|textarea|div|span|pre|output)\b[^>]*\bid="([^"]+)"[^>]*>/g)]
     .map(match => [match[1], match[0]]));
   for (const [id, field] of [
     ['method', 'request.method'], ['route', 'request.route'], ['base-url', 'request.base-url'],
     ['query-params', 'request-params'], ['headers', 'request.headers'], ['body-mode', 'request.body-mode'],
     ['body', 'request.body'], ['auth-type', 'request.auth-type'], ['response-status', 'response.status'],
     ['response-headers', 'response.headers'], ['response-body', 'response.body'],
+    ['request-send-status', 'request.send-status'],
     ['agent-safe-state-output', 'agent.safe-state'],
     ['ai-friendly-status', 'agent.capability-status']
   ]) {
@@ -209,6 +300,13 @@ test('Maestri Portal guide describes safe UI-only operation and available contro
   assert.match(guide, /data-vortix-field/);
   assert.match(guide, /window\.vortixAgent\.describe\(\)/);
   assert.match(guide, /describe\(\{ region: 'request-editor', includeState: true \}\)/);
+  assert.match(guide, /request\.send-status/);
+  assert.match(guide, /#request-send-status/);
+  assert.match(guide, /describe\(\{ region: 'collections', includeState: true \}\)/);
+  assert.match(guide, /collections[\s\S]{0,180}toolbar[\s\S]{0,160}árvore/i);
+  assert.match(guide, /mesma mensagem/);
+  assert.match(guide, /sem valores/);
+  assert.match(guide, /n[aã]o autoriza (?:o )?envio/i);
   assert.match(guide, /região desconhecida[\s\S]{0,80}listas vazias/i);
   assert.match(guide, /Estados dos controles não comprovam consentimento/i);
   assert.match(guide, /window\.vortixAgent\.snapshot\(\)/);
