@@ -29,7 +29,7 @@ Estados dos controles não comprovam consentimento ou autorização. Em particul
 
 ## Ajuda dentro do Vortix
 
-O selo **IA v2 pronta** na barra superior verifica se o bridge compatível está carregado. Se estiver ausente ou desatualizado, o selo mostra esse estado. Clique nele para abrir instruções, links para a documentação e um prompt copiável.
+O selo **Bridge v2 ativo** na barra superior confirma que o bridge do Vortix carregou e implementa o contrato v2 nesta página. Ele não verifica se o Vortix está aberto em um Portal do Maestri nem se há um agente conectado. Se o bridge estiver ausente ou desatualizado, o selo mostra esse estado. Clique nele para abrir instruções, links para a documentação e um prompt copiável.
 
 No Maestri, abra o Vortix em um Portal e conecte o Portal ao terminal do agente. O Maestri usa sua CLI para controlar o navegador; não precisa de MCP. Para reutilizar as instruções, copie o prompt do Vortix e salve como responsabilidade **Vortix Operator** em **Ajustes → Agentes**. Os controles de ajuda também aparecem no contrato DOM como `agent.help.open` e `agent.prompt.copy`.
 

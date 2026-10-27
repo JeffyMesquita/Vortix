@@ -64,13 +64,13 @@ function createDocument() {
   const actions = [
     element({ id: 'send-request', dataset: { vortixAction: 'request.send' }, label: 'Enviar', disabled: true }),
     element({ id: 'refresh-agent-safe-state', dataset: { vortixAction: 'agent.snapshot.refresh' }, label: 'Gerar estado seguro', disabled: false }),
-    element({ id: 'ai-friendly-trigger', dataset: { vortixAction: 'agent.help.open' }, label: 'IA v2 pronta', disabled: false }),
+    element({ id: 'ai-friendly-trigger', dataset: { vortixAction: 'agent.help.open' }, label: 'Bridge v2 ativo', disabled: false }),
     element({ id: 'copy-maestri-agent-prompt', dataset: { vortixAction: 'agent.prompt.copy' }, label: 'Copiar prompt', disabled: false })
   ];
   const fields = [
     element({ id: 'method', dataset: { vortixField: 'request.method' }, value: 'PATCH', disabled: false }),
     element({ id: 'bearer-token', dataset: { vortixField: 'request.auth.bearer' }, value: values.auth, type: 'password', disabled: false }),
-    element({ id: 'ai-friendly-status', dataset: { vortixField: 'agent.capability-status' }, textContent: 'IA v2 pronta' })
+    element({ id: 'ai-friendly-status', dataset: { vortixField: 'agent.capability-status' }, textContent: 'Bridge v2 ativo' })
   ];
   const requestEditor = element({ id: 'request-editor', dataset: { vortixRegion: 'request-editor' } });
   const historyRegion = element({ id: 'history-panel', dataset: { vortixRegion: 'history' }, open: true });

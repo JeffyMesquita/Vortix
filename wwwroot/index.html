@@ -63,8 +63,8 @@
       <header class="workspace-bar">
         <div class="breadcrumb"><span>Workspace</span><span class="breadcrumb-separator">/</span><strong id="request-title">Nova requisição</strong></div>
         <div class="workspace-actions">
-          <button class="ai-friendly-trigger" id="ai-friendly-trigger" data-state="checking" data-vortix-action="agent.help.open" type="button" aria-haspopup="dialog" aria-controls="ai-help-dialog" aria-label="Verificando suporte a IA">
-            <span class="ai-friendly-dot" aria-hidden="true"></span><span id="ai-friendly-trigger-label">Verificando IA</span>
+          <button class="ai-friendly-trigger" id="ai-friendly-trigger" data-state="checking" data-vortix-action="agent.help.open" type="button" aria-haspopup="dialog" aria-controls="ai-help-dialog" aria-label="Verificando bridge">
+            <span class="ai-friendly-dot" aria-hidden="true"></span><span id="ai-friendly-trigger-label">Verificando bridge</span>
           </button>
           <button class="button secondary compact-button" id="workspace-fullscreen-toggle" data-vortix-action="workspace.fullscreen.toggle" type="button" aria-pressed="false" title="Tela cheia indisponível" disabled>Tela cheia</button>
           <label class="environment-picker" for="environment-select"><span>AMBIENTE</span><select id="environment-select" data-vortix-action="environment.select" data-vortix-region="environment" aria-label="Ambiente ativo" disabled><option value="" selected disabled>Carregando ambientes…</option></select></label>
@@ -437,7 +437,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
     <div class="dialog-heading"><div><h2 id="ai-help-title">Use Vortix com IA</h2><p class="dialog-description" id="ai-help-description">Conecte um agente ao Portal do Maestri pela CLI nativa; não precisa servidor MCP. O Vortix oferece descoberta de controles e estado seguro pela página.</p></div><button class="icon-button dialog-close" id="close-ai-help" type="button" aria-label="Fechar ajuda de IA">×</button></div>
     <div class="dialog-scroll ai-help-content">
       <div class="dialog-note ai-friendly-status" id="ai-friendly-status" data-state="checking" data-vortix-field="agent.capability-status" role="status">
-        <span class="ai-friendly-dot" aria-hidden="true"></span><div><strong id="ai-friendly-status-title">Verificando compatibilidade</strong><p id="ai-friendly-status-text">Consultando o bridge de IA desta página.</p></div>
+        <span class="ai-friendly-dot" aria-hidden="true"></span><div><strong id="ai-friendly-status-title">Verificando bridge</strong><p id="ai-friendly-status-text">Verificando o contrato do bridge do Vortix nesta página.</p></div>
       </div>
       <ol class="ai-help-steps">
         <li>Abra o Vortix em um Portal do Maestri e conecte o Portal ao terminal do agente.</li>
