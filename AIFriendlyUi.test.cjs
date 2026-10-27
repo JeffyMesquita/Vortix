@@ -311,7 +311,7 @@ test('Maestri Portal guide describes safe UI-only operation and available contro
   assert.match(guide, /Estados dos controles não comprovam consentimento/i);
   assert.match(guide, /window\.vortixAgent\.snapshot\(\)/);
   assert.match(guide, /agent-safe-state/);
-  assert.match(guide, /IA v2 pronta/);
+  assert.match(guide, /Bridge v2 ativo/);
   assert.match(guide, /agent\.help\.open/);
   assert.match(guide, /GET|HEAD|OPTIONS/);
   assert.match(guide, /POST[\s\S]*PUT[\s\S]*PATCH[\s\S]*DELETE/);
@@ -322,7 +322,7 @@ test('Maestri Portal guide describes safe UI-only operation and available contro
   assert.match(guide, /Copiar contexto seguro/);
   assert.match(guide, /bloquear a cópia[\s\S]{0,120}somente leitura/i);
   assert.match(readme, /## Automação por IA com Maestri Portal/);
-  assert.match(readme, /selo \*\*IA v2 pronta\*\*/);
+  assert.match(readme, /selo \*\*Bridge v2 ativo\*\*/);
   assert.match(readme, /\[guia para agentes no Maestri Portal\]\(docs\/maestri-portal\.md\)/i);
   assert.match(readme, /\.agents\/skills\/vortix-maestri-operator\/SKILL\.md/);
 });
@@ -520,7 +520,7 @@ test('clipboard denial selects readonly snapshot fallback; missing or old bridge
   }
 });
 
-test('AI readiness reports ready only for the supported bridge contract', async () => {
+test('bridge status reports ready only for the supported contract', async () => {
   const app = await fs.readFile(path.join(root, 'wwwroot', 'app.js'), 'utf8');
   const start = app.indexOf('function resolveAiFriendlyStatus(');
   const end = app.indexOf('\nfunction updateAiFriendlyStatus(', start);
