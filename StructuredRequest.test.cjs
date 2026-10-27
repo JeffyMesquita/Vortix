@@ -48,3 +48,12 @@ test('review displays only origin, never path/query/credentials or secret host',
   assert.equal(reviewDestination('https://user:password@example.test/private?token=SECRET', {}), 'https://example.test');
   assert.equal(reviewDestination('https://SECRET.example.test', { key: 'SECRET' }), null);
 });
+
+test('preparation rejects literal and resolved base URL queries and fragments before approval', () => {
+  for (const baseUrl of ['https://api.example.test?tenant=QUERY_SENTINEL', 'https://api.example.test#FRAGMENT_SENTINEL']) {
+    for (const saved of [{ baseUrl, route: '/health' }, { baseUrl: '{{baseUrl}}', route: '/health' }]) {
+      const source = sources({ saved, environment: { id: 'test', variables: { baseUrl } } });
+      assert.throws(() => materializeSavedRequest(source), error => error.code === 'invalid_request' && error.message === 'invalid_request');
+    }
+  }
+});

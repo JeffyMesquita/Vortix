@@ -56,6 +56,8 @@ Os campos permanecem editáveis, mas alterações posteriores não modificam o s
 
 O registro interno guarda até 20 resumos finais em memória. Fechar/recarregar a aba perde os identificadores; não há recuperação durável do protocolo nem replay automático.
 
+Ao sair e voltar pelo cache de navegação do navegador, preparações ainda não executadas perdem a aprovação e precisam ser preparadas novamente. O painel retoma a atualização; uma execução já iniciada continua sendo acompanhada sem reenvio. Se o navegador recarregar o documento em vez de restaurá-lo do cache, aplicam-se os limites de perda de estado acima.
+
 ## Como interpretar o resultado
 
 | Sinal | Significado | Próximo passo |
@@ -71,6 +73,7 @@ Zero testes configurados não comprova cobertura. Uma resposta HTTP 200 também 
 
 ## Persistência e segurança
 
+- A URL base deve ser HTTP(S), sem credenciais, query ou fragmento; esses componentes são rejeitados já na preparação, inclusive quando vierem de variáveis.
 - O fluxo revisado não persiste Auth e não altera a preferência global do envio manual. Históricos antigos não são apagados automaticamente.
 - Histórico, retenção de body e capturas seguem os efeitos e políticas revisados. Aprovar uma request não autoriza outras requests ou o Runner inteiro.
 - Erro de histórico obrigatório antes do transporte bloqueia a chamada. Se houver edição durante essa gravação assíncrona, o envio é impedido; o registro prévio pode permanecer no histórico.

@@ -39,3 +39,10 @@ Na mesma tela final de fixture: snapshot DOM de 8.417 caracteres; texto do resum
 Sem validação de transporte externo, integração real Maestri ou APIs de terceiros. Timeout/perda de estado segue conservador: entrega desconhecida não autoriza replay. Recarregar descarta IDs em memória. A captura para cofre e cenários de falha são cobertos pelos testes/limites existentes, mas não foram exercitados com um cofre real no smoke visual desta rodada.
 
 A delegação pelo bridge foi iniciada, mas não retornou metadados confirmados. Não atribuir a entrega a uma execução DeepSeek comprovada. As verificações locais e a revisão independente são a evidência desta entrega.
+
+## Ajustes solicitados no PR #34
+
+- Restauração por cache de navegação: `pagehide` persistido pausa atualização e invalida aprovação pendente; `pageshow` persistido retoma um único timer. Execução iniciada mantém o mesmo registro e não é reenviada. Descarte permanente continua liberando o controlador.
+- URL base com query/fragmento, literal ou resolvida por variável, passa a ser bloqueada antes da aprovação, alinhada à validação do proxy.
+- Quatro regressões novas falharam antes das correções e passaram depois: ciclos repetidos de cache, execução em andamento sem replay, descarte permanente e URLs inválidas. As 14 verificações de UI/preparação direcionadas passaram; suíte completa: 350 testes, 349 passaram, um ignorado, nenhuma falha. Build Release sem avisos/erros e sintaxe conferida.
+- Smoke de navegação em instância e SQLite descartáveis: sair para página em branco, voltar pelo navegador e preparar novamente deixou aprovação disponível e envio bloqueado até nova autorização. O navegador reabriu o documento nesta execução; o caminho `persisted: true` foi exercitado deterministicamente nos testes automatizados, não comprovado por esse smoke.

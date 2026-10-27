@@ -85,10 +85,24 @@
       refresh();
     };
     cancel.onclick = () => { reset('preparation_cancelled'); refresh(); prepare.focus(); };
-    const interval = setInterval(refresh, 500);
+    let interval = setInterval(refresh, 500);
     document.addEventListener('input', refresh);
     document.addEventListener('change', refresh);
-    window.addEventListener('pagehide', () => { disposed = true; clearInterval(interval); controller.dispose(); materialized = null; sourcesStamp = ''; }, { once: true });
+    window.addEventListener('pagehide', event => {
+      disposed = true; clearInterval(interval); interval = null;
+      if (event.persisted) {
+        if (!executionId) { reset('preparation_invalidated'); target = null; }
+      } else {
+        controller.dispose(); materialized = null; sourcesStamp = ''; target = null;
+      }
+      prepare.disabled = true; approve.disabled = true; execute.disabled = true; cancel.disabled = true;
+    });
+    window.addEventListener('pageshow', event => {
+      if (!event.persisted) return;
+      disposed = false;
+      if (interval === null) interval = setInterval(refresh, 500);
+      refresh();
+    });
     refresh();
   }
   root.StructuredUi = Object.freeze({ attach });

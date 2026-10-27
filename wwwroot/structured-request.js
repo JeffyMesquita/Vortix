@@ -28,7 +28,7 @@
         : logic.runPreRequestActions(saved.preRequestActions, variables, {}, sources.vault);
       const call = logic.prepareSavedRequest(saved, variables, {}, true, sources.authScopes, sources.vault, preRequest.variables);
       const base = new URL(call.baseUrl);
-      if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || !call.route || /[\r\n]/.test(call.route)) throw blocked('invalid_request');
+      if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash || !call.route || /[\r\n]/.test(call.route)) throw blocked('invalid_request');
       const insecureOrigin = logic.remoteHttpOrigin(call.baseUrl);
       if (insecureOrigin && !call.allowInsecureHttp) throw blocked('invalid_request');
       if (saved.captureResponseVariable) {

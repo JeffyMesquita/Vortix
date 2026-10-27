@@ -7,17 +7,18 @@ function harness(method = 'GET') {
   const elements = new Map();
   const ids = ['structured-card', 'structured-prepare', 'structured-approve', 'structured-execute', 'structured-cancel', 'structured-status', 'structured-review', 'structured-write-guard', 'structured-confirm', 'structured-phrase', 'structured-destination', 'structured-effects'];
   for (const id of ids) elements.set(id, { textContent: '', disabled: false, hidden: true, checked: false, value: '', focus() { this.focused = true; } });
-  let tick, time = 0, sequence = 0;
+  let time = 0, sequence = 0, timerSequence = 0;
+  const timers = new Map(), listeners = new Map();
   const context = vm.createContext({
     document: { getElementById: id => elements.get(id), addEventListener() {} },
-    window: { addEventListener() {} }, performance: { now: () => time },
+    window: { addEventListener(name, callback, options) { const entries = listeners.get(name) || []; entries.push({ callback, once: options?.once }); listeners.set(name, entries); } }, performance: { now: () => time },
     crypto: { randomUUID: () => `id-${++sequence}` },
-    setInterval(callback) { tick = callback; return 1; }, clearInterval() {}, structuredClone,
+    setInterval(callback) { const id = ++timerSequence; timers.set(id, callback); return id; }, clearInterval(id) { timers.delete(id); }, structuredClone,
     method
   });
   for (const file of ['structured-execution.js', 'structured-ui.js']) vm.runInContext(fs.readFileSync(`./wwwroot/${file}`, 'utf8'), context);
   vm.runInContext(`
-    var calls = 0, revision = 0, canConfirm = true;
+    var calls = 0, revision = 0, canConfirm = true, pendingResult = null, completeRun;
     var finalFacts = {delivery:'response_received', httpStatus:200, proxyStatus:200, durationMs:1, assertions:{passed:1,failed:0,partial:0},capture:'not_requested',persistence:'completed'};
     var target = { collectionId:'c1', folderId:null, requestId:'r1', environmentId:'e1' };
     StructuredUi.attach({
@@ -25,10 +26,15 @@ function harness(method = 'GET') {
       readSources: () => ({ revision, method }),
       materialize: source => ({request: {method:source.method}, warnings:[], review: {method:source.method,destination:'http://127.0.0.1',capture:false,saveResponseBody:false}}),
       confirmReview: async () => canConfirm,
-      run: async () => { calls++; return finalFacts; }
+      run: async () => { calls++; return pendingResult || finalFacts; }
     });
   `, context);
-  return { context, field: id => elements.get(`structured-${id}`), tick: () => tick(), advance: amount => { time += amount; } };
+  return {
+    context, field: id => elements.get(`structured-${id}`),
+    tick: () => { for (const callback of timers.values()) callback(); },
+    advance: amount => { time += amount; }, timerCount: () => timers.size,
+    emit(name, event) { for (const entry of [...(listeners.get(name) || [])]) { if (entry.once) listeners.set(name, listeners.get(name).filter(item => item !== entry)); entry.callback(event); } }
+  };
 }
 
 test('prepare and approve are side-effect free; execution uses one prepared call', async () => {
@@ -104,4 +110,50 @@ test('partial validation is visibly distinct from a fully completed validation',
   page.tick();
   assert.match(page.field('status').textContent, /validação parcial/);
   assert.doesNotMatch(page.field('status').textContent, /: concluído/);
+});
+
+test('back-forward restoration invalidates pending approval and resumes the panel repeatedly', async () => {
+  const page = harness();
+  for (let cycle = 0; cycle < 2; cycle++) {
+    page.field('prepare').onclick();
+    await page.field('approve').onclick();
+    assert.equal(page.field('execute').disabled, false);
+    page.emit('pagehide', { persisted: true });
+    assert.equal(page.timerCount(), 0);
+    page.emit('pageshow', { persisted: true });
+    page.emit('pageshow', { persisted: true });
+    assert.equal(page.timerCount(), 1);
+    assert.equal(page.field('execute').disabled, true);
+    assert.equal(page.field('prepare').disabled, false);
+    page.field('prepare').onclick();
+    assert.equal(page.field('approve').disabled, false);
+  }
+  assert.equal(page.context.calls, 0);
+});
+
+test('back-forward restoration retains an in-flight execution without replaying it', async () => {
+  const page = harness();
+  vm.runInContext('pendingResult = new Promise(resolve => { completeRun = resolve; })', page.context);
+  page.field('prepare').onclick();
+  await page.field('approve').onclick();
+  await page.field('execute').onclick();
+  page.emit('pagehide', { persisted: true });
+  page.emit('pageshow', { persisted: true });
+  assert.equal(page.field('execute').disabled, true);
+  assert.equal(page.field('prepare').disabled, true);
+  vm.runInContext('completeRun(finalFacts)', page.context);
+  await new Promise(resolve => setImmediate(resolve));
+  page.tick();
+  assert.equal(page.context.calls, 1);
+  assert.match(page.field('status').textContent, /HTTP 200/);
+  assert.equal(page.field('prepare').disabled, false);
+});
+
+test('permanent page teardown stops timers and disables stale controls', () => {
+  const page = harness();
+  page.field('prepare').onclick();
+  page.emit('pagehide', { persisted: false });
+  page.emit('pageshow', { persisted: false });
+  assert.equal(page.timerCount(), 0);
+  for (const name of ['prepare', 'approve', 'execute', 'cancel']) assert.equal(page.field(name).disabled, true);
 });
