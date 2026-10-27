@@ -74,6 +74,7 @@ Zero testes configurados não comprova cobertura. Uma resposta HTTP 200 também 
 ## Persistência e segurança
 
 - A URL base deve ser HTTP(S), sem credenciais, query ou fragmento; esses componentes são rejeitados já na preparação, inclusive quando vierem de variáveis.
+- HTTPS é recomendado. No modo local, HTTP em localhost funciona sem configuração adicional. HTTP remoto exige habilitar **Permitir HTTP sem TLS para esta request fora de localhost** (`allowInsecureHttp`) e salvar a request antes de prepará-la. Essa opção não remove as demais proteções de rede do proxy.
 - O fluxo revisado não persiste Auth e não altera a preferência global do envio manual. Históricos antigos não são apagados automaticamente.
 - Histórico, retenção de body e capturas seguem os efeitos e políticas revisados. Aprovar uma request não autoriza outras requests ou o Runner inteiro.
 - Erro de histórico obrigatório antes do transporte bloqueia a chamada. Se houver edição durante essa gravação assíncrona, o envio é impedido; o registro prévio pode permanecer no histórico.
