@@ -2,6 +2,8 @@
 
 **Estado atual — reorganização desktop concluída localmente em 28/10/2026:** [entrega e evidências](superpowers/validation/2026-10-28-beginner-ui.md). Usuário aprovou o desenho e depois dispensou otimização mobile. `master/eafccf9`, sem stage/commit/publicação; diagnóstico compacto anterior preservado. Os registros abaixo mantêm o histórico das etapas.
 
+**Publicação desta entrega:** [PR #35](https://github.com/JeffyMesquita/Vortix/pull/35), branch `feat/beginner-ui-compact-diagnostics`. Primeiro commit do pacote: `a3387b1a0f6d9c56191b818a24e2ac4b857fa2c8`. O estado vivo, o merge commit e os gates remotos ficam no PR e na aba Checks; as menções anteriores a ausência de commit/publicação são retratos históricos, não bloqueios atuais. [Sessões e terminais](operations/2026-10-28-delivery-sessions.md) registrados para retomada.
+
 Atualizado em 28/10/2026 antes de reiniciar o PC. **Comece pelo checkpoint local `docs/handoff-reboot-2026-10-28.md` (preservado fora da seleção versionável)**: checkout final, backup, alterações sem commit, evidências, próximos passos e prompt para nova conversa. Este fichário não inicia trabalho nem concede autorização para executar APIs.
 
 ## Premissa do produto
@@ -168,3 +170,5 @@ Após a entrega, o usuário autorizou explicitamente **commit, PR e merge** e pe
 Branch de publicação: `feat/beginner-ui-compact-diagnostics`, criada após fetch com `master/eafccf9` igual a `origin/master`. Pacote inclui diagnóstico compacto e UI desktop, necessários juntos, testes, CI e evidências. `Orquestrador.md`, handoff de reboot, diff local de revisão e capturas mobile permanecem fora da seleção versionável. Nenhum banco, chave ou dado pessoal integra o pacote.
 
 Preparação: build Release `--no-restore`, 413 testes Node (412 aprovados, zero falhas, um skip), sintaxe e diff-check passaram novamente. Workflow agora inclui `BeginnerUi.test.cjs`. Publicar e fazer merge somente depois de conferir os gates remotos; anotar PR/run e resultado final na conclusão desta operação.
+
+PR aberto e conferido pela CLI e Portal: [#35](https://github.com/JeffyMesquita/Vortix/pull/35), inicialmente com head `a3387b1`. CI inicial: [run 40734962096](https://github.com/JeffyMesquita/Vortix/actions/runs/40734962096). Este registro documental acrescenta os vínculos de publicação; o head final precisa ter seus próprios checks aprovados antes do merge. Resultado final também será preservado no registro local de publicação, fora do código versionado, sem exigir outro PR apenas para registrar o hash do próprio merge.
