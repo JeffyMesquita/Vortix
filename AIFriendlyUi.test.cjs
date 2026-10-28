@@ -592,3 +592,112 @@ test('structured diagnostics load before consumers and expose an accessible expl
   assert.match(css, /structured-diagnostic-summary/);
   assert.match(css, /structured-diagnostic-go/);
 });
+
+const sharingTitle = 'Vortix — Cliente de APIs para criar e testar requisições';
+const sharingDescription = 'Crie, organize e teste requisições HTTP no navegador. Use coleções, ambientes e testes de resposta no Vortix, sem criar conta.';
+
+async function readOfficialOrigin() {
+  const render = await fs.readFile(path.join(root, 'render.yaml'), 'utf8');
+  const declared = render.match(/ApiStudio__PublicOrigin\s*\r?\n\s*value:\s*(https:\/\/[^\s]+)/)?.[1];
+  const domain = render.match(/domains:\s*\r?\n\s*-\s*([^\s]+)/)?.[1];
+  assert.ok(declared, 'render.yaml should declare ApiStudio__PublicOrigin');
+  assert.ok(domain, 'render.yaml should declare the service domain');
+  const origin = new URL(declared);
+  assert.equal(origin.protocol, 'https:');
+  assert.equal(origin.hostname, domain, 'public origin and service domain should agree');
+  return origin.origin + '/';
+}
+
+function metaTags(html, key, value) {
+  return [...html.matchAll(/<meta\b[^>]*>/g)].map(match => match[0]).filter(tag => attribute(tag, key) === value);
+}
+function singleMeta(html, key, value, label) {
+  const tags = metaTags(html, key, value);
+  assert.equal(tags.length, 1, label + ' should be declared exactly once');
+  return tags[0];
+}
+function assertAbsoluteHttps(value, label, host) {
+  const parsed = new URL(value);
+  assert.equal(parsed.protocol, 'https:', label + ' should use HTTPS');
+  assert.equal(parsed.hostname, host, label + ' should use the official host from render.yaml');
+  return parsed;
+}
+
+test('sharing metadata is unique, consistent and absolute HTTPS', async () => {
+  const origin = await readOfficialOrigin();
+  const host = new URL(origin).hostname;
+  const ogImageUrl = origin + 'social/vortix-og-v1.png';
+  const html = await fs.readFile(path.join(root, 'wwwroot', 'index.html'), 'utf8');
+  const head = html.slice(0, html.indexOf('</head>'));
+  const title = head.match(/<title>([\s\S]*?)<\/title>/)?.[1];
+  assert.equal(title, sharingTitle);
+  const description = singleMeta(head, 'name', 'description', 'description');
+  assert.equal(attribute(description, 'content'), sharingDescription);
+  const canonical = [...head.matchAll(/<link\b[^>]*>/g)].map(match => match[0]).filter(tag => attribute(tag, 'rel') === 'canonical');
+  assert.equal(canonical.length, 1, 'canonical should be declared exactly once');
+  assert.equal(attribute(canonical[0], 'href'), origin);
+  assertAbsoluteHttps(attribute(canonical[0], 'href'), 'canonical', host);
+
+  const expected = [
+    ['og:type', 'website'], ['og:site_name', 'Vortix'], ['og:locale', 'pt_BR'],
+    ['og:title', sharingTitle], ['og:description', sharingDescription], ['og:url', origin],
+    ['og:image', ogImageUrl], ['og:image:type', 'image/png']
+  ];
+  for (const [property, content] of expected) {
+    assert.equal(attribute(singleMeta(head, 'property', property, property), 'content'), content);
+  }
+  for (const property of ['og:image:width', 'og:image:height']) {
+    assert.match(attribute(singleMeta(head, 'property', property, property), 'content'), /^[1-9]\d*$/, property + ' should be the real pixel size');
+  }
+  const ogAlt = attribute(singleMeta(head, 'property', 'og:image:alt', 'og:image:alt'), 'content');
+  assert.ok(ogAlt.length >= 20 && /Vortix/.test(ogAlt), 'og:image:alt should describe the Vortix preview');
+  assert.match(ogAlt, /Cliente de APIs no navegador/i);
+  assert.match(ogAlt, /conexões abstratas/i);
+  assert.doesNotMatch(ogAlt, /editor|painel/i, 'alt should not invent UI that is not in the image');
+
+  assert.equal(attribute(singleMeta(head, 'name', 'twitter:card', 'twitter:card'), 'content'), 'summary_large_image');
+  assert.equal(attribute(singleMeta(head, 'name', 'twitter:title', 'twitter:title'), 'content'), sharingTitle);
+  assert.equal(attribute(singleMeta(head, 'name', 'twitter:description', 'twitter:description'), 'content'), sharingDescription);
+  const twitterImage = attribute(singleMeta(head, 'name', 'twitter:image', 'twitter:image'), 'content');
+  assert.equal(twitterImage, ogImageUrl);
+  assertAbsoluteHttps(twitterImage, 'twitter:image', host);
+  assert.equal(attribute(singleMeta(head, 'name', 'twitter:image:alt', 'twitter:image:alt'), 'content'), ogAlt);
+
+  assert.ok(html.includes('<link rel="icon" type="image/svg+xml" href="/vortix-mark.svg">'), 'favicon should remain');
+  assert.ok(html.includes('<meta name="vortix-agent-contract" content="2">'), 'bridge contract should remain');
+  assert.equal(metaTags(head, 'name', 'keywords').length, 0, 'no keyword stuffing');
+  assert.equal(head.includes('application/ld+json'), false, 'no invented schema');
+  assert.doesNotMatch(head, /googletagmanager|google-analytics|plausible|umami/i, 'no analytics tags');
+});
+
+test('robots and sitemap expose only the canonical root', async () => {
+  const origin = await readOfficialOrigin();
+  const robots = await fs.readFile(path.join(root, 'wwwroot', 'robots.txt'), 'utf8');
+  const lines = robots.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  assert.ok(lines.includes('User-agent: *'));
+  assert.ok(lines.includes('Allow: /'));
+  assert.ok(lines.includes('Disallow: /api/'));
+  assert.ok(lines.includes('Disallow: /oauth/'));
+  assert.ok(lines.includes('Sitemap: ' + origin + 'sitemap.xml'));
+  assert.equal(lines.filter(line => /^Disallow:/i.test(line)).length, 2);
+
+  const sitemap = await fs.readFile(path.join(root, 'wwwroot', 'sitemap.xml'), 'utf8');
+  assert.match(sitemap, /<urlset\b[^>]*xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9"/);
+  const locations = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map(match => match[1]);
+  assert.deepEqual(locations, [origin]);
+  assert.doesNotMatch(sitemap, /lastmod/i, 'no invented lastmod');
+});
+
+test('the referenced Open Graph image is present and matches its declared size', async () => {
+  const { existsSync, readFileSync } = require('node:fs');
+  const imagePath = path.join(root, 'wwwroot', 'social', 'vortix-og-v1.png');
+  assert.ok(existsSync(imagePath), 'OG image must exist at wwwroot/social/vortix-og-v1.png');
+  const html = await fs.readFile(path.join(root, 'wwwroot', 'index.html'), 'utf8');
+  const head = html.slice(0, html.indexOf('</head>'));
+  const png = readFileSync(imagePath);
+  assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'OG image should be a PNG');
+  for (const [property, offset] of [['og:image:width', 16], ['og:image:height', 20]]) {
+    const declared = attribute(singleMeta(head, 'property', property, property), 'content');
+    assert.equal(declared, String(png.readUInt32BE(offset)), property + ' should match the PNG IHDR');
+  }
+});

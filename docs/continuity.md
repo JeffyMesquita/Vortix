@@ -172,3 +172,11 @@ Branch de publicação: `feat/beginner-ui-compact-diagnostics`, criada após fet
 Preparação: build Release `--no-restore`, 413 testes Node (412 aprovados, zero falhas, um skip), sintaxe e diff-check passaram novamente. Workflow agora inclui `BeginnerUi.test.cjs`. Publicar e fazer merge somente depois de conferir os gates remotos; anotar PR/run e resultado final na conclusão desta operação.
 
 PR aberto e conferido pela CLI e Portal: [#35](https://github.com/JeffyMesquita/Vortix/pull/35), inicialmente com head `a3387b1`. CI inicial: [run 40734962096](https://github.com/JeffyMesquita/Vortix/actions/runs/40734962096). Este registro documental acrescenta os vínculos de publicação; o head final precisa ter seus próprios checks aprovados antes do merge. Resultado final também será preservado no registro local de publicação, fora do código versionado, sem exigir outro PR apenas para registrar o hash do próprio merge.
+
+### Missão SEO e prévia social — 28/10/2026
+
+Usuário pediu trabalhar SEO/OG após mostrar uma prévia do domínio sem imagem. Base publicada `master/000ef34`, PR #35 já mergeado e CI pós-merge aprovado. [Validação desta missão](superpowers/validation/2026-10-28-seo-social-preview.md) registra diagnóstico público, asset, prompt e limites.
+
+Senku implementou somente head HTML, robots/sitemap e testes de metadata; Maestro criou PNG e documentação; Hange revisou em leitura. Terminais/sessões são os mesmos do índice existente. Domínio público foi conferido com `render.yaml`; dimensões reais do PNG 1717×916 declaradas nas tags. Teste agora exige existência do arquivo. Preservados scripts, favicon, bridge e todo fluxo de requests. Sem mobile ou nova dependência.
+
+416 testes locais: 415 aprovados, zero falhas, um skip; AIFriendlyUi 20/20. Instância temporária em loopback serviu HTML, PNG, robots e sitemap com HTTP 200 e MIME corretos. A origem pública antes desta publicação tinha zero OG, sem description/canonical e 404 em robots/sitemap; não declarar prévia de WhatsApp validada apenas pelo teste local. Seguir fluxo de publicação autorizado e conferir a origem pública após o merge.
