@@ -1,5 +1,17 @@
 # SEO básico e prévia social — Vortix
 
+## Correção após retorno do usuário: thumbnail ausente no WhatsApp
+
+Após o PR #36, o usuário mostrou título e descrição presentes, mas sem thumbnail. Requisições com user-agent `WhatsApp/2.24.0.0 A` e `facebookexternalhit/1.1` receberam HTTP 200 no HTML e no PNG, com MIME correto e sem redirects. O arquivo publicado tinha 1.312.784 bytes. Isso comprova entrega HTTP, não compatibilidade com a prévia do aplicativo; a validação anterior não cobria um orçamento de peso.
+
+Hipótese desta correção: peso excessivo do asset. Exportada a mesma arte como JPEG baseline, qualidade 82, via encoder nativo disponível no Windows, sem nova geração visual, recorte, resize ou dependência. Original preservado. Novo arquivo `wwwroot/social/vortix-og-v2.jpg`: **1717×916, 87.884 bytes**, redução de **93,31%**. `og:image` e `twitter:image` usam a nova URL HTTPS; MIME declarado `image/jpeg`; dimensões, alt e identidade canonical preservados. A URL versionada evita reutilizar o endereço do PNG em caches de imagem, sem alterar canonical ou `og:url`.
+
+Adotado orçamento conservador do projeto de **200 KiB**. Não declarar que esse é um limite oficial do WhatsApp: a documentação Meta consultada retornou HTTP 429 e fontes de terceiros divergem nos números. O ponto verificado é a redução do arquivo, não uma confirmação causal dentro do cliente.
+
+Regressão RED/GREEN observada com head apontando ao PNG antigo e após a troca. Teste exige o JPEG, assinatura, dimensões reais via SOF coerentes com tags e tamanho dentro do orçamento. AIFriendlyUi 20/20, sintaxe e diff-check passaram. Confirmação visual no WhatsApp continua dependendo de novo teste pelo usuário; nenhuma mensagem ou configuração de privacidade foi manipulada pela automação.
+
+Os registros abaixo preservam a primeira entrega do PNG e seus limites.
+
 Data: 28/10/2026. Base: `master/000ef3401ccb87a7acda6877e058330b795869fd`; branch `feat/seo-social-preview`. Escopo: corrigir apresentação de links compartilhados e metadados básicos, sem redesenhar UI ou retomar mobile.
 
 ## Diagnóstico em produção
