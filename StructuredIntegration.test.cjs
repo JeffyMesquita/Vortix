@@ -105,3 +105,103 @@ test('application credentials and execution adapters remain in private lexical s
   assert.equal(vm.runInContext('typeof runStructuredRequest', context), 'undefined');
   assert.equal(vm.runInContext('typeof secretVaultValues', context), 'undefined');
 });
+
+function diagnosticReadinessHarness() {
+  const source = fs.readFileSync('./wwwroot/app.js', 'utf8');
+  const start = source.indexOf('function getDiagnosticReadiness(');
+  assert.ok(start >= 0, 'app.js should define the private diagnostic readiness adapter');
+  const end = source.indexOf('\nfunction ', start + 1);
+  assert.ok(end > start, 'diagnostic readiness adapter should be a focused function');
+  const state = {
+    tab: { id: 'tab-private', dirty: false },
+    saved: { id: 'request-private', collectionId: 'collection-private', folderId: '' },
+    selectedContainer: { collectionId: 'collection-private', folderId: '' },
+    collections: [{ id: 'collection-private', requests: [{ id: 'request-private' }] }],
+    environments: [{ id: 'environment-private' }],
+    activeEnvironmentId: 'environment-private',
+    requestSendInProgress: false,
+    revision: 7,
+    sourceReads: 0,
+    secretReads: 0
+  };
+  const context = {
+    activeWorkspaceTab: () => state.tab,
+    get activeSaved() { return state.saved; },
+    get selectedContainer() { return state.selectedContainer; },
+    get collections() { return state.collections; },
+    get environments() { return state.environments; },
+    get activeEnvironmentId() { return state.activeEnvironmentId; },
+    get requestSendInProgress() { return state.requestSendInProgress; },
+    get structuredDiagnosticContextRevision() { return state.revision; },
+    findCollection: id => state.collections.find(collection => collection.id === id),
+    findFolder: collection => collection,
+    getStructuredSources() { state.sourceReads += 1; throw Error('source materialization forbidden'); },
+    vaultResolutionInput() { state.secretReads += 1; throw Error('credential access forbidden'); }
+  };
+  const handler = vm.runInNewContext(`${source.slice(start, end)}\ngetDiagnosticReadiness`, context);
+  return { handler, state };
+}
+
+test('diagnostic readiness distinguishes private blockers without materializing sources or reading secrets', () => {
+  const page = diagnosticReadinessHarness();
+  const origin = {
+    collectionId: 'collection-private', folderId: '', requestId: 'request-private', environmentId: 'environment-private'
+  };
+  const ready = page.handler(origin);
+  assert.deepEqual({
+    blocker: ready.blocker,
+    contextMatches: ready.contextMatches,
+    requestSaved: ready.requestSaved,
+    draftDirty: ready.draftDirty,
+    requestExists: ready.requestExists,
+    environmentExists: ready.environmentExists,
+    executorBusy: ready.executorBusy,
+    revision: ready.revision
+  }, {
+    blocker: null, contextMatches: true, requestSaved: true, draftDirty: false,
+    requestExists: true, environmentExists: true, executorBusy: false, revision: 7
+  });
+
+  page.state.saved = null;
+  assert.equal(page.handler(null).blocker, 'request_not_saved');
+  page.state.saved = { id: 'request-private', collectionId: 'collection-private', folderId: '' };
+  page.state.tab.dirty = true;
+  assert.equal(page.handler(origin).blocker, 'unsaved_changes');
+  page.state.tab.dirty = false;
+  page.state.collections[0].requests = [];
+  assert.equal(page.handler(origin).blocker, 'request_not_found');
+  page.state.collections[0].requests = [{ id: 'request-private' }];
+  page.state.environments = [];
+  assert.equal(page.handler(origin).blocker, 'environment_not_found');
+  page.state.environments = [{ id: 'environment-private' }];
+  page.state.requestSendInProgress = true;
+  assert.equal(page.handler(origin).blocker, 'execution_in_progress');
+  assert.equal(page.state.sourceReads, 0);
+  assert.equal(page.state.secretReads, 0);
+  assert.deepEqual(Object.keys(ready.origin).sort(), ['collectionId', 'environmentId', 'folderId', 'requestId', 'tabId'].sort());
+  assert.doesNotMatch(JSON.stringify(ready.origin), /SECRET_SENTINEL|BODY_SENTINEL/);
+});
+
+test('tab navigation changes diagnostic origin without changing semantic revision', () => {
+  const page = diagnosticReadinessHarness();
+  const origin = {
+    tabId: 'tab-private', collectionId: 'collection-private', folderId: '',
+    requestId: 'request-private', environmentId: 'environment-private'
+  };
+  const original = page.handler(origin);
+  assert.equal(original.contextMatches, true);
+  page.state.tab = { id: 'tab-other', dirty: false };
+  const away = page.handler(origin);
+  assert.equal(away.contextMatches, false);
+  assert.equal(away.revision, original.revision);
+  page.state.tab = { id: 'tab-private', dirty: false };
+  const returned = page.handler(origin);
+  assert.equal(returned.contextMatches, true);
+  assert.equal(returned.revision, original.revision);
+
+  const source = fs.readFileSync('./wwwroot/app.js', 'utf8');
+  const start = source.indexOf('function activateWorkspaceTab(');
+  const end = source.indexOf('\nfunction ', start + 1);
+  assert.ok(start >= 0 && end > start, 'workspace activation should be a focused function');
+  assert.match(source.slice(start, end), /invalidateStructuredDiagnosticContext\(false\)/);
+});

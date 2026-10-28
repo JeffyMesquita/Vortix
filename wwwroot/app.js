@@ -37,8 +37,18 @@ let tokenRequestConfig = RunnerLogic.normalizeTokenRequestConfig(), oauth2TokenC
 let oauthPkceConfig = RunnerLogic.normalizeOAuthPkceConfig(), oauthPkceBusy = false, oauthPkceCancelRequested = false, oauthPkcePopup = null, oauthPkcePreviewTimer = 0;
 let hostedMode = false;
 let requestSendInProgress = false;
+let structuredExecutionHandle = null, structuredDiagnosticContextRevision = 0, structuredDiagnosticContextInvalidated = false;
 let secretVault = null, secretVaultValues = null, secretVaultEnvelope = null, secretVaultNames = [], secretVaultBusy = false, secretVaultEnvironmentId = '', secretVaultUnavailable = null, secretVaultLoading = false;
 let lastResolutionProvenance = {};
+
+function invalidateStructuredDiagnosticContext(semanticChange=true){
+  if(semanticChange&&!structuredDiagnosticContextInvalidated){structuredDiagnosticContextRevision=Math.min(Number.MAX_SAFE_INTEGER,structuredDiagnosticContextRevision+1);structuredDiagnosticContextInvalidated=true;}
+  structuredExecutionHandle?.invalidateDiagnosticContext();
+}
+function invalidateStructuredDiagnosticForDraft(event){
+  const target=event.target;
+  if(target?.closest?.('#request-workspace-panel')&&!target.closest('#structured-card'))invalidateStructuredDiagnosticContext();
+}
 
 function openLegacyDb() {
   if (legacyDbPromise) return legacyDbPromise;
@@ -1018,6 +1028,7 @@ function authScopesBeforeRunnerTarget(collection,folderId=''){
   return authScopeEntries([collection,...folders.slice(0,-1)]);
 }
 async function saveAuthDefault(){
+  invalidateStructuredDiagnosticContext();
   const collection=findCollection(selectedContainer.collectionId),container=selectedContainer.folderId?findFolder(collection,selectedContainer.folderId):collection;
   if(!collection||!container){showToast('Selecione um destino','Escolha uma coleção ou pasta antes de salvar o padrão.','warning');return;}
   const fields=authFieldsFromForm(value=>value,true),saved=RunnerLogic.persistAuthFields({...fields,authMode:'custom'},byId('save-token-history').checked);
@@ -1325,7 +1336,7 @@ function activeWorkspaceTab(){return workspaceTabs.find(tab=>tab.id===activeWork
 function captureResponseTestDraft(){return[...byId('response-tests-list').querySelectorAll('.response-test-row')].map(row=>({id:row.dataset.testId,target:row.querySelector('.response-test-target').value,path:row.querySelector('.response-test-path').value,operator:row.querySelector('.response-test-operator').value,expected:row.querySelector('.response-test-expected').value}));}
 function capturePreRequestActionsDraft(){return[...byId('pre-request-actions').querySelectorAll('.pre-request-action-row')].map(row=>({type:row.querySelector('[data-pre-request-type]').value,name:row.querySelector('[data-pre-request-name]').value,value:row.querySelector('[data-pre-request-value]').value}));}
 function getPreRequestActionsFromForm(){const draft=capturePreRequestActionsDraft();if(!byId('pre-request-actions-enabled').checked){try{return RunnerLogic.normalizePreRequestActions(draft);}catch{return[];}}return RunnerLogic.normalizePreRequestActions(draft);}
-function updatePreRequestActionsUi(){const list=byId('pre-request-actions'),hasActions=list.children.length>0,enabled=byId('pre-request-actions-enabled'),rows=[...list.children];byId('pre-request-actions-empty').hidden=hasActions;byId('add-pre-request-action').disabled=rows.length>=10;list.dataset.enabled=String(enabled.checked);rows.forEach((row,index)=>{row.querySelector('[data-pre-request-move="up"]').disabled=index===0;row.querySelector('[data-pre-request-move="down"]').disabled=index===rows.length-1;});}
+function updatePreRequestActionsUi(){const list=byId('pre-request-actions'),hasActions=list.children.length>0,enabled=byId('pre-request-actions-enabled'),rows=[...list.children];byId('pre-request-actions-empty').hidden=hasActions;byId('add-pre-request-action').disabled=rows.length>=10;list.dataset.enabled=String(enabled.checked);rows.forEach((row,index)=>{row.querySelector('[data-pre-request-move="up"]').disabled=index===0;row.querySelector('[data-pre-request-move="down"]').disabled=index===rows.length-1;});updateAdvancedToolsIndicator();}
 function createPreRequestActionRow(action={type:'uuid',name:'request_id'}){
   const normalized=RunnerLogic.normalizePreRequestActions([action])[0],row=document.createElement('div');row.className='pre-request-action-row';
   const type=document.createElement('select');type.dataset.preRequestType='';type.setAttribute('aria-label','Tipo de ação pré-request');for(const[value,label]of[['uuid','UUID'],['timestamp','Timestamp UTC'],['template','Template']]){const option=document.createElement('option');option.value=value;option.textContent=label;type.append(option);}type.value=normalized.type;
@@ -1350,7 +1361,7 @@ function restoreResponseTestDraft(tests){
     row.querySelector('.response-test-path').value=String(source?.path??'');row.querySelector('.response-test-expected').value=String(source?.expected??'');
     const operator=row.querySelector('.response-test-operator');operator.value=String(source?.operator||'');row.dataset.operator=operator.value;updateResponseTestRow(row,false);list.append(row);
   }
-  renderResponseTestResults([]);
+  renderResponseTestResults([]);updateAdvancedToolsIndicator();
 }
 function renderWorkspaceTabs(){
   const list=byId('workspace-tabs');if(!list)return;list.replaceChildren();
@@ -1374,6 +1385,7 @@ async function persistWorkspaceTabsNow(){
 function scheduleWorkspaceTabsPersist(){clearTimeout(workspaceTabsSaveTimer);workspaceTabsSaveTimer=setTimeout(()=>void persistWorkspaceTabsNow(),250);}
 function syncActiveWorkspaceTab(markDirty=false){
   if(workspaceTabsLoading)return activeWorkspaceTab();
+  if(markDirty)invalidateStructuredDiagnosticContext();
   const tab=activeWorkspaceTab();if(!tab)return null;const draft=captureWorkspaceDraft();tab.rawDraft=draft;tab.title=draft.title||tab.title;tab.activeSaved=draft.activeSaved;tab.collectionId=draft.collectionId;tab.folderId=draft.folderId;tab.editorSection=draft.editorSection;tab.saveBearerToken=draft.saveBearerToken;
   if(markDirty)tab.dirty=true;
   try{tab.request=getSnapshot();}catch{}
@@ -1398,10 +1410,12 @@ function applyWorkspaceTab(tab){
   tab.rawDraft=captureWorkspaceDraft();tab.saveBearerToken=byId('save-token-history').checked;try{tab.request=getSnapshot();}catch{}
 }
 function activateWorkspaceTab(id){
+  if(id!==activeWorkspaceTabId)invalidateStructuredDiagnosticContext(false);
   const target=workspaceTabs.find(tab=>tab.id===id);if(!target||id===activeWorkspaceTabId)return;const keepFocus=byId('workspace-tabs').contains(document.activeElement);syncActiveWorkspaceTab();activeWorkspaceTabId=id;applyWorkspaceTab(target);clearWorkspaceResponse();renderWorkspaceTabs();scheduleWorkspaceTabsPersist();
   if(keepFocus){const selected=[...byId('workspace-tabs').querySelectorAll('[role="tab"]')].find(tab=>tab.dataset.workspaceTabId===id);selected?.focus();}
 }
 function createWorkspaceTabFromCurrent(title){
+  invalidateStructuredDiagnosticContext(false);
   byId('request-title').textContent=title||'Nova requisição';const draft=captureWorkspaceDraft();let request;
   try{request=getSnapshot();}catch(error){showToast('Revise a requisição',error.message||'Corrija os campos antes de abrir a aba.','error');return null;}
   const tab={id:newId(),title:draft.title,request,activeSaved:draft.activeSaved,collectionId:draft.collectionId,folderId:draft.folderId,editorSection:draft.editorSection,saveBearerToken:draft.saveBearerToken,dirty:false,rawDraft:draft};workspaceTabs.push(tab);activeWorkspaceTabId=tab.id;clearWorkspaceResponse();renderWorkspaceTabs();scheduleWorkspaceTabsPersist();return tab;
@@ -1413,6 +1427,7 @@ function resetEditorForNewWorkspaceTab(title){
   activeSaved=null;byId('request-title').textContent=title;renderQueryParams([]);clearWriteConfirmation();updateGuard();renderBodyHighlight();updateJsonTools();setEditorTab('params');
 }
 function createNewWorkspaceTab(notify=true){
+  invalidateStructuredDiagnosticContext(false);
   if(workspaceTabs.length>=MAX_WORKSPACE_TABS){showToast('Limite de abas','Feche uma aba antes de abrir outra.','warning');return false;}
   syncActiveWorkspaceTab();const title=nextWorkspaceDraftTitle();activeWorkspaceTabId='';resetEditorForNewWorkspaceTab(title);const tab=createWorkspaceTabFromCurrent(title);if(tab&&notify)showToast('Nova aba','Rascunho pronto; salve a requisi\u00e7\u00e3o numa cole\u00e7\u00e3o para reutilizar.','info');return !!tab;
 }
@@ -1423,6 +1438,7 @@ function openCollectionRequestInTab(request,collectionId,folderId){
   const saved={id:request.id,name:request.name,collectionId,folderId},tab={id:newId(),title:request.name||request.route||'Requisição salva',request:{...request},activeSaved:saved,collectionId,folderId,editorSection:'params',saveBearerToken:hasAuthCredentials(request)||byId('save-token-history').checked,dirty:false,rawDraft:null};workspaceTabs.push(tab);activateWorkspaceTab(tab.id);showToast('Requisição aberta','Request aberta em nova aba.','success',2500);
 }
 function closeWorkspaceTab(id){
+  if(id===activeWorkspaceTabId)invalidateStructuredDiagnosticContext(false);
   const index=workspaceTabs.findIndex(tab=>tab.id===id);if(index<0)return;const tab=workspaceTabs[index];void closeWorkspaceTabAfterConfirm(index,id,tab.dirty);
 }
 async function closeWorkspaceTabAfterConfirm(index,id,dirty){
@@ -1557,9 +1573,9 @@ async function persistCollections(){for(const item of collections)await dbWrite(
 async function addCollection(){
   const name=await promptWithDialog({eyebrow:'COLEÇÕES',title:'Nova coleção',description:'Organize requisições relacionadas em uma coleção.',inputLabel:'Nome da coleção',placeholder:'Ex.: API de grupos',confirmLabel:'Criar coleção'});
   if(!name?.trim())return;
-  const item={id:newId(),name:name.trim(),folders:[],requests:[]};collections.push(item);selectedContainer={collectionId:item.id,folderId:''};
-  try{await dbWrite('collections',item);renderCollectionTree();showToast('Coleção criada','“'+item.name+'” está pronta para organizar requests.','success');}
-  catch(error){collections=collections.filter(x=>x.id!==item.id);showToast('Falha ao salvar',error.message||'Não foi possível criar a coleção local.','error');}
+  const item={id:newId(),name:name.trim(),folders:[],requests:[]},previousSelection={...selectedContainer};collections.push(item);
+  try{await dbWrite('collections',item);selectedContainer={collectionId:item.id,folderId:''};renderCollectionTree();showToast('Coleção criada','“'+item.name+'” está pronta para organizar requests.','success');}
+  catch(error){collections=collections.filter(x=>x.id!==item.id);selectedContainer=previousSelection;showToast('Falha ao salvar',error.message||'Não foi possível criar a coleção local.','error');}
 }
 async function addFolder(collectionId,parentId=''){
   const name=await promptWithDialog({eyebrow:'PASTAS',title:'Nova pasta',description:'Crie uma pasta ou subpasta para organizar as requisições.',inputLabel:'Nome da pasta',placeholder:'Ex.: Consultas',confirmLabel:'Criar pasta'});
@@ -1595,6 +1611,7 @@ async function manageNode(collectionId,folderId,kind){
   catch{showToast('Falha ao excluir','O banco local não concluiu a exclusão.','error');}
 }
 async function deleteCollectionRequest(collectionId,folderId,id){
+  invalidateStructuredDiagnosticContext();
   if(!(await confirmWithDialog({eyebrow:'EXCLUSÃO',title:'Excluir requisição?',description:'A requisição salva será removida da coleção.',confirmLabel:'Excluir requisição',danger:true})))return;
   const container=findFolder(findCollection(collectionId),folderId);if(!container)return;
   container.requests=(container.requests||[]).filter(x=>x.id!==id);
@@ -1798,6 +1815,7 @@ async function exportEncryptedWorkspaceBackup(){
   finally{passphrase='';button.disabled=false;button.textContent='Backup com senha';}
 }
 async function restoreWorkspaceBackup(event){
+  invalidateStructuredDiagnosticContext();
   const file=event.target.files?.[0];if(!file)return;
   try{
     if(file.size>RunnerLogic.maxEncryptedWorkspaceBackupBytes)throw Error('Arquivo excede o limite de 22 MB.');
@@ -1818,6 +1836,7 @@ async function restoreWorkspaceBackup(event){
   finally{event.target.value='';}
 }
 async function protectExistingSecrets(){
+  invalidateStructuredDiagnosticContext();
   if(hostedMode){showToast('Proteção não disponível','Dados hospedados ficam apenas no armazenamento deste navegador. Use Backup com senha para exportar uma cópia protegida.','info');return;}
   const confirmation=await promptWithDialog({eyebrow:'PROTEÇÃO DOS DADOS',title:'Proteger dados existentes?',description:'Baixe um backup completo antes. Bodies e campos reconhecidos como sensíveis serão protegidos pelo ASP.NET Core Data Protection.',warning:'O backup JSON fica em texto puro. A migração protege o SQLite, mas não apaga cópias antigas do IndexedDB. A leitura depende das chaves e da identidade desta instalação. Digite BACKUP após baixar a cópia.',inputLabel:'Confirmação',placeholder:'Digite BACKUP',maxLength:12,confirmLabel:'Proteger dados',danger:true});
   if(String(confirmation||'').trim().toUpperCase()!=='BACKUP'){if(confirmation!==null)showToast('Migração cancelada','Baixe um backup completo e digite BACKUP para continuar.','info');return;}
@@ -2058,6 +2077,7 @@ function openImportedCommandDraft(){
   }catch(importError){error.textContent=importError.message||'Não foi possível importar o comando.';error.hidden=false;}
 }
 async function importCollectionFile(event){
+  invalidateStructuredDiagnosticContext();
   const file=event.target.files?.[0];event.target.value='';if(!file)return;
   try{
     if(file.size>10*1024*1024)throw Error('O arquivo ultrapassa o limite de 10 MB.');
@@ -2092,9 +2112,15 @@ function flattenContainers(){
   const result=[];const visit=(collection,node,folders=[])=>{result.push({collectionId:collection.id,folderId:folders.at(-1)?.id||'',label:collection.name+(folders.length?' / '+folders.map(x=>x.name).join(' / '):'')});for(const folder of node.folders||[])visit(collection,folder,[...folders,folder]);};
   for(const collection of collections)visit(collection,collection);return result;
 }
-function openSaveDialog(){
-  if(!collections.length){showToast('Crie uma coleção','Adicione uma coleção antes de salvar requests.','info');return;}
+async function openSaveDialog(){
   try{buildRequestRoute();}catch(error){showToast('Revise a requisição',error.message,'error');return;}
+  if(!collections.length){
+    const proceed=await confirmWithDialog({eyebrow:'COLEÇÕES',title:'Criar coleção para salvar?',description:'Salvar precisa de uma coleção. Crie uma agora ou cancele para manter este rascunho como está.',confirmLabel:'Criar coleção'});
+    if(!proceed)return;
+    /* Reuse the existing creation flow; it only changes state after a successful write. */
+    const before=collections.length;await addCollection();
+    if(collections.length===before)return;
+  }
   byId('saved-request-name').value=activeSaved?.name||route.value.trim()||'Nova requisição';
   const select=byId('saved-request-folder');select.replaceChildren();
   for(const item of flattenContainers()){const option=document.createElement('option');option.value=`${item.collectionId}|${item.folderId}`;option.textContent=item.label;option.selected=item.collectionId===selectedContainer.collectionId&&item.folderId===selectedContainer.folderId;select.append(option);}
@@ -2111,6 +2137,7 @@ function getSnapshot(){
      redacted:base.redacted||path.redacted||headers.redacted||payload.redacted||authOmitted||multipart.redacted||graphql.redacted||preRequest.actions.length!==preRequestInput.length};
 }
 async function saveCollectionRequest(event){
+  invalidateStructuredDiagnosticContext();
   event.preventDefault();const name=byId('saved-request-name').value.trim(),[collectionId,folderId='']=byId('saved-request-folder').value.split('|');
   const collection=findCollection(collectionId),container=findFolder(collection,folderId);if(!name)return;if(!collection||!container){showToast('Destino inválido','Selecione uma coleção ou pasta válida para salvar.','error');return;}
   selectedContainer={collectionId,folderId};if(authModeFromForm()==='inherit')applyAuthFields({authMode:'inherit'});
@@ -2149,7 +2176,21 @@ function updateGuard(){
   sendButton.disabled=disabled;
   const status=byId('request-send-status');
   if(status&&status.textContent!==message)status.textContent=message;
-  refreshRequestInspector();
+  refreshRequestInspector();updateAdvancedToolsIndicator();
+}
+function updateAdvancedToolsIndicator(){
+  const indicator=byId('advanced-active-indicator');if(!indicator)return '';
+  const active=[];
+  if(byId('allow-insecure-http')?.checked)active.push('HTTP sem TLS');
+  if(byId('pre-request-actions-enabled')?.checked&&byId('pre-request-actions')?.children?.length)active.push('automação antes do envio');
+  if(byId('capture-response-variable')?.checked)active.push('captura após resposta');
+  if(byId('response-tests-list')?.children?.length)active.push('testes de resposta');
+  if(typeof activeResponseContract!=='undefined'&&activeResponseContract)active.push('contrato OpenAPI');
+  if(byId('token-helper')?.open||byId('oauth2-helper')?.open||byId('oauth-pkce-helper')?.open)active.push('autenticação avançada');
+  const text=active.length?`Avançado ativo: ${active.join(' · ')}`:'';
+  if(indicator.textContent!==text)indicator.textContent=text;
+  indicator.hidden=!active.length;
+  return text;
 }
 function escHtml(value){return String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');}
 function highlightJson(value){
@@ -2183,7 +2224,7 @@ function handleJsonKeydown(event){
 }
 function showResponse(statusText,statusClass,headersText,bodyText){
   const status=byId('response-status');status.textContent=statusText;status.title=statusText;status.className='status '+statusClass;
-  const headers=byId('response-headers');headers.innerHTML=headersText?highlightJson(headersText):'A resposta aparecerá aqui.';headers.classList.toggle('empty',!headersText);
+  const headers=byId('response-headers');headers.innerHTML=headersText?highlightJson(headersText):'Os cabeçalhos aparecerão após o envio.';headers.classList.toggle('empty',!headersText);
   responseBodyState=RunnerLogic.parseResponseBody(bodyText);responseTreeSource=null;
   if(!responseBodyState.isJson&&responseBodyView==='tree')responseBodyView='pretty';
   if(!responseBodyState.raw)byId('response-search').value='';
@@ -2201,7 +2242,7 @@ function renderResponseBody(){
   const raw=responseBodyState.raw,query=search.value.trim(),text=responseBodyView==='raw'?raw:responseBodyState.pretty;
   output.classList.toggle('empty',!raw);search.disabled=!raw;
   document.querySelectorAll('[data-response-view]').forEach(button=>{button.setAttribute('aria-pressed',String(button.dataset.responseView===responseBodyView));button.disabled=!raw||(button.dataset.responseView==='tree'&&!responseBodyState.isJson);});
-  if(!raw){pre.textContent='A resposta aparecerá aqui.';pre.hidden=false;tree.replaceChildren();tree.hidden=true;responseTreeSource=null;byId('response-search-count').textContent='';return;}
+  if(!raw){pre.textContent='Envie a request para ver o status e o corpo da resposta.';pre.hidden=false;tree.replaceChildren();tree.hidden=true;responseTreeSource=null;byId('response-search-count').textContent='';return;}
   const matches=RunnerLogic.findTextMatches(text,query);byId('response-search-count').textContent=query?(matches.length?matches.length+' '+(matches.length===1?'ocorrência':'ocorrências'):'Nenhuma ocorrência'):'';
   if(responseBodyView==='tree'){pre.hidden=true;tree.hidden=false;if(responseTreeSource!==responseBodyState)buildResponseTree();const found=filterResponseTree(query);tree.querySelector('.response-tree-empty').hidden=!query||found;return;}
   tree.hidden=true;pre.hidden=false;pre.innerHTML=highlightJson(text);highlightResponseMatches(pre,query);
@@ -2288,12 +2329,12 @@ function createResponseTestRow(rule={id:newId(),target:'status',operator:'equals
   const path=document.createElement('input');path.type='text';path.className='response-test-path';path.value=normalized.path;path.placeholder='data.id';path.autocomplete='off';path.spellcheck=false;path.setAttribute('aria-label','Caminho JSON');
   const operator=document.createElement('select');operator.className='response-test-operator';operator.setAttribute('aria-label','Condição do teste');
   const expected=document.createElement('input');expected.type='text';expected.className='response-test-expected';expected.value=normalized.expected;expected.autocomplete='off';expected.spellcheck=false;expected.placeholder='200';expected.setAttribute('aria-label','Valor esperado');
-  const remove=document.createElement('button');remove.type='button';remove.className='response-test-remove';remove.textContent='×';remove.setAttribute('aria-label','Remover teste da resposta');remove.onclick=()=>row.remove();
+  const remove=document.createElement('button');remove.type='button';remove.className='response-test-remove';remove.textContent='×';remove.setAttribute('aria-label','Remover teste da resposta');remove.onclick=()=>{row.remove();updateAdvancedToolsIndicator();};
   row.dataset.operator=normalized.operator;row.append(responseTestField('Alvo',target,`response-test-target-${row.dataset.testId}`),responseTestField('Campo JSON',path,`response-test-path-${row.dataset.testId}`),responseTestField('Condição',operator,`response-test-operator-${row.dataset.testId}`),responseTestField('Valor esperado',expected,`response-test-expected-${row.dataset.testId}`),remove);
   target.onchange=()=>updateResponseTestRow(row,true);operator.onchange=()=>updateResponseTestRow(row);updateResponseTestRow(row);return row;
 }
 function setResponseTests(tests){
-  const normalized=RunnerLogic.normalizeResponseTests(tests||[]),list=byId('response-tests-list');list.replaceChildren(...normalized.map(createResponseTestRow));renderResponseTestResults([]);
+  const normalized=RunnerLogic.normalizeResponseTests(tests||[]),list=byId('response-tests-list');list.replaceChildren(...normalized.map(createResponseTestRow));renderResponseTestResults([]);updateAdvancedToolsIndicator();
 }
 function getResponseTestsFromForm(){
   return RunnerLogic.normalizeResponseTests([...byId('response-tests-list').querySelectorAll('.response-test-row')].map(row=>({
@@ -2303,7 +2344,7 @@ function getResponseTestsFromForm(){
 }
 function addResponseTest(){
   const list=byId('response-tests-list');if(list.children.length>=20){showToast('Limite de testes','Cada requisição aceita até 20 verificações.','warning');return;}
-  const row=createResponseTestRow();list.append(row);row.querySelector('.response-test-target').focus();
+  const row=createResponseTestRow();list.append(row);row.querySelector('.response-test-target').focus();updateAdvancedToolsIndicator();
 }
 function responseContractTestResult(request,result){
   const contract=request?.responseContract;
@@ -2355,7 +2396,7 @@ function responseResultsForRequest(request,result){
 }
 function setActiveResponseContract(contract){
   activeResponseContract=RunnerLogic.sanitizeOpenApiResponseContract(contract);
-  updateResponseContractNote();updateRequestBodyContractNote();clearRequestBodyContractResult();
+  updateResponseContractNote();updateRequestBodyContractNote();clearRequestBodyContractResult();updateAdvancedToolsIndicator();
 }
 function updateRequestBodyContractNote(){
   const panel=byId('request-body-contract-panel'),note=byId('request-body-contract-note'),button=byId('validate-request-body');if(!panel||!note||!button)return;
@@ -2614,6 +2655,7 @@ function renderEnvironmentSelect(){
     const option=document.createElement('option');option.value=env.id;option.textContent=env.name;option.selected=env.id===activeEnvironmentId;groups.get(group).append(option);}
   void renderCookieJar();
 }async function chooseEnvironment(id){
+  invalidateStructuredDiagnosticContext();
   if(!environments.some(x=>x.id===id))return;
   if(id===activeEnvironmentId)return;
   releaseSecretVaultMemory();
@@ -2778,6 +2820,7 @@ async function recoverSecretVaultAfterFailure(){
   renderSecretVaultUi();refreshRequestInspector();
 }
 async function createSecretVaultFromUi(){
+  invalidateStructuredDiagnosticContext();
   if(secretVaultBusy)return;
   if(secretVaultLoading||secretVaultUnavailable){showToast('Cofre indisponível','Não crie um cofre enquanto o registro atual não puder ser lido. Recarregue ou remova o registro inválido.','warning');return;}
   if(secretVaultEnvelope){showToast('Cofre já existe','Desbloqueie o cofre existente ou remova-o antes de criar outro.','warning');return;}
@@ -2791,6 +2834,7 @@ async function createSecretVaultFromUi(){
   finally{secretVaultBusy=false;input.value='';renderSecretVaultUi();refreshRequestInspector();if(secretVaultValues)byId('secret-vault-value').focus();}
 }
 async function unlockSecretVaultFromUi(){
+  invalidateStructuredDiagnosticContext();
   if(secretVaultBusy)return;
   if(secretVaultLoading||secretVaultUnavailable){showToast('Cofre indisponível','Não desbloqueie um cofre cujo registro não pôde ser lido. Recarregue ou remova o registro.','warning');return;}
   if(!secretVaultEnvelope){showToast('Crie o cofre','Defina uma senha de pelo menos 12 caracteres para criar o cofre deste ambiente.','info');return;}
@@ -2807,10 +2851,12 @@ async function unlockSecretVaultFromUi(){
   finally{secretVaultBusy=false;input.value='';renderSecretVaultUi();refreshRequestInspector();if(secretVaultValues)byId('secret-vault-name').focus();}
 }
 async function lockSecretVaultFromUi(){
+  invalidateStructuredDiagnosticContext();
   if(secretVault){try{await secretVault.lock();}catch{}}
   secretVault=null;secretVaultValues=null;renderSecretVaultUi();refreshRequestInspector();showToast('Cofre bloqueado','Os valores descriptografados foram removidos da memória desta aba.','info');
 }
 async function addSecretVaultEntry(event){
+  invalidateStructuredDiagnosticContext();
   event?.preventDefault?.();
   if(secretVaultLoading||secretVaultUnavailable){showToast('Cofre indisponível','Não adicione segredos enquanto o registro não puder ser confirmado.','warning');return;}
   if(!secretVaultValues||!secretVault){showToast('Cofre bloqueado','Desbloqueie o cofre antes de adicionar segredos.','warning');return;}
@@ -2830,6 +2876,7 @@ async function addSecretVaultEntry(event){
   }catch(error){await recoverSecretVaultAfterFailure();showToast('Segredo não salvo','O valor não foi confirmado no armazenamento e foi descartado. '+(error.message||'Não foi possível atualizar o cofre.'),'error');}
 }
 async function removeSecretVaultEntry(name){
+  invalidateStructuredDiagnosticContext();
   if(secretVaultLoading||secretVaultUnavailable){showToast('Cofre indisponível','Não remova segredos enquanto o registro não puder ser confirmado.','warning');return;}
   if(!secretVaultValues||!secretVault){showToast('Cofre bloqueado','Desbloqueie o cofre antes de remover segredos.','warning');return;}
   if(!(await confirmWithDialog({eyebrow:'COFRE DE SEGREDOS',title:'Remover segredo?',description:`O nome “${name}” será removido do cofre do ambiente “${getEnvironment().name}”.`,warning:'O valor não pode ser recuperado depois desta ação.',confirmLabel:'Remover segredo',danger:true})))return;
@@ -2842,6 +2889,7 @@ async function removeSecretVaultEntry(name){
   }catch(error){await recoverSecretVaultAfterFailure();showToast('Segredo não removido','A remoção não foi confirmada no armazenamento. '+(error.message||'Não foi possível atualizar o cofre.'),'error');}
 }
 async function removeSecretVault(){
+  invalidateStructuredDiagnosticContext();
   if(!secretVaultEnvelope&&!secretVaultNames.length&&!secretVaultUnavailable)return;
   if(!(await confirmWithDialog({eyebrow:'COFRE DE SEGREDOS',title:'Remover o cofre deste ambiente?',description:`Todos os segredos do ambiente “${getEnvironment().name}” serão removidos do armazenamento local.`,warning:'A senha não é armazenada; sem o cofre, os valores não podem ser recuperados.',confirmLabel:'Remover cofre',danger:true})))return;
   const environmentId=secretVaultEnvironmentId||activeEnvironmentId||'default';
@@ -2857,6 +2905,7 @@ function openSettingsDialog(){syncHistorySettingsControls();renderSecretVaultUi(
 function openEnvironmentDialog(){environmentDraft=JSON.parse(JSON.stringify(environments));renderEnvironmentDraft();byId('environment-dialog').showModal();}
 function addEnvironmentDraft(){environmentDraft.push({id:newId(),name:'Novo ambiente',group:'Local',variables:{}});renderEnvironmentDraft();byId('environment-list').lastElementChild.querySelector('.environment-name').focus();}
 async function saveEnvironmentDraft(event){
+  invalidateStructuredDiagnosticContext();
   event.preventDefault();const next=[];
   for(const card of byId('environment-list').children){
     const environment=readEnvironmentCard(card);if(!environment)return;next.push(environment);
@@ -2996,7 +3045,7 @@ function updateInsomniaScriptPreview(){
 function updateResponseCaptureUi(){
   byId('response-json-path-wrap').hidden=byId('response-value-source').value!=='json';
   byId('response-variable-result').hidden=true;
-  updateInsomniaScriptPreview();
+  updateInsomniaScriptPreview();updateAdvancedToolsIndicator();
 }
 function validateResponseCaptureForm(){
   if(!byId('capture-response-variable').checked)return;
@@ -3093,10 +3142,29 @@ async function runStructuredRequest(prepared){
   }catch{return{...facts,outcome:facts.delivery==='not_sent'?'local_error':facts.delivery==='response_received'?'local_error':'transport_error',durationMs:performance.now()-started};}
   finally{facts.durationMs=Math.max(0,performance.now()-started);requestSendInProgress=false;updateGuard();}
 }
+function getDiagnosticReadiness(origin){
+  const tab=activeWorkspaceTab(),saved=activeSaved,requestSaved=!!saved,source=origin||(!saved?null:{collectionId:saved.collectionId,folderId:saved.folderId||'',requestId:saved.id,environmentId:activeEnvironmentId});
+  const collection=source?findCollection(source.collectionId):null,container=source?findFolder(collection,source.folderId||''):null;
+  const requestExists=!!source&&!!container?.requests?.some(item=>item.id===source.requestId),environmentId=source?.environmentId||activeEnvironmentId;
+  const environmentExists=!!environmentId&&environments.some(item=>item.id===environmentId),draftDirty=!!tab?.dirty,executorBusy=!!requestSendInProgress;
+  const currentOrigin={tabId:tab?.id||'',collectionId:saved?.collectionId||selectedContainer.collectionId||'',folderId:saved?.folderId||selectedContainer.folderId||'',requestId:saved?.id||'',environmentId:activeEnvironmentId||''};
+  const contextMatches=!origin||((origin.tabId===undefined||origin.tabId===currentOrigin.tabId)&&origin.requestId===currentOrigin.requestId&&origin.collectionId===currentOrigin.collectionId&&(origin.folderId||'')===currentOrigin.folderId&&origin.environmentId===currentOrigin.environmentId);
+  let blocker=null;
+  if(executorBusy)blocker='execution_in_progress';
+  else if(!saved&&!origin?.requestId)blocker='request_not_saved';
+  else if(draftDirty)blocker='unsaved_changes';
+  else if(!requestExists)blocker='request_not_found';
+  else if(!environmentExists)blocker='environment_not_found';
+  structuredDiagnosticContextInvalidated=false;
+  return{blocker,contextMatches,requestSaved,draftDirty,requestExists,environmentExists,executorBusy,origin:currentOrigin,revision:structuredDiagnosticContextRevision};
+}
 function initializeStructuredExecution(){
-  StructuredUi.attach({
+  document.addEventListener('input',invalidateStructuredDiagnosticForDraft,true);
+  document.addEventListener('change',invalidateStructuredDiagnosticForDraft,true);
+  structuredExecutionHandle=StructuredUi.attach({
     getTarget:()=>activeSaved&&!activeWorkspaceTab()?.dirty?{collectionId:activeSaved.collectionId,folderId:activeSaved.folderId||null,requestId:activeSaved.id,environmentId:activeEnvironmentId}:null,
     isBusy:()=>requestSendInProgress,
+    getDiagnosticReadiness,
     readSources:getStructuredSources,materialize:StructuredRequest.materializeSavedRequest,run:runStructuredRequest,
     confirmReview:review=>confirmWithDialog({eyebrow:'EXECUÇÃO REVISADA',title:'Aprovar preparação '+review.method+'?',description:review.destination,warning:'Confira a rota na request salva e os efeitos de histórico e captura indicados. Aprovar não envia; a autorização vale uma vez por cinco minutos.',confirmLabel:'Aprovar preparação',danger:writeMethods.has(review.method)})
   });
@@ -3288,7 +3356,7 @@ function addEventListeners(){
   byId('add-query-param').onclick=()=>{addQueryParamRow();syncActiveWorkspaceTab(true);};byId('add-response-test').onclick=()=>{addResponseTest();syncActiveWorkspaceTab(true);};byId('validate-request-body').onclick=validateRequestBodyContractFromForm;
   byId('add-pre-request-action').onclick=addPreRequestAction;byId('pre-request-actions-enabled').addEventListener('change',()=>{updatePreRequestActionsUi();refreshRequestInspector();syncActiveWorkspaceTab(true);});
   byId('response-tests-list').addEventListener('input',()=>renderResponseTestResults([]));byId('response-tests-list').addEventListener('change',()=>renderResponseTestResults([]));
-  byId('add-collection').onclick=addCollection;byId('add-collection-heading').onclick=addCollection;byId('import-collection').onclick=openImportDialog;byId('browse-import-file').onclick=()=>{byId('import-dialog').close();byId('import-collection-file').click();};byId('close-import-dialog').onclick=()=>byId('import-dialog').close();byId('cancel-import-dialog').onclick=()=>byId('import-dialog').close();byId('command-import-format').addEventListener('change',updateCommandImportUi);byId('create-imported-request').onclick=openImportedCommandDraft;byId('import-collection-file').addEventListener('change',importCollectionFile);byId('generate-curl').onclick=openCurlExportDialog;byId('curl-format').addEventListener('change',updateCurlExportPreview);byId('curl-shell').addEventListener('change',updateCurlExportPreview);byId('curl-include-sensitive').addEventListener('change',()=>void confirmCurlSensitiveMode());byId('copy-curl-command').onclick=copyCurlCommand;byId('close-curl-export').onclick=()=>byId('curl-export-dialog').close();byId('cancel-curl-export').onclick=()=>byId('curl-export-dialog').close();byId('curl-export-dialog').addEventListener('close',()=>{byId('curl-include-sensitive').checked=false;updateCurlExportPreview();});byId('export-collection').onclick=openExportDialog;byId('export-format').addEventListener('change',updateExportFormatUi);byId('export-form').addEventListener('submit',exportCollection);byId('close-export-dialog').onclick=()=>byId('export-dialog').close();byId('cancel-export-dialog').onclick=()=>byId('export-dialog').close();byId('save-collection-request').onclick=openSaveDialog;byId('save-request-form').addEventListener('submit',saveCollectionRequest);byId('close-save-request').onclick=()=>byId('save-request-dialog').close();byId('cancel-save-request').onclick=()=>byId('save-request-dialog').close();
+  byId('add-collection').onclick=addCollection;byId('add-collection-heading').onclick=addCollection;byId('collections-empty-create').onclick=addCollection;byId('import-collection').onclick=openImportDialog;byId('browse-import-file').onclick=()=>{byId('import-dialog').close();byId('import-collection-file').click();};byId('close-import-dialog').onclick=()=>byId('import-dialog').close();byId('cancel-import-dialog').onclick=()=>byId('import-dialog').close();byId('command-import-format').addEventListener('change',updateCommandImportUi);byId('create-imported-request').onclick=openImportedCommandDraft;byId('import-collection-file').addEventListener('change',importCollectionFile);byId('generate-curl').onclick=openCurlExportDialog;byId('curl-format').addEventListener('change',updateCurlExportPreview);byId('curl-shell').addEventListener('change',updateCurlExportPreview);byId('curl-include-sensitive').addEventListener('change',()=>void confirmCurlSensitiveMode());byId('copy-curl-command').onclick=copyCurlCommand;byId('close-curl-export').onclick=()=>byId('curl-export-dialog').close();byId('cancel-curl-export').onclick=()=>byId('curl-export-dialog').close();byId('curl-export-dialog').addEventListener('close',()=>{byId('curl-include-sensitive').checked=false;updateCurlExportPreview();});byId('export-collection').onclick=openExportDialog;byId('export-format').addEventListener('change',updateExportFormatUi);byId('export-form').addEventListener('submit',exportCollection);byId('close-export-dialog').onclick=()=>byId('export-dialog').close();byId('cancel-export-dialog').onclick=()=>byId('export-dialog').close();byId('save-collection-request').onclick=openSaveDialog;byId('save-request-form').addEventListener('submit',saveCollectionRequest);byId('close-save-request').onclick=()=>byId('save-request-dialog').close();byId('cancel-save-request').onclick=()=>byId('save-request-dialog').close();
   byId('export-workspace').onclick=exportWorkspaceBackup;byId('export-encrypted-workspace').onclick=exportEncryptedWorkspaceBackup;byId('restore-workspace').onclick=()=>byId('restore-workspace-file').click();byId('restore-workspace-file').addEventListener('change',restoreWorkspaceBackup);
   byId('protect-existing-secrets').onclick=protectExistingSecrets;
   byId('secret-vault-create').onclick=()=>void createSecretVaultFromUi();byId('secret-vault-unlock').onclick=()=>void unlockSecretVaultFromUi();byId('secret-vault-lock').onclick=()=>void lockSecretVaultFromUi();byId('secret-vault-remove').onclick=()=>void removeSecretVault();byId('secret-vault-add').onclick=event=>void addSecretVaultEntry(event);
@@ -3313,7 +3381,7 @@ function addEventListeners(){
   byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('auth-inheritance-mode').addEventListener('change',()=>{const authMode=authModeFromForm();applyAuthFields(authMode==='custom'?{authMode,authType:'none'}:{authMode});syncActiveWorkspaceTab(true);});byId('save-auth-default').onclick=()=>void saveAuthDefault();byId('body-mode').addEventListener('change',updateBodyModeUi);byId('multipart-add-text').onclick=()=>addMultipartField('text');byId('multipart-add-file').onclick=()=>addMultipartField('file');byId('graphql-load-schema').onclick=()=>void loadGraphqlSchema();byId('graphql-schema-type').addEventListener('change',renderGraphqlSchemaFields);const graphqlQueryField=byId('graphql-query');graphqlQueryField.addEventListener('input',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keyup',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('click',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keydown',handleGraphqlAutocompleteKeydown);byId('format-graphql-variables').onclick=formatGraphqlVariables;for(const id of ['graphql-query','graphql-variables','graphql-operation-name']){byId(id).addEventListener('input',()=>{byId('confirm-test-data').checked=false;updateGuard();});byId(id).addEventListener('change',()=>{byId('confirm-test-data').checked=false;updateGuard();});}byId('clear-cookie-jar').onclick=clearCookieJar;byId('inspect-references').onclick=refreshRequestInspector;byId('request-inspector').addEventListener('toggle',()=>{if(byId('request-inspector').open)refreshRequestInspector();});byId('runner-datasets').addEventListener('input',()=>{if(byId('runner-dialog').open)renderRunnerPlan(runnerEntries);});
   for(const id of ['token-route','token-client-id-field','token-client-secret-field','token-credential-mode']){byId(id).addEventListener('input',updateTokenButton);byId(id).addEventListener('change',()=>void persistTokenRequestConfig());}
     for(const id of ['oauth2-token-url','oauth2-client-id','oauth2-scope'])byId(id).addEventListener('input',updateOAuth2TokenButton);
-  byId('refresh-agent-safe-state').onclick=refreshAgentSafeState;
+  byId('refresh-agent-safe-state').onclick=refreshAgentSafeState;for(const id of ['token-helper','oauth2-helper','oauth-pkce-helper'])byId(id).addEventListener('toggle',updateAdvancedToolsIndicator);
   for(const id of ['oauth2-token-url','oauth2-client-id','oauth2-scope','oauth2-client-auth-method'])byId(id).addEventListener('change',()=>void persistOAuth2TokenConfig(true));
   for(const id of ['oauth-pkce-authorization-url','oauth-pkce-token-url','oauth-pkce-client-id','oauth-pkce-scope'])byId(id).addEventListener('input',()=>{if(id==='oauth-pkce-authorization-url'){byId('oauth-pkce-redirect-uri').value='';scheduleOAuthPkceRedirectPreview();}updateOAuthPkceStartButton();});
   for(const id of ['oauth-pkce-authorization-url','oauth-pkce-token-url','oauth-pkce-client-id','oauth-pkce-scope'])byId(id).addEventListener('change',()=>{void persistOAuthPkceConfig(true);if(id==='oauth-pkce-authorization-url')scheduleOAuthPkceRedirectPreview();});

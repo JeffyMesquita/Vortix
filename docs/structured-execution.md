@@ -6,6 +6,12 @@ O painel **Execução revisada**, no editor, prepara uma request salva sem chama
 
 A imagem usa somente uma fixture descartável em loopback, sem credenciais ou banco pessoal.
 
+## Leitura compacta para agentes
+
+Use `window.vortixAgent.diagnose()` para descobrir estado, impedimento principal e próximo controle disponível. Solicite `{ view: 'blockers' }` para destinos fixos ou `{ view: 'result' }` para entrega, HTTP/proxy, assertivas, captura e persistência. As vistas não incluem conteúdo da request/resposta ou credenciais. O [contrato de leitura progressiva](maestri-portal.md#diagnóstico-compacto-e-leitura-progressiva) detalha campos, opções e limites.
+
+A UI publica os mesmos fatos que orientam a leitura. **Ir ao impedimento** abre a área e move o foco por ação explícita. Observação antiga ou contexto diferente omite resultado e próxima ação; uma entrega desconhecida vigente continua distinguível. Nenhuma consulta prepara, aprova, cancela ou envia requests. Controles, guards e revisão humana continuam necessários.
+
 ## Caminho principal
 
 ```mermaid

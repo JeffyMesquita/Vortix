@@ -351,6 +351,8 @@ Referências: [exportar um ambiente no Postman](https://learning.postman.com/doc
 
 **Status: implementada com testes automatizados e smoke visual isolado. Sem transporte externo ou MCP.**
 
+Integrada em `master` pelo PR #34, junto à correção do selo do PR #31 e à atualização de CI do PR #33. Estado e limites atuais no [fichário de continuidade](docs/continuity.md); o diagnóstico compacto foi implementado e integrado no checkout principal, com validação concluída no escopo da seção 23, ainda sem commit ou publicação. A [descoberta SDD](docs/superpowers/specs/2026-10-27-next-features-discovery.md) preserva as alternativas futuras.
+
 - [x] Preparar request salva por IDs explícitos, sem HTTP, histórico ou alteração do formulário.
 - [x] Aprovação visual por preparação, inclusive GET; escrita com confirmação de dados descartáveis e `TESTE`; expiração em cinco minutos e invalidação por alterações.
 - [x] Executar uma única vez por preparação; consultar resumo em memória, sem payloads/credenciais e sem replay automático.
@@ -360,6 +362,17 @@ Referências: [exportar um ambiente no Postman](https://learning.postman.com/doc
 - [x] Registrar evidência e limites em `docs/superpowers/validation/2026-10-27-structured-execution.md`.
 - [ ] Decidir transporte externo e sua fronteira de autorização em recorte posterior.
 - [ ] Medir economia de tokens e chamadas com tarefas equivalentes; comparação de caracteres de uma tela não comprova economia total.
+
+### 23. Diagnóstico compacto e leitura progressiva
+
+**Status: implementado e integrado localmente; testes, smoke funcional e conferência visual por imagem registrados. Sem commit ou publicação.**
+
+- [x] Aprovar [SDD](docs/superpowers/specs/2026-10-27-compact-diagnostics-design.md) e [plano incremental](docs/superpowers/plans/2026-10-27-compact-diagnostics.md).
+- [x] Implementar projeção pura, catálogo fechado e leitura com limites, frescor e contexto; 33 testes direcionados passaram.
+- [x] Integrar UI e bridge; corrigir achados de revisão em opções, modal e troca de aba ociosa.
+- [x] Validar 403 testes Node (402 aprovados, um ignorado), build/sintaxe/diff e cinco suítes PowerShell; registrar smoke e 90 observações sintéticas em [validação](docs/superpowers/validation/2026-10-27-compact-diagnostics.md).
+- [x] Conferir imagens reais em Dracula/Papel, 1280×900/900×800, com diagnóstico e controles acessíveis pela rolagem. Captura do Portal funcionou ao ativar Tela cheia no Vortix.
+- [ ] Medir descoberta comparável e economia de tokens; não demonstradas pelo benchmark sintético atual.
 
 ## Regra de sequência
 

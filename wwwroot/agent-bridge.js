@@ -138,9 +138,20 @@
     };
   }
 
+  function diagnose(options) {
+    const unavailable = { diagnosticVersion: 1, revision: null, state: 'unavailable', freshness: 'unavailable', blocker: 'diagnostic_unavailable', nextAction: null };
+    try {
+      const diagnostics = globalThis.VortixDiagnostics;
+      if (typeof diagnostics?.readDiagnostic !== 'function') return unavailable;
+      const record = byId('structured-card')?.getAttribute('data-vortix-diagnostic') ?? null;
+      return diagnostics.readDiagnostic(record, options, performance.now());
+    } catch { return unavailable; }
+  }
+
   window.vortixAgent = Object.freeze({
     contractVersion: contractVersion(),
     describe,
-    snapshot
+    snapshot,
+    diagnose
   });
 })();
