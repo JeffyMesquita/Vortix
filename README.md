@@ -237,7 +237,7 @@ Para enviar JSON, texto, XML ou form URL-encoded, escolha o formato na aba **Bod
 
 ## Compartilhamento e metadados públicos
 
-A página inclui título, descrição, canonical, Open Graph e Twitter Card no HTML inicial. A prévia usa `wwwroot/social/vortix-og-v1.png`; `robots.txt` e `sitemap.xml` apontam para a origem pública oficial. Nenhum valor do workspace ou da request entra nesses metadados.
+A página inclui título, descrição, canonical, Open Graph e Twitter Card no HTML inicial. A prévia usa `wwwroot/social/vortix-og-v2.jpg`, derivada leve da arte original, com orçamento de até 200 KiB verificado nos testes; `robots.txt` e `sitemap.xml` apontam para a origem pública oficial. Nenhum valor do workspace ou da request entra nesses metadados.
 
 Ao hospedar uma cópia com outro domínio, ajuste as URLs absolutas do head de `wwwroot/index.html`, `wwwroot/robots.txt` e `wwwroot/sitemap.xml` junto de `ApiStudio__PublicOrigin` e dos domínios em `render.yaml`. Depois de publicar, confira HTTP 200 e `image/png` no asset; a atualização da prévia em aplicativos de mensagem depende da nova leitura/cache de cada plataforma.
 

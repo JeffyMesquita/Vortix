@@ -623,10 +623,25 @@ function assertAbsoluteHttps(value, label, host) {
   return parsed;
 }
 
+function jpegDimensions(buffer) {
+  let offset = 2;
+  while (offset < buffer.length) {
+    if (buffer[offset] !== 0xFF) { offset += 1; continue; }
+    let marker = buffer[offset + 1];
+    while (marker === 0xFF) { offset += 1; marker = buffer[offset + 1]; }
+    if (marker === 0xD8 || marker === 0x01 || (marker >= 0xD0 && marker <= 0xD7)) { offset += 2; continue; }
+    const length = buffer.readUInt16BE(offset + 2);
+    if (marker >= 0xC0 && marker <= 0xCF && ![0xC4, 0xC8, 0xCC].includes(marker))
+      return { height: buffer.readUInt16BE(offset + 5), width: buffer.readUInt16BE(offset + 7) };
+    offset += 2 + length;
+  }
+  throw new Error('JPEG SOF marker not found');
+}
+
 test('sharing metadata is unique, consistent and absolute HTTPS', async () => {
   const origin = await readOfficialOrigin();
   const host = new URL(origin).hostname;
-  const ogImageUrl = origin + 'social/vortix-og-v1.png';
+  const ogImageUrl = origin + 'social/vortix-og-v2.jpg';
   const html = await fs.readFile(path.join(root, 'wwwroot', 'index.html'), 'utf8');
   const head = html.slice(0, html.indexOf('</head>'));
   const title = head.match(/<title>([\s\S]*?)<\/title>/)?.[1];
@@ -641,7 +656,7 @@ test('sharing metadata is unique, consistent and absolute HTTPS', async () => {
   const expected = [
     ['og:type', 'website'], ['og:site_name', 'Vortix'], ['og:locale', 'pt_BR'],
     ['og:title', sharingTitle], ['og:description', sharingDescription], ['og:url', origin],
-    ['og:image', ogImageUrl], ['og:image:type', 'image/png']
+    ['og:image', origin + 'social/vortix-og-v2.jpg'], ['og:image:type', 'image/jpeg']
   ];
   for (const [property, content] of expected) {
     assert.equal(attribute(singleMeta(head, 'property', property, property), 'content'), content);
@@ -688,16 +703,24 @@ test('robots and sitemap expose only the canonical root', async () => {
   assert.doesNotMatch(sitemap, /lastmod/i, 'no invented lastmod');
 });
 
-test('the referenced Open Graph image is present and matches its declared size', async () => {
+test('the referenced Open Graph image is present, JPEG, within budget and matches its declared size', async () => {
   const { existsSync, readFileSync } = require('node:fs');
-  const imagePath = path.join(root, 'wwwroot', 'social', 'vortix-og-v1.png');
-  assert.ok(existsSync(imagePath), 'OG image must exist at wwwroot/social/vortix-og-v1.png');
+  const origin = await readOfficialOrigin();
+  const host = new URL(origin).hostname;
   const html = await fs.readFile(path.join(root, 'wwwroot', 'index.html'), 'utf8');
   const head = html.slice(0, html.indexOf('</head>'));
-  const png = readFileSync(imagePath);
-  assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'OG image should be a PNG');
-  for (const [property, offset] of [['og:image:width', 16], ['og:image:height', 20]]) {
-    const declared = attribute(singleMeta(head, 'property', property, property), 'content');
-    assert.equal(declared, String(png.readUInt32BE(offset)), property + ' should match the PNG IHDR');
-  }
+  const imageUrl = attribute(singleMeta(head, 'property', 'og:image', 'og:image'), 'content');
+  assertAbsoluteHttps(imageUrl, 'og:image', host);
+  assert.equal(new URL(imageUrl).pathname, '/social/vortix-og-v2.jpg');
+  assert.equal(attribute(singleMeta(head, 'name', 'twitter:image', 'twitter:image'), 'content'), imageUrl);
+
+  const imagePath = path.join(root, 'wwwroot', ...new URL(imageUrl).pathname.split('/').filter(Boolean));
+  assert.ok(existsSync(imagePath), 'OG image must exist at wwwroot/social/vortix-og-v2.jpg');
+  const jpeg = readFileSync(imagePath);
+  assert.ok(jpeg.length <= 200 * 1024, 'OG image should stay within the conservative 200 KiB budget; got ' + jpeg.length + ' bytes');
+  assert.equal(jpeg.subarray(0, 3).toString('hex'), 'ffd8ff', 'OG image should be a real JPEG (SOI marker)');
+  const size = jpegDimensions(jpeg);
+  assert.deepEqual(size, { width: 1717, height: 916 }, 'OG image should keep the 1717x916 artwork size');
+  assert.equal(attribute(singleMeta(head, 'property', 'og:image:width', 'og:image:width'), 'content'), String(size.width));
+  assert.equal(attribute(singleMeta(head, 'property', 'og:image:height', 'og:image:height'), 'content'), String(size.height));
 });

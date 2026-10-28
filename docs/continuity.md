@@ -180,3 +180,9 @@ Usuário pediu trabalhar SEO/OG após mostrar uma prévia do domínio sem imagem
 Senku implementou somente head HTML, robots/sitemap e testes de metadata; Maestro criou PNG e documentação; Hange revisou em leitura. Terminais/sessões são os mesmos do índice existente. Domínio público foi conferido com `render.yaml`; dimensões reais do PNG 1717×916 declaradas nas tags. Teste agora exige existência do arquivo. Preservados scripts, favicon, bridge e todo fluxo de requests. Sem mobile ou nova dependência.
 
 416 testes locais: 415 aprovados, zero falhas, um skip; AIFriendlyUi 20/20. Instância temporária em loopback serviu HTML, PNG, robots e sitemap com HTTP 200 e MIME corretos. A origem pública antes desta publicação tinha zero OG, sem description/canonical e 404 em robots/sitemap; não declarar prévia de WhatsApp validada apenas pelo teste local. Seguir fluxo de publicação autorizado e conferir a origem pública após o merge.
+
+### Retorno: texto presente, thumbnail ainda ausente no WhatsApp
+
+O usuário mostrou prévia com título/descrição atualizados, sem imagem. Investigação: user-agents WhatsApp/Facebook recebem HTTP 200 em página e PNG, mas o asset tinha 1.312.784 bytes. Corrigida essa hipótese por redução de peso: derivada JPEG baseline da mesma arte em `wwwroot/social/vortix-og-v2.jpg`, 1717×916 e 87.884 bytes (93,31% menor); PNG original preservado. Head usa nova URL e MIME JPEG; canonical e dados textuais inalterados.
+
+Teste agora impõe orçamento conservador de 200 KiB e valida assinatura JPEG, SOF/dimensões e presença obrigatória; RED antes/GREEN após. Esse é orçamento do projeto, não limite oficial da plataforma. Não confundir entrega HTTP com thumbnail realmente exibida: é necessário reteste do usuário após publicação. Branch `fix/whatsapp-preview-image-budget`; sem novo agente, dependência, layout ou alteração de servidor.
