@@ -1,0 +1,6433 @@
+{
+  "benchmarkVersion": 2,
+  "benchmarkKind": "synthetic-node-parser-harness",
+  "generatedBy": "DiagnosticBenchmark.cjs",
+  "realAgentOrBrowserBenchmark": false,
+  "claims": {
+    "aiOrAgentUnderstanding": false,
+    "browserOrNetwork": false,
+    "discoveryCost": false,
+    "statisticalSignificance": false
+  },
+  "specification": "docs/superpowers/specs/2026-10-27-compact-diagnostics-design.md section 12",
+  "plan": "docs/superpowers/plans/2026-10-27-compact-diagnostics.md task 6",
+  "protocol": {
+    "cases": 6,
+    "paths": {
+      "execution_status": "reads the existing data-vortix-field=\"execution.status\" text only, then applies the fixed local parser",
+      "focused_current": "reads execution.status plus structured-execution control, review, write-guard and response selectors, then applies the fixed local parser and selector checks",
+      "diagnose": "one vortixAgent.diagnose call: summary only when no detail is needed; otherwise only the blockers or result view, each of which already contains the six common summary fields"
+    },
+    "repetitionsPerCasePath": 5,
+    "totalObservations": 90,
+    "fixtureClockMs": 1001,
+    "recordClockMs": 1000,
+    "measurementScope": "recurring reads over known fixtures and known selector/view names",
+    "discovery": {
+      "measured": false,
+      "reason": "No describe(), selector search or API-surface discovery is charged or claimed. All five repetitions measure recurring reads over a fixture that is already known in advance."
+    },
+    "readers": {
+      "deterministic": true,
+      "handWrittenParsers": [
+        "parseStatusText",
+        "readFocusedCurrent",
+        "readDiagnose"
+      ],
+      "note": "Status text is converted to semantic fields only by fixed local parsers; no AI, model or adaptive interpretation is measured."
+    },
+    "determinism": "fixtures, readCalls, chars, bytes, semantic success and observed fields are stable across runs; durationMs is wall-clock",
+    "inputs": {
+      "harness": {
+        "file": "AIAgentBridge.test.cjs",
+        "sha256": "914d0abac9141a7bb22fbc23cad394f871f6abb3103facd4b2b243349b26fbc3",
+        "usage": "element/createDocument copied read-only; structured-execution elements added locally"
+      },
+      "bridge": {
+        "file": "wwwroot/agent-bridge.js",
+        "sha256": "827897cbbe938bb3aa9662893d5d8b76cf4907583c3d4de99a93a19866a74b3a"
+      },
+      "diagnostics": {
+        "file": "wwwroot/agent-diagnostics.js",
+        "sha256": "682e912555857444498cc197313706cf77df47ebb1e5064b93f9ed72468d0e54"
+      }
+    }
+  },
+  "fixtures": [
+    {
+      "id": "get_valid",
+      "label": "GET válido",
+      "statusText": "Preparação pronta para revisão. Nenhuma chamada enviada.",
+      "controls": {
+        "request.save": true,
+        "environment.manage": true,
+        "settings.open": true,
+        "execution.prepare": true,
+        "execution.review": true,
+        "execution.execute": false
+      },
+      "record": {
+        "diagnosticVersion": 1,
+        "revision": 1,
+        "contextMatches": true,
+        "observedAtMs": 1000,
+        "validUntilMs": 5000,
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "blockers": [],
+        "result": null
+      },
+      "expected": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "diagnoseView": "summary"
+    },
+    {
+      "id": "missing_variable",
+      "label": "Variável ausente",
+      "statusText": "Há variáveis sem valor. Revise o ambiente e prepare novamente.",
+      "controls": {
+        "request.save": true,
+        "environment.manage": true,
+        "settings.open": true,
+        "execution.prepare": true,
+        "execution.review": false,
+        "execution.execute": false
+      },
+      "record": {
+        "diagnosticVersion": 1,
+        "revision": 1,
+        "contextMatches": true,
+        "observedAtMs": 1000,
+        "validUntilMs": null,
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "blockers": [
+          {
+            "code": "unresolved_variables",
+            "target": {
+              "kind": "action",
+              "name": "environment.manage"
+            }
+          }
+        ],
+        "result": null
+      },
+      "expected": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "diagnoseView": "blockers"
+    },
+    {
+      "id": "write_waiting_approval",
+      "label": "POST aguardando aprovação",
+      "statusText": "Preparação pronta para revisão. Nenhuma chamada enviada.",
+      "controls": {
+        "request.save": true,
+        "environment.manage": true,
+        "settings.open": true,
+        "execution.prepare": true,
+        "execution.review": false,
+        "execution.execute": false
+      },
+      "record": {
+        "diagnosticVersion": 1,
+        "revision": 1,
+        "contextMatches": true,
+        "observedAtMs": 1000,
+        "validUntilMs": null,
+        "state": "blocked",
+        "blocker": "write_confirmation_required",
+        "nextAction": null,
+        "blockers": [
+          {
+            "code": "write_confirmation_required",
+            "target": {
+              "kind": "region",
+              "name": "structured-execution"
+            }
+          }
+        ],
+        "result": null
+      },
+      "expected": {
+        "state": "blocked",
+        "blocker": "write_confirmation_required",
+        "nextAction": null,
+        "result": null
+      },
+      "diagnoseView": "blockers"
+    },
+    {
+      "id": "assertion_failed",
+      "label": "Assertiva reprovada",
+      "statusText": "Execução bench-assertion-failed: teste reprovado. HTTP 200; testes 0 aprovados, 1 reprovados, 0 parciais. Captura: confirmado. Histórico: confirmado.",
+      "controls": {
+        "request.save": true,
+        "environment.manage": true,
+        "settings.open": true,
+        "execution.prepare": false,
+        "execution.review": false,
+        "execution.execute": false
+      },
+      "record": {
+        "diagnosticVersion": 1,
+        "revision": 1,
+        "contextMatches": true,
+        "observedAtMs": 1000,
+        "validUntilMs": null,
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "blockers": [],
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "proxyStatus": 200,
+          "durationMs": 12,
+          "assertions": {
+            "passed": 0,
+            "failed": 1,
+            "partial": 0
+          },
+          "validation": "failed",
+          "capture": "completed",
+          "persistence": "completed"
+        }
+      },
+      "expected": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "diagnoseView": "result"
+    },
+    {
+      "id": "partial_validation",
+      "label": "Validação parcial",
+      "statusText": "Execução bench-partial: validação parcial. HTTP 200; testes 1 aprovados, 0 reprovados, 1 parciais. Captura: não solicitada. Histórico: confirmado.",
+      "controls": {
+        "request.save": true,
+        "environment.manage": true,
+        "settings.open": true,
+        "execution.prepare": false,
+        "execution.review": false,
+        "execution.execute": false
+      },
+      "record": {
+        "diagnosticVersion": 1,
+        "revision": 1,
+        "contextMatches": true,
+        "observedAtMs": 1000,
+        "validUntilMs": null,
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "blockers": [],
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "proxyStatus": 200,
+          "durationMs": 15,
+          "assertions": {
+            "passed": 1,
+            "failed": 0,
+            "partial": 1
+          },
+          "validation": "partial",
+          "capture": "not_requested",
+          "persistence": "completed"
+        }
+      },
+      "expected": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "diagnoseView": "result"
+    },
+    {
+      "id": "transport_timeout",
+      "label": "Timeout de transporte",
+      "statusText": "Execução bench-timeout: falha de transporte. HTTP sem resposta; testes 0 aprovados, 0 reprovados, 0 parciais. Captura: não solicitada. Histórico: não solicitado. Entrega desconhecida; confira a API antes de repetir.",
+      "controls": {
+        "request.save": true,
+        "environment.manage": true,
+        "settings.open": true,
+        "execution.prepare": false,
+        "execution.review": false,
+        "execution.execute": false
+      },
+      "record": {
+        "diagnosticVersion": 1,
+        "revision": 1,
+        "contextMatches": true,
+        "observedAtMs": 1000,
+        "validUntilMs": null,
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "blockers": [],
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "proxyStatus": null,
+          "durationMs": 30000,
+          "assertions": {
+            "passed": 0,
+            "failed": 0,
+            "partial": 0
+          },
+          "validation": "not_run",
+          "capture": "not_requested",
+          "persistence": "not_requested"
+        }
+      },
+      "expected": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "diagnoseView": "result"
+    }
+  ],
+  "observations": [
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "execution_status",
+      "repetition": 1,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 56,
+      "bytes": 59,
+      "durationMs": 0.2102,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "execution_status",
+      "repetition": 2,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 56,
+      "bytes": 59,
+      "durationMs": 0.084,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "execution_status",
+      "repetition": 3,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 56,
+      "bytes": 59,
+      "durationMs": 0.0067,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "execution_status",
+      "repetition": 4,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 56,
+      "bytes": 59,
+      "durationMs": 0.0051,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "execution_status",
+      "repetition": 5,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 56,
+      "bytes": 59,
+      "durationMs": 0.0056,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "focused_current",
+      "repetition": 1,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 267,
+      "bytes": 267,
+      "durationMs": 0.0931,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "focused_current",
+      "repetition": 2,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 267,
+      "bytes": 267,
+      "durationMs": 0.0096,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "focused_current",
+      "repetition": 3,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 267,
+      "bytes": 267,
+      "durationMs": 0.008,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "focused_current",
+      "repetition": 4,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 267,
+      "bytes": 267,
+      "durationMs": 0.0216,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "focused_current",
+      "repetition": 5,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 267,
+      "bytes": 267,
+      "durationMs": 0.013,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "diagnose",
+      "repetition": 1,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(summary)"
+      ],
+      "networkCalls": 0,
+      "chars": 142,
+      "bytes": 142,
+      "durationMs": 0.8242,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "diagnose",
+      "repetition": 2,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(summary)"
+      ],
+      "networkCalls": 0,
+      "chars": 142,
+      "bytes": 142,
+      "durationMs": 0.0486,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "diagnose",
+      "repetition": 3,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(summary)"
+      ],
+      "networkCalls": 0,
+      "chars": 142,
+      "bytes": 142,
+      "durationMs": 0.0393,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "diagnose",
+      "repetition": 4,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(summary)"
+      ],
+      "networkCalls": 0,
+      "chars": 142,
+      "bytes": 142,
+      "durationMs": 0.0333,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "get_valid",
+      "caseLabel": "GET válido",
+      "path": "diagnose",
+      "repetition": 5,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(summary)"
+      ],
+      "networkCalls": 0,
+      "chars": 142,
+      "bytes": 142,
+      "durationMs": 0.0418,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "ready_for_review",
+          "expected": "ready_for_review"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "execution.review",
+          "expected": "execution.review"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "focused_current",
+      "repetition": 1,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 276,
+      "bytes": 276,
+      "durationMs": 0.0312,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "focused_current",
+      "repetition": 2,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 276,
+      "bytes": 276,
+      "durationMs": 0.0085,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "focused_current",
+      "repetition": 3,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 276,
+      "bytes": 276,
+      "durationMs": 0.0068,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "focused_current",
+      "repetition": 4,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 276,
+      "bytes": 276,
+      "durationMs": 0.0171,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "focused_current",
+      "repetition": 5,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 276,
+      "bytes": 276,
+      "durationMs": 0.0214,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "diagnose",
+      "repetition": 1,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(blockers)"
+      ],
+      "networkCalls": 0,
+      "chars": 254,
+      "bytes": 254,
+      "durationMs": 0.2326,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "diagnose",
+      "repetition": 2,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(blockers)"
+      ],
+      "networkCalls": 0,
+      "chars": 254,
+      "bytes": 254,
+      "durationMs": 0.0596,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "diagnose",
+      "repetition": 3,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(blockers)"
+      ],
+      "networkCalls": 0,
+      "chars": 254,
+      "bytes": 254,
+      "durationMs": 0.057,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "diagnose",
+      "repetition": 4,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(blockers)"
+      ],
+      "networkCalls": 0,
+      "chars": 254,
+      "bytes": 254,
+      "durationMs": 0.0552,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "diagnose",
+      "repetition": 5,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(blockers)"
+      ],
+      "networkCalls": 0,
+      "chars": 254,
+      "bytes": 254,
+      "durationMs": 0.0701,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "execution_status",
+      "repetition": 1,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 62,
+      "bytes": 64,
+      "durationMs": 0.0061,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "execution_status",
+      "repetition": 2,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 62,
+      "bytes": 64,
+      "durationMs": 0.0083,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "execution_status",
+      "repetition": 3,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 62,
+      "bytes": 64,
+      "durationMs": 0.0029,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "execution_status",
+      "repetition": 4,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 62,
+      "bytes": 64,
+      "durationMs": 0.0036,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "missing_variable",
+      "caseLabel": "Variável ausente",
+      "path": "execution_status",
+      "repetition": 5,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 62,
+      "bytes": 64,
+      "durationMs": 0.0067,
+      "observed": {
+        "state": "blocked",
+        "blocker": "unresolved_variables",
+        "nextAction": "environment.manage",
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "unresolved_variables",
+          "expected": "unresolved_variables"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": "environment.manage",
+          "expected": "environment.manage"
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "diagnose",
+      "repetition": 1,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(blockers)"
+      ],
+      "networkCalls": 0,
+      "chars": 254,
+      "bytes": 254,
+      "durationMs": 0.1148,
+      "observed": {
+        "state": "blocked",
+        "blocker": "write_confirmation_required",
+        "nextAction": null,
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "write_confirmation_required",
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "diagnose",
+      "repetition": 2,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(blockers)"
+      ],
+      "networkCalls": 0,
+      "chars": 254,
+      "bytes": 254,
+      "durationMs": 0.0452,
+      "observed": {
+        "state": "blocked",
+        "blocker": "write_confirmation_required",
+        "nextAction": null,
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "write_confirmation_required",
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "diagnose",
+      "repetition": 3,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(blockers)"
+      ],
+      "networkCalls": 0,
+      "chars": 254,
+      "bytes": 254,
+      "durationMs": 0.0436,
+      "observed": {
+        "state": "blocked",
+        "blocker": "write_confirmation_required",
+        "nextAction": null,
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "write_confirmation_required",
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "diagnose",
+      "repetition": 4,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(blockers)"
+      ],
+      "networkCalls": 0,
+      "chars": 254,
+      "bytes": 254,
+      "durationMs": 0.0375,
+      "observed": {
+        "state": "blocked",
+        "blocker": "write_confirmation_required",
+        "nextAction": null,
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "write_confirmation_required",
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "diagnose",
+      "repetition": 5,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(blockers)"
+      ],
+      "networkCalls": 0,
+      "chars": 254,
+      "bytes": 254,
+      "durationMs": 0.043,
+      "observed": {
+        "state": "blocked",
+        "blocker": "write_confirmation_required",
+        "nextAction": null,
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "write_confirmation_required",
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "execution_status",
+      "repetition": 1,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 56,
+      "bytes": 59,
+      "durationMs": 0.0039,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": false,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": false,
+          "actual": "ready_for_review",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": false,
+          "actual": null,
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": false,
+          "actual": "execution.review",
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "execution_status",
+      "repetition": 2,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 56,
+      "bytes": 59,
+      "durationMs": 0.0013,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": false,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": false,
+          "actual": "ready_for_review",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": false,
+          "actual": null,
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": false,
+          "actual": "execution.review",
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "execution_status",
+      "repetition": 3,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 56,
+      "bytes": 59,
+      "durationMs": 0.001,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": false,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": false,
+          "actual": "ready_for_review",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": false,
+          "actual": null,
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": false,
+          "actual": "execution.review",
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "execution_status",
+      "repetition": 4,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 56,
+      "bytes": 59,
+      "durationMs": 0.0009,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": false,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": false,
+          "actual": "ready_for_review",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": false,
+          "actual": null,
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": false,
+          "actual": "execution.review",
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "execution_status",
+      "repetition": 5,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 56,
+      "bytes": 59,
+      "durationMs": 0.0008,
+      "observed": {
+        "state": "ready_for_review",
+        "blocker": null,
+        "nextAction": "execution.review",
+        "result": null
+      },
+      "semanticSuccess": false,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": false,
+          "actual": "ready_for_review",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": false,
+          "actual": null,
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": false,
+          "actual": "execution.review",
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "focused_current",
+      "repetition": 1,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 269,
+      "bytes": 269,
+      "durationMs": 0.0085,
+      "observed": {
+        "state": "blocked",
+        "blocker": "write_confirmation_required",
+        "nextAction": null,
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "write_confirmation_required",
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "focused_current",
+      "repetition": 2,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 269,
+      "bytes": 269,
+      "durationMs": 0.003,
+      "observed": {
+        "state": "blocked",
+        "blocker": "write_confirmation_required",
+        "nextAction": null,
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "write_confirmation_required",
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "focused_current",
+      "repetition": 3,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 269,
+      "bytes": 269,
+      "durationMs": 0.0026,
+      "observed": {
+        "state": "blocked",
+        "blocker": "write_confirmation_required",
+        "nextAction": null,
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "write_confirmation_required",
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "focused_current",
+      "repetition": 4,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 269,
+      "bytes": 269,
+      "durationMs": 0.0023,
+      "observed": {
+        "state": "blocked",
+        "blocker": "write_confirmation_required",
+        "nextAction": null,
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "write_confirmation_required",
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "write_waiting_approval",
+      "caseLabel": "POST aguardando aprovação",
+      "path": "focused_current",
+      "repetition": 5,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 269,
+      "bytes": 269,
+      "durationMs": 0.0023,
+      "observed": {
+        "state": "blocked",
+        "blocker": "write_confirmation_required",
+        "nextAction": null,
+        "result": null
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "blocked",
+          "expected": "blocked"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": "write_confirmation_required",
+          "expected": "write_confirmation_required"
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "resultAbsent",
+          "passed": true,
+          "actual": true,
+          "expected": true
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "execution_status",
+      "repetition": 1,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 149,
+      "bytes": 152,
+      "durationMs": 0.1001,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "execution_status",
+      "repetition": 2,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 149,
+      "bytes": 152,
+      "durationMs": 0.0603,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "execution_status",
+      "repetition": 3,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 149,
+      "bytes": 152,
+      "durationMs": 0.003,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "execution_status",
+      "repetition": 4,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 149,
+      "bytes": 152,
+      "durationMs": 0.0016,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "execution_status",
+      "repetition": 5,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 149,
+      "bytes": 152,
+      "durationMs": 0.0014,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "focused_current",
+      "repetition": 1,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 343,
+      "bytes": 343,
+      "durationMs": 0.013,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "focused_current",
+      "repetition": 2,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 343,
+      "bytes": 343,
+      "durationMs": 0.0062,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "focused_current",
+      "repetition": 3,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 343,
+      "bytes": 343,
+      "durationMs": 0.0053,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "focused_current",
+      "repetition": 4,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 343,
+      "bytes": 343,
+      "durationMs": 0.0053,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "focused_current",
+      "repetition": 5,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 343,
+      "bytes": 343,
+      "durationMs": 0.0039,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "diagnose",
+      "repetition": 1,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 365,
+      "bytes": 365,
+      "durationMs": 0.2266,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "diagnose",
+      "repetition": 2,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 365,
+      "bytes": 365,
+      "durationMs": 0.0846,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "diagnose",
+      "repetition": 3,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 365,
+      "bytes": 365,
+      "durationMs": 0.055,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "diagnose",
+      "repetition": 4,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 365,
+      "bytes": 365,
+      "durationMs": 0.0423,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "assertion_failed",
+      "caseLabel": "Assertiva reprovada",
+      "path": "diagnose",
+      "repetition": 5,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 365,
+      "bytes": 365,
+      "durationMs": 0.0439,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "assertion_failed",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "failed"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "assertion_failed",
+          "expected": "assertion_failed"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "failed",
+          "expected": "failed"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "focused_current",
+      "repetition": 1,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 335,
+      "bytes": 335,
+      "durationMs": 0.0527,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "focused_current",
+      "repetition": 2,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 335,
+      "bytes": 335,
+      "durationMs": 0.0372,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "focused_current",
+      "repetition": 3,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 335,
+      "bytes": 335,
+      "durationMs": 0.0044,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "focused_current",
+      "repetition": 4,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 335,
+      "bytes": 335,
+      "durationMs": 0.0033,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "focused_current",
+      "repetition": 5,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 335,
+      "bytes": 335,
+      "durationMs": 0.0032,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "diagnose",
+      "repetition": 1,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 361,
+      "bytes": 361,
+      "durationMs": 0.1127,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "diagnose",
+      "repetition": 2,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 361,
+      "bytes": 361,
+      "durationMs": 0.0491,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "diagnose",
+      "repetition": 3,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 361,
+      "bytes": 361,
+      "durationMs": 0.0426,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "diagnose",
+      "repetition": 4,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 361,
+      "bytes": 361,
+      "durationMs": 0.0395,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "diagnose",
+      "repetition": 5,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 361,
+      "bytes": 361,
+      "durationMs": 0.0389,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "execution_status",
+      "repetition": 1,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 146,
+      "bytes": 152,
+      "durationMs": 0.0036,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "execution_status",
+      "repetition": 2,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 146,
+      "bytes": 152,
+      "durationMs": 0.0018,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "execution_status",
+      "repetition": 3,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 146,
+      "bytes": 152,
+      "durationMs": 0.0015,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "execution_status",
+      "repetition": 4,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 146,
+      "bytes": 152,
+      "durationMs": 0.0014,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "partial_validation",
+      "caseLabel": "Validação parcial",
+      "path": "execution_status",
+      "repetition": 5,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 146,
+      "bytes": 152,
+      "durationMs": 0.0015,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "success",
+          "delivery": "response_received",
+          "httpStatus": 200,
+          "validation": "partial"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "success",
+          "expected": "success"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "response_received",
+          "expected": "response_received"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": 200,
+          "expected": 200
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "partial",
+          "expected": "partial"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "diagnose",
+      "repetition": 1,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 368,
+      "bytes": 368,
+      "durationMs": 0.1916,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "diagnose",
+      "repetition": 2,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 368,
+      "bytes": 368,
+      "durationMs": 0.0785,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "diagnose",
+      "repetition": 3,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 368,
+      "bytes": 368,
+      "durationMs": 0.0717,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "diagnose",
+      "repetition": 4,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 368,
+      "bytes": 368,
+      "durationMs": 0.0724,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "diagnose",
+      "repetition": 5,
+      "readCalls": 1,
+      "callNames": [
+        "diagnose(result)"
+      ],
+      "networkCalls": 0,
+      "chars": 368,
+      "bytes": 368,
+      "durationMs": 0.0687,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "execution_status",
+      "repetition": 1,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 215,
+      "bytes": 220,
+      "durationMs": 0.0568,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "execution_status",
+      "repetition": 2,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 215,
+      "bytes": 220,
+      "durationMs": 0.0441,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "execution_status",
+      "repetition": 3,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 215,
+      "bytes": 220,
+      "durationMs": 0.0036,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "execution_status",
+      "repetition": 4,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 215,
+      "bytes": 220,
+      "durationMs": 0.0025,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "execution_status",
+      "repetition": 5,
+      "readCalls": 1,
+      "callNames": [
+        "getElementById(structured-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 215,
+      "bytes": 220,
+      "durationMs": 0.0025,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "focused_current",
+      "repetition": 1,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 342,
+      "bytes": 342,
+      "durationMs": 0.0078,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "focused_current",
+      "repetition": 2,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 342,
+      "bytes": 342,
+      "durationMs": 0.0053,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "focused_current",
+      "repetition": 3,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 342,
+      "bytes": 342,
+      "durationMs": 0.0053,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "focused_current",
+      "repetition": 4,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 342,
+      "bytes": 342,
+      "durationMs": 0.0048,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    },
+    {
+      "caseId": "transport_timeout",
+      "caseLabel": "Timeout de transporte",
+      "path": "focused_current",
+      "repetition": 5,
+      "readCalls": 7,
+      "callNames": [
+        "getElementById(structured-status)",
+        "getElementById(structured-prepare)",
+        "getElementById(structured-approve)",
+        "getElementById(structured-execute)",
+        "getElementById(structured-write-guard)",
+        "getElementById(structured-review)",
+        "getElementById(response-status)"
+      ],
+      "networkCalls": 0,
+      "chars": 342,
+      "bytes": 342,
+      "durationMs": 0.0045,
+      "observed": {
+        "state": "completed",
+        "blocker": null,
+        "nextAction": null,
+        "result": {
+          "outcome": "transport_error",
+          "delivery": "unknown",
+          "httpStatus": null,
+          "validation": "not_run"
+        }
+      },
+      "semanticSuccess": true,
+      "assertions": [
+        {
+          "name": "state",
+          "passed": true,
+          "actual": "completed",
+          "expected": "completed"
+        },
+        {
+          "name": "blocker",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "nextAction",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.outcome",
+          "passed": true,
+          "actual": "transport_error",
+          "expected": "transport_error"
+        },
+        {
+          "name": "result.delivery",
+          "passed": true,
+          "actual": "unknown",
+          "expected": "unknown"
+        },
+        {
+          "name": "result.httpStatus",
+          "passed": true,
+          "actual": null,
+          "expected": null
+        },
+        {
+          "name": "result.validation",
+          "passed": true,
+          "actual": "not_run",
+          "expected": "not_run"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "totalObservations": 90,
+    "overallByPath": {
+      "execution_status": {
+        "observations": 30,
+        "successes": 25,
+        "successRate": 0.8333,
+        "durationMs": {
+          "median": 0.0036,
+          "min": 0.0008,
+          "max": 0.2102
+        },
+        "bytes": {
+          "median": 108,
+          "min": 59,
+          "max": 220
+        },
+        "chars": {
+          "median": 104,
+          "min": 56,
+          "max": 215
+        },
+        "readCalls": {
+          "median": 1,
+          "min": 1,
+          "max": 1
+        },
+        "assertionFailures": {
+          "state": 5,
+          "blocker": 5,
+          "nextAction": 5
+        }
+      },
+      "focused_current": {
+        "observations": 30,
+        "successes": 30,
+        "successRate": 1,
+        "durationMs": {
+          "median": 0.0065,
+          "min": 0.0023,
+          "max": 0.0931
+        },
+        "bytes": {
+          "median": 305.5,
+          "min": 267,
+          "max": 343
+        },
+        "chars": {
+          "median": 305.5,
+          "min": 267,
+          "max": 343
+        },
+        "readCalls": {
+          "median": 7,
+          "min": 7,
+          "max": 7
+        },
+        "assertionFailures": {}
+      },
+      "diagnose": {
+        "observations": 30,
+        "successes": 30,
+        "successRate": 1,
+        "durationMs": {
+          "median": 0.0551,
+          "min": 0.0333,
+          "max": 0.8242
+        },
+        "bytes": {
+          "median": 307.5,
+          "min": 142,
+          "max": 368
+        },
+        "chars": {
+          "median": 307.5,
+          "min": 142,
+          "max": 368
+        },
+        "readCalls": {
+          "median": 1,
+          "min": 1,
+          "max": 1
+        },
+        "assertionFailures": {}
+      }
+    },
+    "byCasePath": [
+      {
+        "caseId": "get_valid",
+        "caseLabel": "GET válido",
+        "path": "execution_status",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.0067,
+            "min": 0.0051,
+            "max": 0.2102
+          },
+          "bytes": {
+            "median": 59,
+            "min": 59,
+            "max": 59
+          },
+          "chars": {
+            "median": 56,
+            "min": 56,
+            "max": 56
+          },
+          "readCalls": {
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "get_valid",
+        "caseLabel": "GET válido",
+        "path": "focused_current",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.013,
+            "min": 0.008,
+            "max": 0.0931
+          },
+          "bytes": {
+            "median": 267,
+            "min": 267,
+            "max": 267
+          },
+          "chars": {
+            "median": 267,
+            "min": 267,
+            "max": 267
+          },
+          "readCalls": {
+            "median": 7,
+            "min": 7,
+            "max": 7
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "get_valid",
+        "caseLabel": "GET válido",
+        "path": "diagnose",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.0418,
+            "min": 0.0333,
+            "max": 0.8242
+          },
+          "bytes": {
+            "median": 142,
+            "min": 142,
+            "max": 142
+          },
+          "chars": {
+            "median": 142,
+            "min": 142,
+            "max": 142
+          },
+          "readCalls": {
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "missing_variable",
+        "caseLabel": "Variável ausente",
+        "path": "execution_status",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.0061,
+            "min": 0.0029,
+            "max": 0.0083
+          },
+          "bytes": {
+            "median": 64,
+            "min": 64,
+            "max": 64
+          },
+          "chars": {
+            "median": 62,
+            "min": 62,
+            "max": 62
+          },
+          "readCalls": {
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "missing_variable",
+        "caseLabel": "Variável ausente",
+        "path": "focused_current",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.0171,
+            "min": 0.0068,
+            "max": 0.0312
+          },
+          "bytes": {
+            "median": 276,
+            "min": 276,
+            "max": 276
+          },
+          "chars": {
+            "median": 276,
+            "min": 276,
+            "max": 276
+          },
+          "readCalls": {
+            "median": 7,
+            "min": 7,
+            "max": 7
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "missing_variable",
+        "caseLabel": "Variável ausente",
+        "path": "diagnose",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.0596,
+            "min": 0.0552,
+            "max": 0.2326
+          },
+          "bytes": {
+            "median": 254,
+            "min": 254,
+            "max": 254
+          },
+          "chars": {
+            "median": 254,
+            "min": 254,
+            "max": 254
+          },
+          "readCalls": {
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "write_waiting_approval",
+        "caseLabel": "POST aguardando aprovação",
+        "path": "execution_status",
+        "overall": {
+          "observations": 5,
+          "successes": 0,
+          "successRate": 0,
+          "durationMs": {
+            "median": 0.001,
+            "min": 0.0008,
+            "max": 0.0039
+          },
+          "bytes": {
+            "median": 59,
+            "min": 59,
+            "max": 59
+          },
+          "chars": {
+            "median": 56,
+            "min": 56,
+            "max": 56
+          },
+          "readCalls": {
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "assertionFailures": {
+            "state": 5,
+            "blocker": 5,
+            "nextAction": 5
+          }
+        }
+      },
+      {
+        "caseId": "write_waiting_approval",
+        "caseLabel": "POST aguardando aprovação",
+        "path": "focused_current",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.0026,
+            "min": 0.0023,
+            "max": 0.0085
+          },
+          "bytes": {
+            "median": 269,
+            "min": 269,
+            "max": 269
+          },
+          "chars": {
+            "median": 269,
+            "min": 269,
+            "max": 269
+          },
+          "readCalls": {
+            "median": 7,
+            "min": 7,
+            "max": 7
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "write_waiting_approval",
+        "caseLabel": "POST aguardando aprovação",
+        "path": "diagnose",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.0436,
+            "min": 0.0375,
+            "max": 0.1148
+          },
+          "bytes": {
+            "median": 254,
+            "min": 254,
+            "max": 254
+          },
+          "chars": {
+            "median": 254,
+            "min": 254,
+            "max": 254
+          },
+          "readCalls": {
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "assertion_failed",
+        "caseLabel": "Assertiva reprovada",
+        "path": "execution_status",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.003,
+            "min": 0.0014,
+            "max": 0.1001
+          },
+          "bytes": {
+            "median": 152,
+            "min": 152,
+            "max": 152
+          },
+          "chars": {
+            "median": 149,
+            "min": 149,
+            "max": 149
+          },
+          "readCalls": {
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "assertion_failed",
+        "caseLabel": "Assertiva reprovada",
+        "path": "focused_current",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.0053,
+            "min": 0.0039,
+            "max": 0.013
+          },
+          "bytes": {
+            "median": 343,
+            "min": 343,
+            "max": 343
+          },
+          "chars": {
+            "median": 343,
+            "min": 343,
+            "max": 343
+          },
+          "readCalls": {
+            "median": 7,
+            "min": 7,
+            "max": 7
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "assertion_failed",
+        "caseLabel": "Assertiva reprovada",
+        "path": "diagnose",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.055,
+            "min": 0.0423,
+            "max": 0.2266
+          },
+          "bytes": {
+            "median": 365,
+            "min": 365,
+            "max": 365
+          },
+          "chars": {
+            "median": 365,
+            "min": 365,
+            "max": 365
+          },
+          "readCalls": {
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "partial_validation",
+        "caseLabel": "Validação parcial",
+        "path": "execution_status",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.0015,
+            "min": 0.0014,
+            "max": 0.0036
+          },
+          "bytes": {
+            "median": 152,
+            "min": 152,
+            "max": 152
+          },
+          "chars": {
+            "median": 146,
+            "min": 146,
+            "max": 146
+          },
+          "readCalls": {
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "partial_validation",
+        "caseLabel": "Validação parcial",
+        "path": "focused_current",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.0044,
+            "min": 0.0032,
+            "max": 0.0527
+          },
+          "bytes": {
+            "median": 335,
+            "min": 335,
+            "max": 335
+          },
+          "chars": {
+            "median": 335,
+            "min": 335,
+            "max": 335
+          },
+          "readCalls": {
+            "median": 7,
+            "min": 7,
+            "max": 7
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "partial_validation",
+        "caseLabel": "Validação parcial",
+        "path": "diagnose",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.0426,
+            "min": 0.0389,
+            "max": 0.1127
+          },
+          "bytes": {
+            "median": 361,
+            "min": 361,
+            "max": 361
+          },
+          "chars": {
+            "median": 361,
+            "min": 361,
+            "max": 361
+          },
+          "readCalls": {
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "transport_timeout",
+        "caseLabel": "Timeout de transporte",
+        "path": "execution_status",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.0036,
+            "min": 0.0025,
+            "max": 0.0568
+          },
+          "bytes": {
+            "median": 220,
+            "min": 220,
+            "max": 220
+          },
+          "chars": {
+            "median": 215,
+            "min": 215,
+            "max": 215
+          },
+          "readCalls": {
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "transport_timeout",
+        "caseLabel": "Timeout de transporte",
+        "path": "focused_current",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.0053,
+            "min": 0.0045,
+            "max": 0.0078
+          },
+          "bytes": {
+            "median": 342,
+            "min": 342,
+            "max": 342
+          },
+          "chars": {
+            "median": 342,
+            "min": 342,
+            "max": 342
+          },
+          "readCalls": {
+            "median": 7,
+            "min": 7,
+            "max": 7
+          },
+          "assertionFailures": {}
+        }
+      },
+      {
+        "caseId": "transport_timeout",
+        "caseLabel": "Timeout de transporte",
+        "path": "diagnose",
+        "overall": {
+          "observations": 5,
+          "successes": 5,
+          "successRate": 1,
+          "durationMs": {
+            "median": 0.0724,
+            "min": 0.0687,
+            "max": 0.1916
+          },
+          "bytes": {
+            "median": 368,
+            "min": 368,
+            "max": 368
+          },
+          "chars": {
+            "median": 368,
+            "min": 368,
+            "max": 368
+          },
+          "readCalls": {
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "assertionFailures": {}
+        }
+      }
+    ]
+  },
+  "limitations": [
+    "Synthetic Node harness, not a benchmark of a real agent, browser session, network or API.",
+    "Discovery is not measured: describe(), selector search and API-surface discovery are excluded, and every repetition is a recurring read over a fixture already known in advance. No discovery claim is made.",
+    "UI status texts are hand-written synthetic fixtures. Success means the fixed local parsers extracted the expected fields; it is not evidence of AI, model or agent understanding and must not be generalized.",
+    "The AIAgentBridge.test.cjs element/createDocument helpers were copied read-only; structured-execution elements were added locally to represent the existing index.html panel.",
+    "The diagnostic record is produced by buildRecord with a fixed monotonic clock because UI publication integration is outside this benchmark scope.",
+    "Five repetitions per case and path are descriptive only; they do not establish statistical significance or universal gains.",
+    "Durations are wall-clock microbenchmark samples from one Node process and are sensitive to JIT and OS scheduling; they are not network, rendering or agent latency.",
+    "No token counts are reported. Bytes and characters describe only the observed path payload; no LLM, tokenizer or dependency was used.",
+    "The execution_status and focused_current paths are deterministic local readers, not a full reproduction of human navigation or every existing UI affordance.",
+    "No real API was called, no personal data was used and no network request is part of any path."
+  ]
+}

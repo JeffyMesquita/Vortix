@@ -13,6 +13,8 @@ Operate Vortix through the connected Maestri Portal. Use the app's visible contr
 2. Read `window.vortixAgent.describe()` for the current UI contract and `window.vortixAgent.snapshot()` for safe, current request state. These methods are read-only. Use the Portal's UI/DOM controls to change anything.
 3. If the bridge is missing or reports an unsupported contract version, use accessible names and the `data-vortix-action`, `data-vortix-field`, and `data-vortix-region` selectors described in [the Maestri Portal guide](../../../docs/maestri-portal.md). Do not guess selectors from screen coordinates.
 
+For reviewed execution, when available, `window.vortixAgent.diagnose()` returns a compact safe summary. Request `{ view: 'blockers' }` for fixed blocker targets or `{ view: 'result' }` for safe execution facts; those views already include the summary. Read only the smallest view sufficient for the task. Stale observations and mismatched context omit prior results and next actions. A suggested `nextAction` is only a hint: use visible controls and preserve every approval guard. Missing diagnostics require ordinary safe UI discovery, never private state or storage inspection.
+
 The snapshot intentionally omits URL and route text, parameter/header names and values, body, environment variables, credentials, and response contents. Read only the visible fields needed for the user-requested operation; never inspect password fields or storage.
 
 ## Prepare and send a request

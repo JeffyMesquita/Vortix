@@ -64,6 +64,26 @@ Campos úteis usam `data-vortix-field`: `request.method`, `request.route`, `requ
 
 As áreas principais usam `data-vortix-region`: `collections`, `history`, `environment`, `request-workspace`, `request-editor`, `request-editor-tabs`, `request-response`, `agent-safe-state` e `agent-help`. As abas Params, Headers, Body, Auth, Scripts e Testes são `tab`; cada uma aponta para seu painel por `aria-controls`, e cada painel retorna a referência por `aria-labelledby`. Use as teclas ←/→, Home e End para navegar pelas abas.
 
+## Diagnóstico compacto e leitura progressiva
+
+Na UI reorganizada, abra **Ajuda e exibição** para acessar a ajuda do bridge ou **Tela cheia**. Importar/exportar/Runner ficam em **Ferramentas da coleção**; cURL, HTTP sem TLS e referências ficam em **Ferramentas avançadas**. **Configurações** tem rótulo visível e seções expansíveis. **Execução revisada** permanece no seu próprio painel após o formulário. Abra o grupo correspondente antes de usar controles recolhidos; os IDs e `data-vortix-*` foram preservados. Recolher não desativa configurações ou concede autorização.
+
+O bridge v2 também oferece `window.vortixAgent.diagnose()`, somente leitura. Comece pelo resumo; peça detalhes apenas quando necessários:
+
+```js
+window.vortixAgent.diagnose()
+window.vortixAgent.diagnose({ view: 'blockers' })
+window.vortixAgent.diagnose({ view: 'result' })
+```
+
+O resumo contém `diagnosticVersion`, `revision`, `state`, `freshness`, `blocker` e `nextAction`. A vista `blockers` acrescenta códigos e destinos fixos; `result` acrescenta outcome, entrega, status HTTP/proxy, duração, contagens de assertivas, validação, captura e persistência. URLs, valores, nomes de variáveis, mensagens livres, credenciais e conteúdo da resposta ficam fora dessas vistas.
+
+`nextAction` indica um controle disponível; não concede consentimento nem executa a ação. Use os controles visíveis para preparar, revisar e enviar. O botão **Ir ao impedimento** apenas abre a área correspondente e move o foco.
+
+A observação vale por menos de 2.000 ms, limitada também pelo prazo da preparação. Ao ficar antiga, retorna `unknown`/`stale` sem resultado ou próxima ação. Contexto divergente retorna `context_changed` e omite o resultado anterior; isso difere de uma execução vigente com entrega desconhecida. Releia após mudar aba, ambiente ou rascunho. O diagnóstico não renova aprovação nem altera o controller.
+
+Os tetos UTF-8 são 512 bytes no resumo, 2.048 no resultado e 4.096 nos impedimentos e no registro interno. Registro ausente, inválido ou grande demais produz `diagnostic_unavailable`, sem eco do conteúdo. Opções devem ser omitidas ou conter somente `view: 'summary' | 'blockers' | 'result'`; opções inválidas retornam `invalid_diagnostic_options`.
+
 ## Execução revisada pela interface
 
 Para uma request já salva e sem alterações pendentes, o painel **Execução revisada** oferece preparação sem HTTP, aprovação contextual e execução única. Os controles são `execution.prepare`, `execution.review`, `execution.execute` e `execution.cancel` em `data-vortix-action`. A região é `structured-execution`; `execution.status` expõe somente o resumo operacional visível, sem payloads.

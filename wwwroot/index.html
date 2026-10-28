@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/fonts/fonts.css">
   <link rel="stylesheet" href="/style.css">
   <script src="/runner-logic.js" defer></script>
+  <script src="/agent-diagnostics.js" defer></script>
   <script src="/agent-bridge.js" defer></script>
   <script src="/structured-execution.js" defer></script>
   <script src="/structured-request.js" defer></script>
@@ -33,19 +34,22 @@
       <section class="side-section collections-section" aria-labelledby="collections-heading" data-vortix-region="collections">
         <div class="side-section-heading">
           <h2 id="collections-heading">Coleções</h2>
-          <div class="collection-tools">
-            <button class="icon-button small-icon quick-open-trigger" id="quick-open-button" data-vortix-action="collection.search" type="button" aria-label="Buscar requisição" title="Buscar requisição (Ctrl+K)">
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
-            </button>
-            <button class="icon-button small-icon" id="import-collection" data-vortix-action="collection.import" type="button" aria-label="Importar coleção, OpenAPI JSON, cURL ou HTTPie" title="Importar coleção JSON, OpenAPI JSON ou comando cURL/HTTPie"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"></path></svg></button>
-            <button class="icon-button small-icon" id="export-collection" data-vortix-action="collection.export" type="button" aria-label="Exportar coleção selecionada" title="Exportar coleção selecionada"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 0 4 4m-4-4L8 7M5 12v7h14v-7"></path></svg></button>
-            <button class="icon-button small-icon" id="run-collection" data-vortix-action="runner.open" type="button" aria-label="Executar coleção ou pasta selecionada" title="Runner da seleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8a1 1 0 0 1 1.5-.86l11.2 7.2a1 1 0 0 1 0 1.72l-11.2 7.2a1 1 0 0 1-1.5-.86z"></path></svg></button>
-            <button class="icon-button small-icon" id="add-collection-heading" data-vortix-action="collection.new" type="button" aria-label="Adicionar coleção" title="Adicionar coleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg></button>
-          </div>
+          <button class="icon-button small-icon quick-open-trigger" id="quick-open-button" data-vortix-action="collection.search" type="button" aria-label="Buscar requisição" title="Buscar requisição (Ctrl+K)">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
+          </button>
           <input id="import-collection-file" type="file" accept=".json,application/json" hidden>
         </div>
+        <details class="collection-tools-more">
+          <summary>Ferramentas da coleção</summary>
+          <div class="collection-tools">
+            <button class="button secondary compact-button collection-tool-button" id="import-collection" data-vortix-action="collection.import" type="button" aria-label="Importar coleção, OpenAPI JSON, cURL ou HTTPie" title="Importar coleção JSON, OpenAPI JSON ou comando cURL/HTTPie"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"></path></svg><span>Importar</span></button>
+            <button class="button secondary compact-button collection-tool-button" id="export-collection" data-vortix-action="collection.export" type="button" aria-label="Exportar coleção selecionada" title="Exportar coleção selecionada"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 0 4 4m-4-4L8 7M5 12v7h14v-7"></path></svg><span>Exportar</span></button>
+            <button class="button secondary compact-button collection-tool-button" id="run-collection" data-vortix-action="runner.open" type="button" aria-label="Executar coleção ou pasta selecionada" title="Runner da seleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8a1 1 0 0 1 1.5-.86l11.2 7.2a1 1 0 0 1 0 1.72l-11.2 7.2a1 1 0 0 1-1.5-.86z"></path></svg><span>Runner</span></button>
+            <button class="button secondary compact-button collection-tool-button" id="add-collection-heading" data-vortix-action="collection.new" type="button" aria-label="Adicionar coleção" title="Adicionar coleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg><span>Nova coleção</span></button>
+          </div>
+        </details>
         <div id="collections-tree" class="collections-tree"></div>
-        <p id="collections-empty" class="sidebar-empty" hidden>Organize requests em coleções e pastas.</p>
+        <p id="collections-empty" class="sidebar-empty" hidden>Coleções organizam suas requests. <button class="text-button sidebar-empty-action" id="collections-empty-create" type="button">Criar coleção</button></p>
       </section>
 
       <details class="history-panel side-section" id="history-panel" data-vortix-region="history">
@@ -66,13 +70,18 @@
       <header class="workspace-bar">
         <div class="breadcrumb"><span>Workspace</span><span class="breadcrumb-separator">/</span><strong id="request-title">Nova requisição</strong></div>
         <div class="workspace-actions">
-          <button class="ai-friendly-trigger" id="ai-friendly-trigger" data-state="checking" data-vortix-action="agent.help.open" type="button" aria-haspopup="dialog" aria-controls="ai-help-dialog" aria-label="Verificando bridge">
-            <span class="ai-friendly-dot" aria-hidden="true"></span><span id="ai-friendly-trigger-label">Verificando bridge</span>
-          </button>
-          <button class="button secondary compact-button" id="workspace-fullscreen-toggle" data-vortix-action="workspace.fullscreen.toggle" type="button" aria-pressed="false" title="Tela cheia indisponível" disabled>Tela cheia</button>
+          <details class="workspace-utility">
+            <summary>Ajuda e exibição</summary>
+            <div class="workspace-utility-panel">
+              <button class="ai-friendly-trigger" id="ai-friendly-trigger" data-state="checking" data-vortix-action="agent.help.open" type="button" aria-haspopup="dialog" aria-controls="ai-help-dialog" aria-label="Verificando bridge">
+                <span class="ai-friendly-dot" aria-hidden="true"></span><span id="ai-friendly-trigger-label">Verificando bridge</span>
+              </button>
+              <button class="button secondary compact-button" id="workspace-fullscreen-toggle" data-vortix-action="workspace.fullscreen.toggle" type="button" aria-pressed="false" title="Tela cheia indisponível" disabled>Tela cheia</button>
+            </div>
+          </details>
           <label class="environment-picker" for="environment-select"><span>AMBIENTE</span><select id="environment-select" data-vortix-action="environment.select" data-vortix-region="environment" aria-label="Ambiente ativo" disabled><option value="" selected disabled>Carregando ambientes…</option></select></label>
           <button class="button secondary manage-environments-direct" id="manage-environments-direct" data-vortix-action="environment.manage" type="button">Gerenciar ambientes</button>
-          <button class="icon-button environment-settings" id="manage-environments" data-vortix-action="settings.open" type="button" title="Configurações" aria-label="Configurações"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"></circle><path d="m19.4 13.5 1.1.8-1.3 2.3-1.3-.5a8 8 0 0 1-1.5.8l-.2 1.5h-2.6l-.2-1.5a8 8 0 0 1-1.5-.8l-1.3.5-1.3-2.3 1.1-.8a8 8 0 0 1 0-1.6l-1.1-.8 1.3-2.3 1.3.5a8 8 0 0 1 1.5-.8l.2-1.5h2.6l.2 1.5a8 8 0 0 1 1.5.8l1.3-.5 1.3 2.3-1.1.8a8 8 0 0 1 0 1.6z"></path></svg></button>
+          <button class="button secondary compact-button environment-settings" id="manage-environments" data-vortix-action="settings.open" type="button" title="Configurações" aria-label="Configurações"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"></circle><path d="m19.4 13.5 1.1.8-1.3 2.3-1.3-.5a8 8 0 0 1-1.5.8l-.2 1.5h-2.6l-.2-1.5a8 8 0 0 1-1.5-.8l-1.3.5-1.3-2.3 1.1-.8a8 8 0 0 1 0-1.6l-1.1-.8 1.3-2.3 1.3.5a8 8 0 0 1 1.5-.8l.2-1.5h2.6l.2 1.5a8 8 0 0 1 1.5.8l1.3-.5 1.3 2.3-1.1.8a8 8 0 0 1 0 1.6z"></path></svg><span>Configurações</span></button>
           <button class="button secondary save-request" id="save-collection-request" data-vortix-action="request.save" type="button">Salvar</button>
         </div>
       </header>
@@ -86,6 +95,10 @@
 
       <div class="workspace-grid" id="request-workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-0" data-vortix-region="request-workspace">
         <section class="editor-column" aria-label="Editor da requisição" data-vortix-region="request-editor">
+          <label class="base-url-label" for="base-url">URL base</label>
+          <div class="base-url-wrap"><span class="base-url-icon" aria-hidden="true">↗</span><input id="base-url" data-vortix-field="request.base-url" type="url" autocomplete="off" placeholder="https://api.example.com/" spellcheck="false"></div>
+          <p class="hint base-url-hint">Servidor da API (ex.: <code>https://api.example.com</code>). Pode vir do ambiente ativo; HTTPS é recomendado e HTTP em localhost funciona sem configuração extra.</p>
+
           <div class="request-line">
             <label class="visually-hidden" for="method">Método</label>
             <select id="method" data-vortix-field="request.method" class="method-select method-get" aria-label="Método HTTP">
@@ -93,58 +106,16 @@
             </select>
             <label class="visually-hidden" for="route">Rota</label>
             <input id="route" data-vortix-field="request.route" class="route-input" type="text" autocomplete="off" spellcheck="false" aria-label="Rota da API" placeholder="/v1/resource">
-            <button class="button secondary request-curl-button" id="generate-curl" type="button" title="Gerar comando cURL">cURL</button>
-            <button class="button primary send-button" id="send-request" data-vortix-action="request.send" aria-describedby="request-send-status" type="button"><span aria-hidden="true">▶</span> Enviar</button>
           </div>
-          <output id="request-send-status" class="hint request-send-status" data-vortix-field="request.send-status" aria-live="polite" aria-atomic="true">Informe uma rota para enviar a requisição.</output>
-          <details id="structured-card" class="structured-card" data-vortix-region="structured-execution">
-            <summary>Execução revisada <span class="hint">Preparar · aprovar · executar</span></summary>
-            <p class="hint">Use uma request salva, sem alterações pendentes, e confira o ambiente ativo. Preparar não chama a API.</p>
-            <output id="structured-status" class="structured-status" data-vortix-field="execution.status" aria-live="polite" aria-atomic="true">Salve e selecione uma request para preparar.</output>
-            <div id="structured-review" hidden>
-              <strong id="structured-destination"></strong>
-              <p id="structured-effects" class="hint"></p>
-              <fieldset id="structured-write-guard" hidden>
-                <legend>Proteção para escrita</legend>
-                <label><input id="structured-confirm" type="checkbox"> Confirmo que URL e dados são descartáveis de teste.</label>
-                <label for="structured-phrase">Digite TESTE para aprovar a escrita</label>
-                <input id="structured-phrase" type="text" autocomplete="off" maxlength="32">
-              </fieldset>
-            </div>
-            <div class="structured-actions">
-              <button id="structured-prepare" class="button secondary" data-vortix-action="execution.prepare" type="button" disabled>Preparar salva</button>
-              <button id="structured-approve" class="button secondary" data-vortix-action="execution.review" type="button" disabled>Revisar e aprovar</button>
-              <button id="structured-execute" class="button primary" data-vortix-action="execution.execute" type="button" aria-describedby="structured-status" disabled>Executar preparação</button>
-              <button id="structured-cancel" class="button secondary" data-vortix-action="execution.cancel" type="button" disabled>Cancelar preparação</button>
-            </div>
-          </details>
-          <label class="base-url-label" for="base-url">URL base</label>
-          <div class="base-url-wrap"><span class="base-url-icon" aria-hidden="true">↗</span><input id="base-url" data-vortix-field="request.base-url" type="url" autocomplete="off" placeholder="https://api.example.com/" spellcheck="false"></div>
-          <p class="hint base-url-hint">Use URL base por ambiente. HTTPS é recomendado; HTTP em localhost funciona sem configuração adicional.</p>
-          <label class="check-row insecure-http-option" for="allow-insecure-http"><input id="allow-insecure-http" type="checkbox"><span>Permitir HTTP sem TLS para esta request fora de localhost. A opção fica salva com a request.</span></label>
-
-          <details class="request-inspector" id="request-inspector">
-            <summary><span>Referências e origens</span> <span class="request-inspector-count" id="request-inspector-count">0</span></summary>
-            <div class="request-inspector-body">
-              <p class="hint">Mostra campo, nome e origem de cada <code>{{...}}</code> antes do envio: <code>environment</code>, <code>vault</code>, <code>dataset</code>, <code>missing</code>, <code>locked</code> ou <code>unavailable</code>. Valores resolvidos nunca aparecem aqui.</p>
-              <button class="button secondary compact-button" id="inspect-references" type="button">Atualizar origens</button>
-              <ul id="request-inspector-output" class="request-inspector-output" aria-live="polite"><li class="request-inspector-empty">Abra ou atualize para inspecionar as referências.</li></ul>
-              <details class="agent-safe-state-panel" data-vortix-region="agent-safe-state">
-                <summary>Estado seguro para IA</summary>
-                <p class="hint">Gera um resumo sem URL, rota, valores de request, credenciais ou conteúdo da resposta. O resumo não envia requests nem comprova consentimento.</p>
-                <button class="button secondary compact-button" id="refresh-agent-safe-state" data-vortix-action="agent.snapshot.refresh" type="button">Gerar estado seguro</button>
-                <pre id="agent-safe-state-output" data-vortix-field="agent.safe-state" class="agent-safe-state-output" aria-label="Resumo seguro para IA" aria-live="polite" tabindex="0" hidden></pre>
-              </details>
-            </div>
-          </details>
+          <p class="hint request-route-hint">Rota é o caminho após o servidor (ex.: <code>/v1/resource</code>). O envio combina os dois.</p>
 
           <nav class="editor-tabs" id="request-editor-tabs" aria-label="Seções da requisição" role="tablist" data-vortix-region="request-editor-tabs">
             <button class="editor-tab active" type="button" id="editor-tab-params" role="tab" aria-selected="true" aria-controls="editor-panel-params" tabindex="0" data-editor-tab="params">Params <span class="tab-count" id="params-count">0</span></button>
             <button class="editor-tab" type="button" id="editor-tab-headers" role="tab" aria-selected="false" aria-controls="editor-panel-headers" tabindex="-1" data-editor-tab="headers">Headers</button>
             <button class="editor-tab" type="button" id="editor-tab-body" role="tab" aria-selected="false" aria-controls="editor-panel-body" tabindex="-1" data-editor-tab="body">Body</button>
             <button class="editor-tab" type="button" id="editor-tab-auth" role="tab" aria-selected="false" aria-controls="editor-panel-auth" tabindex="-1" data-editor-tab="auth">Auth</button>
-            <button class="editor-tab" type="button" id="editor-tab-scripts" role="tab" aria-selected="false" aria-controls="editor-panel-scripts" tabindex="-1" data-editor-tab="scripts">Scripts</button>
-            <button class="editor-tab" type="button" id="editor-tab-tests" role="tab" aria-selected="false" aria-controls="editor-panel-tests" tabindex="-1" data-editor-tab="tests">Testes</button>
+            <button class="editor-tab editor-tab-secondary" type="button" id="editor-tab-scripts" role="tab" aria-selected="false" aria-controls="editor-panel-scripts" tabindex="-1" data-editor-tab="scripts" title="Automação: ações antes e depois do envio">Scripts <span class="editor-tab-note">automação</span></button>
+            <button class="editor-tab editor-tab-secondary" type="button" id="editor-tab-tests" role="tab" aria-selected="false" aria-controls="editor-panel-tests" tabindex="-1" data-editor-tab="tests" title="Automação: testes e contratos da resposta">Testes <span class="editor-tab-note">automação</span></button>
           </nav>
 
           <div class="tab-panel" id="editor-panel-params" role="tabpanel" aria-labelledby="editor-tab-params" data-editor-panel="params">
@@ -386,14 +357,67 @@ insomnia.environment.set("token", body.access_token);</code></pre>
             </details>
           </div>
 
-          <fieldset class="write-guard" id="write-guard" hidden>
-            <legend>Proteção para escrita</legend>
-            <p>POST, PUT, PATCH e DELETE podem alterar dados. Use somente ambiente e dados descartáveis de teste.</p>
-            <label for="test-data-phrase">Digite TESTE para habilitar</label>
-            <input id="test-data-phrase" type="text" autocomplete="off" spellcheck="false" placeholder="TESTE">
-            <label class="check-row" for="confirm-test-data"><input id="confirm-test-data" type="checkbox"><span>Confirmo que URL e dados são de teste e podem ser alterados.</span></label>
-            <p class="warning-text">Uma confirmação visual aparecerá antes de cada envio.</p>
-          </fieldset>
+          <div class="request-action-area">
+            <fieldset class="write-guard" id="write-guard" hidden>
+              <legend>Proteção para escrita</legend>
+              <p>POST, PUT, PATCH e DELETE podem alterar dados. Use somente ambiente e dados descartáveis de teste.</p>
+              <label for="test-data-phrase">Digite TESTE para habilitar</label>
+              <input id="test-data-phrase" type="text" autocomplete="off" spellcheck="false" placeholder="TESTE">
+              <label class="check-row" for="confirm-test-data"><input id="confirm-test-data" type="checkbox"><span>Confirmo que URL e dados são de teste e podem ser alterados.</span></label>
+              <p class="warning-text">Uma confirmação visual aparecerá antes de cada envio.</p>
+            </fieldset>
+            <output id="request-send-status" class="hint request-send-status" data-vortix-field="request.send-status" aria-live="polite" aria-atomic="true">Informe uma rota para enviar a requisição.</output>
+            <button class="button primary send-button" id="send-request" data-vortix-action="request.send" aria-describedby="request-send-status" type="button"><span aria-hidden="true">▶</span> Enviar</button>
+          </div>
+
+          <details id="advanced-tools" class="advanced-tools">
+            <summary><span>Ferramentas avançadas</span> <span id="advanced-active-indicator" class="advanced-active-indicator" hidden></span></summary>
+            <p class="hint">Opções que mudam como a request é enviada ou inspecionada. Recolher não desativa o que já está configurado.</p>
+            <label class="check-row insecure-http-option" for="allow-insecure-http"><input id="allow-insecure-http" type="checkbox"><span>Permitir HTTP sem TLS para esta request fora de localhost. A opção fica salva com a request.</span></label>
+            <div class="advanced-tool-row">
+              <button class="button secondary compact-button" id="generate-curl" type="button" title="Gerar comando cURL">Gerar cURL</button>
+              <span class="hint">Copia um comando equivalente; não envia a request.</span>
+            </div>
+
+            <details class="request-inspector" id="request-inspector">
+              <summary><span>Referências e origens</span> <span class="request-inspector-count" id="request-inspector-count">0</span></summary>
+              <div class="request-inspector-body">
+                <p class="hint">Mostra campo, nome e origem de cada <code>{{...}}</code> antes do envio: <code>environment</code>, <code>vault</code>, <code>dataset</code>, <code>missing</code>, <code>locked</code> ou <code>unavailable</code>. Valores resolvidos nunca aparecem aqui.</p>
+                <button class="button secondary compact-button" id="inspect-references" type="button">Atualizar origens</button>
+                <ul id="request-inspector-output" class="request-inspector-output" aria-live="polite"><li class="request-inspector-empty">Abra ou atualize para inspecionar as referências.</li></ul>
+                <details class="agent-safe-state-panel" data-vortix-region="agent-safe-state">
+                  <summary>Estado seguro para IA</summary>
+                  <p class="hint">Gera um resumo sem URL, rota, valores de request, credenciais ou conteúdo da resposta. O resumo não envia requests nem comprova consentimento.</p>
+                  <button class="button secondary compact-button" id="refresh-agent-safe-state" data-vortix-action="agent.snapshot.refresh" type="button">Gerar estado seguro</button>
+                  <pre id="agent-safe-state-output" data-vortix-field="agent.safe-state" class="agent-safe-state-output" aria-label="Resumo seguro para IA" aria-live="polite" tabindex="0" hidden></pre>
+                </details>
+              </div>
+            </details>
+          </details>
+
+          <details id="structured-card" class="structured-card" data-vortix-region="structured-execution">
+            <summary>Execução revisada <span class="hint">Preparar · aprovar · executar</span></summary>
+            <p class="hint">Use uma request salva, sem alterações pendentes, e confira o ambiente ativo. Preparar não chama a API.</p>
+            <output id="structured-status" class="structured-status" data-vortix-field="execution.status" aria-live="polite" aria-atomic="true">Salve e selecione uma request para preparar.</output>
+            <output id="structured-diagnostic-summary" class="structured-diagnostic-summary" aria-live="polite" aria-atomic="true"></output>
+            <button id="structured-diagnostic-go" class="button secondary compact-button structured-diagnostic-go" type="button" aria-describedby="structured-diagnostic-summary" hidden>Ir ao impedimento</button>
+            <div id="structured-review" hidden>
+              <strong id="structured-destination"></strong>
+              <p id="structured-effects" class="hint"></p>
+              <fieldset id="structured-write-guard" hidden>
+                <legend>Proteção para escrita</legend>
+                <label><input id="structured-confirm" type="checkbox"> Confirmo que URL e dados são descartáveis de teste.</label>
+                <label for="structured-phrase">Digite TESTE para aprovar a escrita</label>
+                <input id="structured-phrase" type="text" autocomplete="off" maxlength="32">
+              </fieldset>
+            </div>
+            <div class="structured-actions">
+              <button id="structured-prepare" class="button secondary" data-vortix-action="execution.prepare" type="button" disabled>Preparar salva</button>
+              <button id="structured-approve" class="button secondary" data-vortix-action="execution.review" type="button" disabled>Revisar e aprovar</button>
+              <button id="structured-execute" class="button primary" data-vortix-action="execution.execute" type="button" aria-describedby="structured-status" disabled>Executar preparação</button>
+              <button id="structured-cancel" class="button secondary" data-vortix-action="execution.cancel" type="button" disabled>Cancelar preparação</button>
+            </div>
+          </details>
           <div class="editor-foot"><span id="request-note" class="hint">GET, HEAD e OPTIONS consultam a API. POST, PUT, PATCH e DELETE exigem confirmação manual.</span></div>
         </section>
 
@@ -417,10 +441,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
             </div>
             <p class="hint">O body fica salvo na coleção local e pode conter dados sensíveis.</p>
           </form>
-          <div class="response-section">
-            <div class="output-heading"><h2>Cabeçalhos</h2><button class="copy-button" id="copy-headers" data-vortix-action="response.copy-headers" type="button" disabled>Copiar</button></div>
-            <pre id="response-headers" data-vortix-field="response.headers" class="output empty">A resposta aparecerá aqui.</pre>
-          </div>
+          <p class="hint response-guidance">Envie a request para ver o status e o corpo aqui; os cabeçalhos ficam em uma seção secundária.</p>
           <div class="response-section response-body-section">
             <div class="output-heading response-body-heading">
               <h2>Body</h2>
@@ -439,10 +460,15 @@ insomnia.environment.set("token", body.access_token);</code></pre>
               <span id="response-search-count" role="status" aria-live="polite"></span>
             </div>
             <div id="response-body" data-vortix-field="response.body" class="output body-output empty">
-              <pre id="response-body-pre" class="response-body-pre" tabindex="0" aria-label="Body da resposta">A resposta aparecerá aqui.</pre>
+              <pre id="response-body-pre" class="response-body-pre" tabindex="0" aria-label="Body da resposta">Envie a request para ver o status e o corpo da resposta.</pre>
               <div id="response-tree" class="response-json-tree" hidden></div>
             </div>
           </div>
+          <details class="response-section response-headers-section" id="response-headers-section">
+            <summary>Ver cabeçalhos da resposta</summary>
+            <div class="output-heading"><h2>Cabeçalhos</h2><button class="copy-button" id="copy-headers" data-vortix-action="response.copy-headers" type="button" disabled>Copiar</button></div>
+            <pre id="response-headers" data-vortix-field="response.headers" class="output empty">Os cabeçalhos aparecerão após o envio.</pre>
+          </details>
           <details id="response-examples-panel" class="response-examples-panel" hidden>
             <summary>Exemplos salvos <span id="response-examples-count" class="response-examples-count">0</span></summary>
             <div id="response-examples-list" class="response-example-list"></div>
@@ -519,77 +545,94 @@ insomnia.environment.set("token", body.access_token);</code></pre>
 
   <dialog class="app-dialog settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
     <form method="dialog">
-      <div class="dialog-heading"><div><h2 id="settings-title">Configurações</h2><p class="dialog-description">Ajuste aparência, legibilidade e retenção local.</p></div><button class="icon-button dialog-close" id="close-settings" type="button" aria-label="Fechar configurações">×</button></div>
-      <section class="settings-section" aria-labelledby="settings-appearance-title">
-        <h3 id="settings-appearance-title">Aparência</h3>
-        <div class="settings-grid">
-          <label for="theme-select">Tema<select id="theme-select" aria-label="Tema"><option value="dracula">Dracula</option><option value="monokai">Monokai</option><option value="one-dark">One Dark</option><option value="nord">Nord</option><option value="solarized-dark">Solarized Dark</option><option value="github-dark">GitHub Dark</option><option value="paper">Papel</option><option value="graphite">Grafite</option><option value="tide">Maré</option></select></label>
-          <label for="font-select">Fonte global<select id="font-select" aria-label="Fonte global"><option value="fira-code">Fira Code</option><option value="jetbrains-mono">JetBrains Mono</option><option value="cascadia-code">Cascadia Code</option><option value="cascadia-mono">Cascadia Mono</option><option value="ibm-plex-mono">IBM Plex Mono</option></select></label>
-        </div>
-        <div class="settings-scale">
-          <span>Escala global</span>
-          <div class="font-scale" role="group" aria-label="Escala global da interface">
-            <button class="icon-button font-scale-button" id="decrease-font" type="button" title="Diminuir fonte (Ctrl+-)" aria-label="Diminuir fonte">A−</button>
-            <output id="font-scale-value" aria-live="polite" aria-atomic="true">120%</output>
-            <button class="icon-button font-scale-button" id="increase-font" type="button" title="Aumentar fonte (Ctrl++)" aria-label="Aumentar fonte">A+</button>
-          </div>
-          <p class="hint">Atalhos: Ctrl++ aumenta, Ctrl+- diminui e Ctrl+0 restaura.</p>
-        </div>
-      </section>
-      <section class="settings-section settings-history-section" aria-labelledby="settings-history-title">
-        <h3 id="settings-history-title">Histórico de respostas</h3>
-        <div class="history-settings-controls">
-          <label for="history-retention-limit">Limite de requests
-            <select id="history-retention-limit" aria-label="Limite do histórico">
-              <option value="50">50 requests</option><option value="100">100 requests</option><option value="250">250 requests</option>
-              <option value="500" selected>500 requests</option><option value="1000">1000 requests</option><option value="2500">2500 requests</option>
-            </select>
-          </label>
-          <label class="check-row" for="history-save-response-body"><input id="history-save-response-body" type="checkbox"><span>Salvar body de resposta</span></label>
-        </div>
-        <p class="hint history-body-setting-note">Bodies de resposta ficam desativados por padrão. No modo local, são protegidos no SQLite; no modo público, ficam no IndexedDB sem criptografia automática. Desativar não apaga bodies já salvos; limpe o histórico para removê-los. Bodies de token nunca são guardados.</p>
-      </section>
-      <section class="settings-section settings-environment-section" aria-labelledby="settings-environments-title">
-        <div><h3 id="settings-environments-title">Ambientes</h3><p class="hint">Separe variáveis de desenvolvimento, homologação e produção.</p></div>
-        <button class="button secondary" id="settings-environments" type="button">Gerenciar ambientes</button>
-      </section>
-      <section class="settings-section settings-vault-section" aria-labelledby="settings-vault-title">
-        <div><h3 id="settings-vault-title">Cofre de segredos</h3><p class="hint">Opcional e por ambiente. Os valores são cifrados no navegador com WebCrypto PBKDF2-SHA-256 e AES-GCM-256 usando <code>dbRead</code>/<code>dbWrite('settings', …)</code>; a senha e a chave não são salvas nem enviadas ao servidor.</p></div>
-        <p id="secret-vault-status" class="secret-vault-status" role="status" aria-live="polite"></p>
-        <div id="secret-vault-locked" class="secret-vault-locked">
-          <label for="secret-vault-passphrase">Senha do cofre (mínimo 12 caracteres)</label>
-          <input id="secret-vault-passphrase" type="password" minlength="12" maxlength="256" autocomplete="new-password" spellcheck="false" aria-describedby="secret-vault-help">
-          <p class="hint" id="secret-vault-help">A senha não é armazenada e não pode ser recuperada. Ao recarregar ou bloquear, os valores descriptografados saem da memória.</p>
-          <div class="secret-vault-actions">
-            <button class="button secondary" id="secret-vault-create" type="button">Criar cofre</button>
-            <button class="button secondary" id="secret-vault-unlock" type="button">Desbloquear</button>
-            <button class="button secondary danger-button" id="secret-vault-remove" type="button">Remover cofre</button>
-          </div>
-        </div>
-        <div id="secret-vault-unlocked" class="secret-vault-unlocked" hidden>
-          <div class="secret-vault-add">
-            <div><label for="secret-vault-name">Nome do segredo</label><input id="secret-vault-name" type="text" maxlength="80" autocomplete="off" placeholder="apiToken"></div>
-            <div><label for="secret-vault-value">Valor (mascarado)</label><input id="secret-vault-value" type="password" autocomplete="new-password" spellcheck="false" placeholder="valor do segredo"></div>
-            <button class="button secondary" id="secret-vault-add" type="button">Adicionar ou substituir</button>
-          </div>
-          <div class="secret-vault-list-heading"><span>Nomes no cofre (valores nunca são exibidos)</span><button class="button secondary compact-button" id="secret-vault-lock" type="button">Bloquear cofre</button></div>
-          <ul id="secret-vault-list" class="secret-vault-list" aria-live="polite"></ul>
-          <p class="hint">Use <code>{{nome}}</code> em URL base, rota, Params, Headers, Auth, Body, GraphQL e multipart. A precedência é dados do Runner &gt; cofre &gt; ambiente.</p>
-        </div>
-      </section>
-      <section class="settings-section settings-backup-section" aria-labelledby="settings-backup-title">
-        <div><h3 id="settings-backup-title">Backup do workspace</h3><p class="hint">Inclui histórico, coleções, pastas, ambientes e configurações. Você pode baixar JSON simples ou protegido por senha.</p></div>
-        <div class="settings-backup-actions">
-          <button class="button secondary" id="export-workspace" type="button">Backup simples</button>
-          <button class="button secondary" id="export-encrypted-workspace" type="button">Backup com senha</button>
-          <button class="button secondary" id="restore-workspace" type="button">Restaurar backup</button>
-          <input id="restore-workspace-file" type="file" accept=".json,.apistudio-backup,application/json" hidden>
-        </div>
-      </section>
-      <section class="settings-section settings-security-section" aria-labelledby="settings-security-title">
-        <div><h3 id="settings-security-title">Proteção dos dados</h3><p class="hint">Novos tokens, Headers, Params sensíveis e Bodies usam ASP.NET Core Data Protection. Registros antigos migram após backup; cópias legadas do navegador não são apagadas.</p></div>
-        <button class="button secondary" id="protect-existing-secrets" type="button">Proteger dados existentes</button>
-      </section>
+      <div class="dialog-heading"><div><h2 id="settings-title">Configurações</h2><p class="dialog-description">Ajuste aparência, ambientes e dados do workspace.</p></div><button class="icon-button dialog-close" id="close-settings" type="button" aria-label="Fechar configurações">×</button></div>
+      <div class="settings-groups">
+        <details class="settings-group" open>
+          <summary>Aparência</summary>
+          <section class="settings-section" aria-labelledby="settings-appearance-title">
+            <h3 id="settings-appearance-title" class="visually-hidden">Aparência</h3>
+            <div class="settings-grid">
+              <label for="theme-select">Tema<select id="theme-select" aria-label="Tema"><option value="dracula">Dracula</option><option value="monokai">Monokai</option><option value="one-dark">One Dark</option><option value="nord">Nord</option><option value="solarized-dark">Solarized Dark</option><option value="github-dark">GitHub Dark</option><option value="paper">Papel</option><option value="graphite">Grafite</option><option value="tide">Maré</option></select></label>
+              <label for="font-select">Fonte global<select id="font-select" aria-label="Fonte global"><option value="fira-code">Fira Code</option><option value="jetbrains-mono">JetBrains Mono</option><option value="cascadia-code">Cascadia Code</option><option value="cascadia-mono">Cascadia Mono</option><option value="ibm-plex-mono">IBM Plex Mono</option></select></label>
+            </div>
+            <div class="settings-scale">
+              <span>Escala global</span>
+              <div class="font-scale" role="group" aria-label="Escala global da interface">
+                <button class="icon-button font-scale-button" id="decrease-font" type="button" title="Diminuir fonte (Ctrl+-)" aria-label="Diminuir fonte">A−</button>
+                <output id="font-scale-value" aria-live="polite" aria-atomic="true">120%</output>
+                <button class="icon-button font-scale-button" id="increase-font" type="button" title="Aumentar fonte (Ctrl++)" aria-label="Aumentar fonte">A+</button>
+              </div>
+              <p class="hint">Atalhos: Ctrl++ aumenta, Ctrl+- diminui e Ctrl+0 restaura.</p>
+            </div>
+          </section>
+        </details>
+        <details class="settings-group">
+          <summary>Ambientes</summary>
+          <section class="settings-section settings-environment-section" aria-labelledby="settings-environments-title">
+            <div><h3 id="settings-environments-title" class="visually-hidden">Ambientes</h3><p class="hint">Separe variáveis de desenvolvimento, homologação e produção.</p></div>
+            <button class="button secondary" id="settings-environments" type="button">Gerenciar ambientes</button>
+          </section>
+        </details>
+        <details class="settings-group">
+          <summary>Histórico e privacidade</summary>
+          <section class="settings-section settings-history-section" aria-labelledby="settings-history-title">
+            <h3 id="settings-history-title" class="visually-hidden">Histórico de respostas</h3>
+            <div class="history-settings-controls">
+              <label for="history-retention-limit">Limite de requests
+                <select id="history-retention-limit" aria-label="Limite do histórico">
+                  <option value="50">50 requests</option><option value="100">100 requests</option><option value="250">250 requests</option>
+                  <option value="500" selected>500 requests</option><option value="1000">1000 requests</option><option value="2500">2500 requests</option>
+                </select>
+              </label>
+              <label class="check-row" for="history-save-response-body"><input id="history-save-response-body" type="checkbox"><span>Salvar body de resposta</span></label>
+            </div>
+            <p class="hint history-body-setting-note">Bodies de resposta ficam desativados por padrão. No modo local, são protegidos no SQLite; no modo público, ficam no IndexedDB sem criptografia automática. Desativar não apaga bodies já salvos; limpe o histórico para removê-los. Bodies de token nunca são guardados.</p>
+          </section>
+        </details>
+        <details class="settings-group">
+          <summary>Cofre de segredos</summary>
+          <section class="settings-section settings-vault-section" aria-labelledby="settings-vault-title">
+            <div><h3 id="settings-vault-title" class="visually-hidden">Cofre de segredos</h3><p class="hint">Opcional e por ambiente. Os valores são cifrados no navegador com Web Crypto; a senha e a chave não são salvas nem enviadas ao servidor.</p></div>
+            <p id="secret-vault-status" class="secret-vault-status" role="status" aria-live="polite"></p>
+            <div id="secret-vault-locked" class="secret-vault-locked">
+              <label for="secret-vault-passphrase">Senha do cofre (mínimo 12 caracteres)</label>
+              <input id="secret-vault-passphrase" type="password" minlength="12" maxlength="256" autocomplete="new-password" spellcheck="false" aria-describedby="secret-vault-help">
+              <p class="hint" id="secret-vault-help">A senha não é armazenada e não pode ser recuperada. Ao recarregar ou bloquear, os valores descriptografados saem da memória.</p>
+              <div class="secret-vault-actions">
+                <button class="button secondary" id="secret-vault-create" type="button">Criar cofre</button>
+                <button class="button secondary" id="secret-vault-unlock" type="button">Desbloquear</button>
+                <button class="button secondary danger-button" id="secret-vault-remove" type="button">Remover cofre</button>
+              </div>
+            </div>
+            <div id="secret-vault-unlocked" class="secret-vault-unlocked" hidden>
+              <div class="secret-vault-add">
+                <div><label for="secret-vault-name">Nome do segredo</label><input id="secret-vault-name" type="text" maxlength="80" autocomplete="off" placeholder="apiToken"></div>
+                <div><label for="secret-vault-value">Valor (mascarado)</label><input id="secret-vault-value" type="password" autocomplete="new-password" spellcheck="false" placeholder="valor do segredo"></div>
+                <button class="button secondary" id="secret-vault-add" type="button">Adicionar ou substituir</button>
+              </div>
+              <div class="secret-vault-list-heading"><span>Nomes no cofre (valores nunca são exibidos)</span><button class="button secondary compact-button" id="secret-vault-lock" type="button">Bloquear cofre</button></div>
+              <ul id="secret-vault-list" class="secret-vault-list" aria-live="polite"></ul>
+              <p class="hint">Use <code>{{nome}}</code> em URL base, rota, Params, Headers, Auth, Body, GraphQL e multipart. A precedência é dados do Runner &gt; cofre &gt; ambiente.</p>
+            </div>
+          </section>
+        </details>
+        <details class="settings-group">
+          <summary>Backup e proteção dos dados</summary>
+          <section class="settings-section settings-backup-section" aria-labelledby="settings-backup-title">
+            <div><h3 id="settings-backup-title" class="visually-hidden">Backup do workspace</h3><p class="hint">Inclui histórico, coleções, pastas, ambientes e configurações. Você pode baixar JSON simples ou protegido por senha.</p></div>
+            <div class="settings-backup-actions">
+              <button class="button secondary" id="export-workspace" type="button">Backup simples</button>
+              <button class="button secondary" id="export-encrypted-workspace" type="button">Backup com senha</button>
+              <button class="button secondary" id="restore-workspace" type="button">Restaurar backup</button>
+              <input id="restore-workspace-file" type="file" accept=".json,.apistudio-backup,application/json" hidden>
+            </div>
+          </section>
+          <section class="settings-section settings-security-section" aria-labelledby="settings-security-title">
+            <div><h3 id="settings-security-title" class="visually-hidden">Proteção dos dados</h3><p class="hint">No modo local, novos tokens, Headers, Params sensíveis e Bodies usam ASP.NET Core Data Protection. No modo público, o workspace fica no armazenamento deste navegador sem criptografia automática. Registros antigos migram após backup; cópias legadas do navegador não são apagadas.</p></div>
+            <button class="button secondary" id="protect-existing-secrets" type="button">Proteger dados existentes</button>
+          </section>
+        </details>
+      </div>
       <div class="dialog-actions"><button class="button primary" id="close-settings-done" type="button">Concluído</button></div>
     </form>
   </dialog>

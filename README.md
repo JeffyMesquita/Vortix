@@ -229,7 +229,7 @@ Clique **Enviar**. Uma resposta fictícia pode ter este formato:
 }
 ~~~
 
-Confira status, cabeçalhos e body. Na aba **Testes**, você pode exigir status <code>200</code> ou verificar um campo da resposta, como <code>data[0].id</code>. GET costuma consultar dados, mas confira o contrato do endpoint: o Vortix não consegue garantir que uma API não altere estado. Salve a request na coleção para abrir de novo ou executar pelo [Runner de coleção](#runner-de-coleção).
+Confira status e body; abra **Ver cabeçalhos da resposta** quando precisar dos metadados. Na aba **Testes**, você pode exigir status <code>200</code> ou verificar um campo da resposta, como <code>data[0].id</code>. GET costuma consultar dados, mas confira o contrato do endpoint: o Vortix não consegue garantir que uma API não altere estado. Salve a request na coleção para abrir de novo ou executar pelo [Runner de coleção](#runner-de-coleção). Se ainda não houver coleção, **Salvar** oferece criá-la explicitamente; cancelar mantém o rascunho.
 
 Para enviar JSON, texto, XML ou form URL-encoded, escolha o formato na aba **Body**. O Vortix define o Content-Type padrão; um header Content-Type informado manualmente o sobrescreve. POST, PUT, PATCH e DELETE pedem confirmação de gravação; use dados descartáveis e confira a URL antes de confirmar.
 
@@ -248,6 +248,10 @@ O status vem dos exemplos já salvos; a busca não envia requests nem altera o h
 
 ## Workspace desktop e aparência
 
+O editor segue URL base, método/rota, abas de preenchimento e área **Enviar**, com a proteção de escrita junto da ação. **Ferramentas avançadas** reúne HTTP sem TLS, geração de cURL e referências; o indicador informa recursos ativos sem mostrar valores. **Execução revisada** mantém seu painel próprio. Recolher ferramentas não desativa automações já configuradas.
+
+Na lateral, **Ferramentas da coleção** reúne importação, exportação e Runner. **Ajuda e exibição**, no cabeçalho, contém a ajuda do bridge e **Tela cheia**. **Configurações** organiza Aparência, Ambientes, Histórico e privacidade, Cofre e Backup/proteção em seções expansíveis. Segurança, consentimentos e avisos de persistência continuam nos respectivos fluxos.
+
 Em **Configurações → Aparência**, escolha **Papel** para uma superfície clara, **Grafite** para tons escuros neutros ou **Maré** para azul profundo com destaque âmbar. A escolha é salva no workspace, mantendo os seis temas anteriores disponíveis. Os novos temas incluem cores de sintaxe JSON, estados e foco por teclado.
 
 O botão **Tela cheia** usa a Fullscreen API do navegador. Clique novamente ou pressione **Esc** para sair. O controle informa o estado por `aria-pressed`; fica desativado quando o navegador não oferece suporte e mostra um aviso se a solicitação for recusada. A disponibilidade depende do navegador e das permissões do portal.
@@ -259,6 +263,8 @@ As capturas abaixo usam somente conteúdo fictício em uma fixture local, sem ba
 | ![Workspace desktop antes das mudanças, com dados fictícios](docs/images/desktop-workspace-before.png) | ![Workspace desktop com tema Grafite, com dados fictícios](docs/images/desktop-workspace-after.png) |
 
 ## Execução revisada de requests salvas
+
+Para retomar o desenvolvimento, consulte o [fichário de continuidade](docs/continuity.md), com entregas recentes, regras operacionais, evidências e a proposta da próxima rodada SDD.
 
 No editor, abra **Execução revisada** para preparar uma request salva sem chamar a API. Salve alterações pendentes e confira o ambiente ativo antes de começar.
 
@@ -283,6 +289,8 @@ O [guia para agentes no Maestri Portal](docs/maestri-portal.md) traz um fluxo co
 Use `window.vortixAgent.describe({ region: 'request-editor', includeState: true })` para descobrir somente a região necessária. Regiões desconhecidas retornam listas vazias; os estados expostos não comprovam consentimento.
 
 Na ajuda de IA, **Copiar contexto seguro** copia somente o JSON de `snapshot()`, sem enviar requests. O contexto omite URLs, headers, body, credenciais e conteúdo da resposta; inclui metadados como método, contagens e status. Se o navegador bloquear o clipboard, um campo readonly com o JSON selecionado permite cópia manual. Confira o contexto antes de compartilhá-lo.
+
+Para a execução revisada, `window.vortixAgent.diagnose()` oferece um resumo compacto; as vistas `{ view: 'blockers' }` e `{ view: 'result' }` trazem detalhes sob demanda. Estado antigo ou contexto diferente omite o resultado anterior e a próxima ação. A leitura não prepara, aprova ou envia requests. Veja [campos, limites e frescor do diagnóstico](docs/maestri-portal.md#diagnóstico-compacto-e-leitura-progressiva).
 
 ### Instalar a skill pelo skills.sh
 

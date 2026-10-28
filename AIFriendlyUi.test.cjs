@@ -572,3 +572,23 @@ test('Maestri prompt copy reports a blocked clipboard without exposing prompt te
   assert.equal(messages[0][2], 'error');
   assert.equal(JSON.stringify(messages).includes(secretPrompt), false);
 });
+
+test('structured diagnostics load before consumers and expose an accessible explicit-focus control', async () => {
+  const [html, css] = await Promise.all(['index.html', 'style.css']
+    .map(file => fs.readFile(path.join(root, 'wwwroot', file), 'utf8')));
+  const scriptOrder = ['/runner-logic.js', '/agent-diagnostics.js', '/agent-bridge.js', '/structured-execution.js', '/structured-request.js', '/structured-ui.js', '/app.js']
+    .map(script => html.indexOf(`src=\"${script}\"`));
+  assert.ok(scriptOrder.every(index => index >= 0), 'all diagnostic consumers and dependencies should be present');
+  assert.deepEqual(scriptOrder, [...scriptOrder].sort((first, second) => first - second), 'the pure diagnostics API should load before its consumers');
+  const summary = html.match(/<output\b[^>]*\bid=\"structured-diagnostic-summary\"[^>]*>/)?.[0];
+  const focusButton = html.match(/<button\b[^>]*\bid=\"structured-diagnostic-go\"[^>]*>[\s\S]*?<\/button>/)?.[0];
+  assert.ok(summary, 'diagnostic summary output should exist');
+  assert.match(summary, /aria-live=\"polite\"/);
+  assert.match(summary, /aria-atomic=\"true\"/);
+  assert.ok(focusButton, 'explicit focus button should exist');
+  assert.match(focusButton, /type=\"button\"/);
+  assert.match(focusButton, /hidden/);
+  assert.match(focusButton, /Ir ao impedimento/);
+  assert.match(css, /structured-diagnostic-summary/);
+  assert.match(css, /structured-diagnostic-go/);
+});

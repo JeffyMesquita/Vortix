@@ -4,6 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+const VortixDiagnostics = require('./wwwroot/agent-diagnostics.js');
 const root = __dirname;
 
 function element({ id = '', dataset = {}, value = '', checked = false, disabled, hidden = false, textContent = '', className = '', type = '', label = '', attributes = {}, open } = {}) {
@@ -104,6 +105,543 @@ function createDocument() {
   return { document: doc, values, elements, actions, fields, regions, activeEditorTab };
 }
 
+function setDiagnosticRecord(elements, rawRecord) {
+  elements.set('structured-card', element({
+    id: 'structured-card',
+    attributes: { 'data-vortix-diagnostic': rawRecord }
+  }));
+}
+
+async function loadBridge(document, { diagnostics = VortixDiagnostics, now = 1000, window = {}, globals = {} } = {}) {
+  const source = await fs.readFile(path.join(root, 'wwwroot', 'agent-bridge.js'), 'utf8');
+  const clock = typeof now === 'function' ? now : () => now;
+  vm.runInNewContext(source, {
+    window,
+    document,
+    VortixDiagnostics: diagnostics,
+    performance: { now: clock },
+    ...globals
+  }, { filename: 'agent-bridge.js' });
+  return { api: window.vortixAgent, window };
+}
+
+function normalizeDiagnostic(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function unavailableDiagnostic() {
+  return {
+    diagnosticVersion: 1,
+    revision: null,
+    state: 'unavailable',
+    freshness: 'unavailable',
+    blocker: 'diagnostic_unavailable',
+    nextAction: null
+  };
+}
+
+function diagnosticControls(overrides = {}) {
+  return {
+    'request.save': true,
+    'environment.manage': true,
+    'settings.open': true,
+    'execution.prepare': true,
+    'execution.review': true,
+    'execution.execute': true,
+    ...overrides
+  };
+}
+
+function blockedDiagnosticFacts(overrides = {}) {
+  return {
+    state: 'blocked',
+    contextMatches: true,
+    validUntilMs: null,
+    blockers: ['unresolved_variables'],
+    controls: diagnosticControls({ 'execution.review': false, 'execution.execute': false }),
+    result: null,
+    ...overrides
+  };
+}
+
+function completedDiagnosticFacts(overrides = {}) {
+  return {
+    state: 'completed',
+    contextMatches: true,
+    validUntilMs: null,
+    blockers: [],
+    controls: diagnosticControls(),
+    result: {
+      outcome: 'http_error',
+      delivery: 'response_received',
+      httpStatus: 422,
+      proxyStatus: 200,
+      durationMs: 12.5,
+      assertions: { passed: 0, failed: 1, partial: 0 },
+      validation: 'passed',
+      capture: 'failed',
+      persistence: 'completed',
+      url: 'URL_SENTINEL',
+      authorization: 'AUTH_SENTINEL',
+      responseText: 'RESPONSE_SENTINEL'
+    },
+    ...overrides
+  };
+}
+
+function createBridgeEffects() {
+  const calls = { http: 0, storage: 0, prepare: 0, approve: 0, cancel: 0, capture: 0 };
+  const spy = name => () => {
+    calls[name] += 1;
+    throw new Error(name.toUpperCase() + '_SIDE_EFFECT_SENTINEL');
+  };
+  const storage = {
+    getItem: spy('storage'),
+    setItem: spy('storage'),
+    removeItem: spy('storage'),
+    clear: spy('storage')
+  };
+  const indexedDB = { open: spy('storage'), deleteDatabase: spy('storage') };
+  const controller = {
+    prepare: spy('prepare'),
+    approve: spy('approve'),
+    cancel: spy('cancel'),
+    capture: spy('capture')
+  };
+  function XMLHttpRequest() {
+    calls.http += 1;
+    throw new Error('HTTP_SIDE_EFFECT_SENTINEL');
+  }
+  const window = {
+    fetch: spy('http'),
+    XMLHttpRequest,
+    localStorage: storage,
+    sessionStorage: storage,
+    indexedDB,
+    controller,
+    structuredExecution: controller
+  };
+  return {
+    calls,
+    window,
+    globals: {
+      fetch: spy('http'),
+      XMLHttpRequest,
+      localStorage: storage,
+      sessionStorage: storage,
+      indexedDB,
+      controller,
+      structuredExecution: controller,
+      prepare: spy('prepare'),
+      approve: spy('approve'),
+      cancel: spy('cancel'),
+      capture: spy('capture')
+    }
+  };
+}
+
+function assertNoBridgeEffects(calls) {
+  assert.deepEqual(calls, { http: 0, storage: 0, prepare: 0, approve: 0, cancel: 0, capture: 0 });
+}
+
+test('diagnose delegates each view with only the record and fractional monotonic time', async () => {
+  const { document, elements } = createDocument();
+  const rawRecord = 'RAW_RECORD_SENTINEL';
+  setDiagnosticRecord(elements, rawRecord);
+  const card = elements.get('structured-card');
+  const originalGetAttribute = card.getAttribute.bind(card);
+  const attributeReads = [];
+  card.getAttribute = name => {
+    attributeReads.push(name);
+    return originalGetAttribute(name);
+  };
+
+  const domReads = { ids: [], selectors: [], lists: [] };
+  const observedDocument = {
+    getElementById(id) {
+      domReads.ids.push(id);
+      return document.getElementById(id);
+    },
+    querySelector(selector) {
+      domReads.selectors.push(selector);
+      return document.querySelector(selector);
+    },
+    querySelectorAll(selector) {
+      domReads.lists.push(selector);
+      return document.querySelectorAll(selector);
+    }
+  };
+
+  const common = {
+    diagnosticVersion: 1,
+    revision: 7,
+    state: 'blocked',
+    freshness: 'fresh',
+    blocker: 'unresolved_variables',
+    nextAction: 'environment.manage'
+  };
+  const views = {
+    summary: { ...common },
+    blockers: {
+      ...common,
+      blockers: [{ code: 'unresolved_variables', target: { kind: 'action', name: 'environment.manage' } }]
+    },
+    result: { ...common, result: null }
+  };
+  const readerCalls = [];
+  const reader = {
+    readDiagnostic(record, options, now) {
+      readerCalls.push([record, options, now]);
+      if (record === null) return unavailableDiagnostic();
+      return views[options?.view ?? 'summary'];
+    }
+  };
+  const effects = createBridgeEffects();
+  let clockReads = 0;
+  const { api } = await loadBridge(observedDocument, {
+    diagnostics: reader,
+    now: () => {
+      clockReads += 1;
+      return 1234.5;
+    },
+    window: effects.window,
+    globals: effects.globals
+  });
+  domReads.selectors.length = 0;
+
+  const calls = [
+    [undefined, views.summary],
+    [{ view: 'summary' }, views.summary],
+    [{ view: 'blockers' }, views.blockers],
+    [{ view: 'result' }, views.result]
+  ];
+  const outputs = [];
+  for (const [options, expected] of calls) {
+    const output = options === undefined ? api.diagnose() : api.diagnose(options);
+    outputs.push(output);
+    assert.deepEqual(output, expected);
+    assertNoBridgeEffects(effects.calls);
+  }
+
+  elements.delete('structured-card');
+  assert.deepEqual(api.diagnose(), unavailableDiagnostic());
+  assertNoBridgeEffects(effects.calls);
+
+  assert.deepEqual(readerCalls, [
+    [rawRecord, undefined, 1234.5],
+    [rawRecord, { view: 'summary' }, 1234.5],
+    [rawRecord, { view: 'blockers' }, 1234.5],
+    [rawRecord, { view: 'result' }, 1234.5],
+    [null, undefined, 1234.5]
+  ]);
+  assert.deepEqual(attributeReads, Array(4).fill('data-vortix-diagnostic'));
+  assert.deepEqual(domReads.ids, Array(5).fill('structured-card'));
+  assert.deepEqual(domReads.selectors, []);
+  assert.deepEqual(domReads.lists, []);
+  assert.equal(clockReads, 5);
+  assert.equal(JSON.stringify(outputs).includes(rawRecord), false);
+});
+
+test('diagnose fails closed when its reader is missing or throws', async () => {
+  const { document, elements } = createDocument();
+  const rawRecord = 'READER_INPUT_SENTINEL';
+  setDiagnosticRecord(elements, rawRecord);
+  let attributeReads = 0;
+  const card = elements.get('structured-card');
+  const getAttribute = card.getAttribute.bind(card);
+  card.getAttribute = name => {
+    attributeReads += 1;
+    return getAttribute(name);
+  };
+
+  const missingEffects = createBridgeEffects();
+  const missingReader = await loadBridge(document, {
+    diagnostics: null,
+    window: missingEffects.window,
+    globals: missingEffects.globals
+  });
+  assert.deepEqual(normalizeDiagnostic(missingReader.api.diagnose()), unavailableDiagnostic());
+  assert.equal(attributeReads, 0);
+  assertNoBridgeEffects(missingEffects.calls);
+
+  const readerCalls = [];
+  const throwingEffects = createBridgeEffects();
+  const throwingReader = await loadBridge(document, {
+    diagnostics: {
+      readDiagnostic(...args) {
+        readerCalls.push(args);
+        throw new Error('READER_EXCEPTION_SENTINEL');
+      }
+    },
+    now: 1234.5,
+    window: throwingEffects.window,
+    globals: throwingEffects.globals
+  });
+  const output = throwingReader.api.diagnose();
+  assert.deepEqual(normalizeDiagnostic(output), unavailableDiagnostic());
+  assert.deepEqual(readerCalls, [[rawRecord, undefined, 1234.5]]);
+  assert.equal(JSON.stringify(output).includes('SENTINEL'), false);
+  assertNoBridgeEffects(throwingEffects.calls);
+});
+
+test('diagnose exposes real safe summary, blockers and result views', async () => {
+  const { document, elements } = createDocument();
+  const sourceSentinel = 'DIAGNOSTIC_SOURCE_SENTINEL';
+  const blockedRecord = VortixDiagnostics.buildRecord(blockedDiagnosticFacts({
+    requestUrl: sourceSentinel,
+    body: sourceSentinel,
+    variables: sourceSentinel,
+    errorMessage: sourceSentinel
+  }), null, 1000);
+  setDiagnosticRecord(elements, JSON.stringify(blockedRecord));
+
+  const effects = createBridgeEffects();
+  const { api } = await loadBridge(document, {
+    now: 1001,
+    window: effects.window,
+    globals: effects.globals
+  });
+
+  const summary = api.diagnose();
+  assert.deepEqual(summary, {
+    diagnosticVersion: 1,
+    revision: 1,
+    state: 'blocked',
+    freshness: 'fresh',
+    blocker: 'unresolved_variables',
+    nextAction: 'environment.manage'
+  });
+  assert.ok(Buffer.byteLength(JSON.stringify(summary), 'utf8') <= 512);
+  assertNoBridgeEffects(effects.calls);
+
+  const blockers = api.diagnose({ view: 'blockers' });
+  assert.deepEqual(blockers, {
+    diagnosticVersion: 1,
+    revision: 1,
+    state: 'blocked',
+    freshness: 'fresh',
+    blocker: 'unresolved_variables',
+    nextAction: 'environment.manage',
+    blockers: [{ code: 'unresolved_variables', target: { kind: 'action', name: 'environment.manage' } }]
+  });
+  assert.ok(Buffer.byteLength(JSON.stringify(blockers), 'utf8') <= 4096);
+  blockers.blockers[0].target.name = 'mutated';
+  assert.equal(api.diagnose({ view: 'blockers' }).blockers[0].target.name, 'environment.manage');
+  assertNoBridgeEffects(effects.calls);
+
+  const completedRecord = VortixDiagnostics.buildRecord(completedDiagnosticFacts(), null, 1000);
+  setDiagnosticRecord(elements, JSON.stringify(completedRecord));
+  const result = api.diagnose({ view: 'result' });
+  assert.deepEqual(result, {
+    diagnosticVersion: 1,
+    revision: 1,
+    state: 'completed',
+    freshness: 'fresh',
+    blocker: null,
+    nextAction: null,
+    result: {
+      outcome: 'http_error',
+      delivery: 'response_received',
+      httpStatus: 422,
+      proxyStatus: 200,
+      durationMs: 12.5,
+      assertions: { passed: 0, failed: 1, partial: 0 },
+      validation: 'failed',
+      capture: 'failed',
+      persistence: 'completed'
+    }
+  });
+  assert.ok(Buffer.byteLength(JSON.stringify(result), 'utf8') <= 2048);
+  assert.equal(JSON.stringify({ summary, blockers, result }).includes('SENTINEL'), false);
+  assertNoBridgeEffects(effects.calls);
+});
+
+test('an approved diagnostic remains an inert hint to the existing controller', async () => {
+  const { document, elements } = createDocument();
+  const record = VortixDiagnostics.buildRecord(blockedDiagnosticFacts({
+    state: 'approved',
+    blockers: [],
+    validUntilMs: 5000.5,
+    controls: diagnosticControls({ 'execution.execute': true })
+  }), null, 1000.5);
+  setDiagnosticRecord(elements, JSON.stringify(record));
+
+  const effects = createBridgeEffects();
+  const { api } = await loadBridge(document, {
+    now: 1001.25,
+    window: effects.window,
+    globals: effects.globals
+  });
+  assert.deepEqual(api.diagnose(), {
+    diagnosticVersion: 1,
+    revision: 1,
+    state: 'approved',
+    freshness: 'fresh',
+    blocker: null,
+    nextAction: 'execution.execute'
+  });
+  assertNoBridgeEffects(effects.calls);
+});
+
+test('diagnose preserves context mismatch and omits the previous result', async () => {
+  const { document, elements } = createDocument();
+  const record = VortixDiagnostics.buildRecord(completedDiagnosticFacts({
+    contextMatches: false
+  }), null, 1000.5);
+  setDiagnosticRecord(elements, JSON.stringify(record));
+
+  const effects = createBridgeEffects();
+  const { api } = await loadBridge(document, {
+    now: 1001.25,
+    window: effects.window,
+    globals: effects.globals
+  });
+  assert.deepEqual(api.diagnose(), {
+    diagnosticVersion: 1,
+    revision: 1,
+    state: 'unknown',
+    freshness: 'unavailable',
+    blocker: 'context_changed',
+    nextAction: null
+  });
+  assert.deepEqual(api.diagnose({ view: 'blockers' }).blockers.map(entry => entry.code), ['context_changed']);
+  assert.equal(api.diagnose({ view: 'result' }).result, null);
+  assertNoBridgeEffects(effects.calls);
+});
+
+test('diagnose degrades an approved record at the fractional freshness boundary', async () => {
+  const { document, elements } = createDocument();
+  const record = VortixDiagnostics.buildRecord(blockedDiagnosticFacts({
+    state: 'approved',
+    blockers: [],
+    validUntilMs: 5000.5,
+    controls: diagnosticControls({ 'execution.execute': true })
+  }), null, 1000.25);
+  setDiagnosticRecord(elements, JSON.stringify(record));
+
+  const freshEffects = createBridgeEffects();
+  const { api: freshApi } = await loadBridge(document, {
+    now: 3000.249,
+    window: freshEffects.window,
+    globals: freshEffects.globals
+  });
+  assert.deepEqual(freshApi.diagnose(), {
+    diagnosticVersion: 1,
+    revision: 1,
+    state: 'approved',
+    freshness: 'fresh',
+    blocker: null,
+    nextAction: 'execution.execute'
+  });
+  assertNoBridgeEffects(freshEffects.calls);
+
+  const staleEffects = createBridgeEffects();
+  const { api: staleApi } = await loadBridge(document, {
+    now: 3000.25,
+    window: staleEffects.window,
+    globals: staleEffects.globals
+  });
+  assert.deepEqual(staleApi.diagnose(), {
+    diagnosticVersion: 1,
+    revision: 1,
+    state: 'unknown',
+    freshness: 'stale',
+    blocker: 'diagnostic_stale',
+    nextAction: null
+  });
+  assert.equal(staleApi.diagnose({ view: 'result' }).result, null);
+  assertNoBridgeEffects(staleEffects.calls);
+});
+
+test('diagnose rejects invalid options without invoking getters or echoing proxy failures', async () => {
+  const { document, elements } = createDocument();
+  const record = VortixDiagnostics.buildRecord(blockedDiagnosticFacts(), null, 1000);
+  setDiagnosticRecord(elements, JSON.stringify(record));
+
+  const effects = createBridgeEffects();
+  const { api } = await loadBridge(document, {
+    now: 1001,
+    window: effects.window,
+    globals: effects.globals
+  });
+  const invalidOptions = [
+    null,
+    [],
+    { view: 'raw' },
+    { view: 'summary', id: 'OPTION_SENTINEL' }
+  ];
+  const symbolOptions = { view: 'summary' };
+  symbolOptions[Symbol('OPTION_SENTINEL')] = 'OPTION_SENTINEL';
+  invalidOptions.push(symbolOptions);
+
+  const expectedError = { diagnosticVersion: 1, error: 'invalid_diagnostic_options' };
+  for (const options of invalidOptions) {
+    assert.deepEqual(api.diagnose(options), expectedError);
+    assertNoBridgeEffects(effects.calls);
+  }
+
+  let getterCalls = 0;
+  const accessorOptions = {};
+  Object.defineProperty(accessorOptions, 'view', {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      return 'summary';
+    }
+  });
+  assert.deepEqual(api.diagnose(accessorOptions), expectedError);
+  assert.equal(getterCalls, 0);
+  assertNoBridgeEffects(effects.calls);
+
+  const proxyOptions = new Proxy({}, {
+    getPrototypeOf() {
+      throw new Error('OPTIONS_PROXY_SENTINEL');
+    }
+  });
+  const proxyOutput = api.diagnose(proxyOptions);
+  assert.deepEqual(normalizeDiagnostic(proxyOutput), expectedError);
+  assert.equal(JSON.stringify(proxyOutput).includes('OPTIONS_PROXY_SENTINEL'), false);
+  assertNoBridgeEffects(effects.calls);
+});
+
+test('malformed and oversized diagnostic attributes fail closed without echo or fallback', async () => {
+  const { document, elements } = createDocument();
+  const record = VortixDiagnostics.buildRecord(blockedDiagnosticFacts(), null, 1000);
+  const rawRecord = JSON.stringify(record);
+  const oversizedRecord = rawRecord + ' '.repeat(4097);
+  assert.ok(Buffer.byteLength(oversizedRecord, 'utf8') > 4096);
+  const malformedRecords = [
+    '{MALFORMED_RECORD_SENTINEL',
+    JSON.stringify({ ...record, diagnosticVersion: 2, extra: 'RECORD_SENTINEL' }),
+    oversizedRecord
+  ];
+
+  const effects = createBridgeEffects();
+  const { api } = await loadBridge(document, {
+    now: 1001,
+    window: effects.window,
+    globals: effects.globals
+  });
+  for (const malformed of malformedRecords) {
+    setDiagnosticRecord(elements, malformed);
+    const output = api.diagnose();
+    assert.deepEqual(output, unavailableDiagnostic());
+    assert.equal(JSON.stringify(output).includes('SENTINEL'), false);
+    assertNoBridgeEffects(effects.calls);
+  }
+
+  const proxiedCard = new Proxy({}, {
+    get(_target, property) {
+      if (property === 'getAttribute') throw new Error('DOM_PROXY_SENTINEL');
+      return undefined;
+    }
+  });
+  elements.set('structured-card', proxiedCard);
+  const proxyOutput = api.diagnose();
+  assert.deepEqual(normalizeDiagnostic(proxyOutput), unavailableDiagnostic());
+  assert.equal(JSON.stringify(proxyOutput).includes('DOM_PROXY_SENTINEL'), false);
+  assertNoBridgeEffects(effects.calls);
+});
 test('Vortix loads contract v2 bridge and safe snapshot leaks no user values', async () => {
   const html = await fs.readFile(path.join(root, 'wwwroot', 'index.html'), 'utf8');
   assert.ok(html.includes('<meta name="vortix-agent-contract" content="2">'), 'contract version should be 2');
@@ -123,7 +661,13 @@ test('Vortix loads contract v2 bridge and safe snapshot leaks no user values', a
   vm.runInNewContext(source, context, { filename: 'agent-bridge.js' });
 
   const api = window.vortixAgent;
-  assert.deepEqual(Object.keys(api).sort(), ['contractVersion', 'describe', 'snapshot']);
+  assert.deepEqual(Object.keys(api).sort(), ['contractVersion', 'describe', 'diagnose', 'snapshot']);
+  assert.equal(Object.isFrozen(api), true);
+  const diagnoseDescriptor = Object.getOwnPropertyDescriptor(api, 'diagnose');
+  assert.equal(diagnoseDescriptor.writable, false);
+  assert.equal(diagnoseDescriptor.configurable, false);
+  assert.equal(diagnoseDescriptor.get, undefined);
+  assert.equal(diagnoseDescriptor.set, undefined);
   assert.equal(api.contractVersion, 2);
   const description = JSON.parse(JSON.stringify(api.describe()));
   assert.deepEqual(description, {
