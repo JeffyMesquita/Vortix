@@ -24,6 +24,7 @@
 - [Início rápido](#início-rápido)
 - [Hospedagem pessoal no Render](#hospedagem-pessoal-no-render)
 - [Primeiro fluxo](#primeiro-fluxo)
+- [Compartilhamento e metadados públicos](#compartilhamento-e-metadados-públicos)
 - [Busca rápida](#busca-rápida)
 - [Execução revisada de requests salvas](#execução-revisada-de-requests-salvas)
 - [Automação por IA com Maestri Portal](#automação-por-ia-com-maestri-portal)
@@ -233,6 +234,14 @@ Confira status e body; abra **Ver cabeçalhos da resposta** quando precisar dos 
 
 Para enviar JSON, texto, XML ou form URL-encoded, escolha o formato na aba **Body**. O Vortix define o Content-Type padrão; um header Content-Type informado manualmente o sobrescreve. POST, PUT, PATCH e DELETE pedem confirmação de gravação; use dados descartáveis e confira a URL antes de confirmar.
 
+
+## Compartilhamento e metadados públicos
+
+A página inclui título, descrição, canonical, Open Graph e Twitter Card no HTML inicial. A prévia usa `wwwroot/social/vortix-og-v1.png`; `robots.txt` e `sitemap.xml` apontam para a origem pública oficial. Nenhum valor do workspace ou da request entra nesses metadados.
+
+Ao hospedar uma cópia com outro domínio, ajuste as URLs absolutas do head de `wwwroot/index.html`, `wwwroot/robots.txt` e `wwwroot/sitemap.xml` junto de `ApiStudio__PublicOrigin` e dos domínios em `render.yaml`. Depois de publicar, confira HTTP 200 e `image/png` no asset; a atualização da prévia em aplicativos de mensagem depende da nova leitura/cache de cada plataforma.
+
+Veja [validação de SEO e prévia social](docs/superpowers/validation/2026-10-28-seo-social-preview.md).
 
 ## Busca rápida
 
