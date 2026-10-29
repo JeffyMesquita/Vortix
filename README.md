@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="wwwroot/vortix-mark.svg" alt="Símbolo Vortix" width="88">
+  <img src="wwwroot/vortix-symbol.svg" alt="Símbolo Vortix: três caminhos em vórtice" width="88">
 </p>
 
 <h1 align="center">Vortix</h1>
@@ -853,9 +853,23 @@ Exemplo de conjunto de dados JSON para o Runner:
 ]
 ~~~
 
-Use <code>/v1/users/{{userId}}</code> na rota e <code>{"name":"{{name}}"}</code> no body. O Runner substitui as variáveis em cada iteração. Segredos do cofre desbloqueado do ambiente ativo também podem ser usados; a precedência é dataset do Runner &gt; cofre &gt; ambiente. Com o cofre bloqueado, um nome conhecido do índice interrompe a resolução em vez de usar um valor antigo do ambiente. O plano e o resultado do Runner mostram as origens sem valores; cofre indisponível também bloqueia a resolução em vez de cair para o ambiente.
+Use <code>/v1/users/{{userId}}</code> na rota e <code>{"name":"{{name}}"}</code> no body. O Runner substitui as variáveis em cada iteração. Segredos do cofre desbloqueado do ambiente ativo também podem ser usados; a precedência é dataset do Runner &gt; ações pré-request &gt; cofre &gt; ambiente. Com o cofre bloqueado, um nome conhecido do índice interrompe a resolução em vez de usar um valor antigo do ambiente. O plano e o resultado do Runner mostram as origens sem valores; cofre indisponível também bloqueia a resolução em vez de cair para o ambiente.
 
 Cada rodada aceita até 500 requests. Credenciais solicitadas manualmente pelo helper de token permanecem no fluxo interativo e não são executadas pelo Runner. O relatório detalhado com bodies e mensagens continua temporário; o resumo seguro da rodada fica no histórico local do Runner.
+
+#### Dependências e pré-requisitos
+
+O plano do Runner explica quando um passo pode usar uma captura anterior, quando já existe uma origem inicial e quando um dataset, ação pré-request ou cofre tem prioridade. As relações são previsões: sucesso HTTP, extração e salvamento ainda podem falhar, mantendo um valor anterior disponível.
+
+Nos detalhes, **Caso** identifica a posição na execução analisada, **Passo** identifica a request na sequência e **Conjunto** identifica a linha de dados. Isso distingue repetições da mesma request e a numeração do subconjunto ao reexecutar falhas.
+
+Exemplo: o primeiro passo captura `orderId` de uma resposta e o segundo usa `/orders/{{orderId}}`. O plano mostra a possível relação entre eles sem executar a captura. Se o conjunto de dados já define `orderId`, ele tem prioridade. Capturas gravadas no ambiente/cofre também podem afetar o conjunto seguinte; não há isolamento novo entre conjuntos.
+
+Os detalhes permanecem locais ao diálogo e não exibem valores. Conjuntos inválidos, cofre indisponível e análise limitada recebem avisos, sem afirmar que o fluxo está pronto. O orçamento da explicação é de 2.000 referências únicas no total, deduplicadas pela combinação de caso, campo e nome; atingir esse orçamento marca a análise como parcial e não altera o limite de 500 requests.
+
+Antes de **Reexecutar falhas**, revise o subconjunto e os produtores que ficaram fora. O Runner não acrescenta passos automaticamente, não repete os ignorados por parada e não garante restaurar dados ou estado remoto. Cancelar a revisão não envia requests; confirmações de escrita e HTTP continuam obrigatórias. A explicação não é persistida no histórico, backup ou exportação e não acrescenta executor à ponte IA. O CLI mantém seu fluxo atual.
+
+![Plano do Runner com origens e capturas condicionais em dados fictícios](docs/images/runner-dependencies-plan.png)
 
 ### Runner CLI para CI/CD
 

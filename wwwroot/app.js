@@ -24,6 +24,9 @@ const DEFAULT_FONT = 'fira-code', DEFAULT_UI_SCALE = 1.2, MIN_UI_SCALE = 0.8, MA
 let legacyDbPromise, toastId = 0, queryId = 0, collections = [], environments = [], environmentDraft = [], activeEnvironmentId = '', activeTheme = 'dracula', activeFont = DEFAULT_FONT, activeScale = DEFAULT_UI_SCALE, actionDialogQueue = Promise.resolve(), tokenModeRecoveryWarned = false;
 let activeSaved = null, selectedContainer = { collectionId:'', folderId:'' }, collapsed = new Set(), baseUrlAuto = true;
 let runnerEntries = [], runnerFailedCases = [], runnerBusy = false, runnerStopRequested = false;
+let runnerDependencyAnalysis = null, runnerDependencyStale = false, runnerExecutionDependencySnapshot = null;
+const RUNNER_DEPENDENCY_CASE_LIMIT = 500, RUNNER_DEPENDENCY_DEBOUNCE_MS = 150;
+let runnerDependencyPreviewTimer = 0;
 let runnerHistoryLoadTask = Promise.resolve(), runnerHistoryMutating = false;
 let quickOpenEntries = [], quickOpenActiveIndex = 0;
 let historySettings = RunnerLogic.normalizeHistorySettings(), historyComparisonIds = [];
@@ -1065,22 +1068,194 @@ async function confirmRunnerRemoteHttp(cases){
   const detail=[...origins,...(queryKeyCases.length?['API Key em query: '+queryKeyCases.length+' request(s)']:[]),...(dynamicBaseUrlCases.length?['URL base dinâmica: '+dynamicBaseUrlCases.length+' request(s)']:[])].join('\n');
   return confirmWithDialog({eyebrow:'TRANSPORTE E CREDENCIAIS',title:origins.size||dynamicBaseUrlCases.length?'Confirmar destinos do Runner?':'Executar Runner com API Key na query?',description:'Confira os destinos antes da execução.',detail,warning:warnings.join(' '),confirmLabel:'Executar Runner',danger:true});
 }
-function runnerPreviewDataset(){
-  try{return RunnerLogic.parseDataSets(byId('runner-datasets')?.value||'')[0]||{};}catch{return{};}
+function runnerDependencyDatasets(){
+  try{return{datasets:RunnerLogic.parseDataSets(byId('runner-datasets')?.value||'')};}catch{return{datasets:null};}
+}
+function runnerDependencyPresence(){
+  const environment=Object.create(null),variables=getEnvironment().variables||{};
+  for(const name of Object.keys(variables))environment[name]='';
+  let vault;
+  if(secretVaultLoading||secretVaultUnavailable)vault={unavailable:true};
+  else if(!secretVault||!secretVaultValues)vault={locked:true,names:[...(secretVaultNames||[])].map(String)};
+  else{vault=Object.create(null);for(const name of Object.keys(secretVaultValues))vault[name]='';}
+  return{environment,vault};
+}
+function runnerDependencyIssueLabel(issue){
+  return({invalid_dataset:'Revise os conjuntos de dados.',case_limit:'Análise limitada a 500 casos.',reference_limit:'Análise parcial: limite de 2.000 referências atingido.',invalid_capture:'Captura com nome inválido; não será considerada.',unsupported_request:'Request incompatível com o Runner; captura omitida.',unsupported_reference:'Referência não analisável; análise parcial.',producer_omitted:'Há captura da rodada anterior fora deste subconjunto.',cross_dataset:'A captura pode vir do conjunto anterior.',multiple_candidates:'Há mais de uma captura possível; a mais recente pode falhar.',existing_value:'Há valor inicial disponível; uma captura anterior pode atualizá-lo.',vault_locked:'Cofre bloqueado; a resolução falha fechada.',vault_unavailable:'Cofre indisponível; a resolução falha fechada.'})[issue]||'Aviso de dependência.';
+}
+function runnerDependencySourceLabel(source){
+  return({dataset:'dataset',vault:'cofre',environment:'ambiente','pre-request':'pré-request',locked:'cofre bloqueado',unavailable:'cofre indisponível',missing:'sem origem'})[source]||String(source||'');
+}
+function runnerDependencyCandidateLabel(target){return target==='vault'?'cofre':'ambiente';}
+function runnerDependencyShadowText(target,initialSource){
+  if(initialSource==='dataset')return'O conjunto de dados tem prioridade sobre esta captura.';
+  if(initialSource==='pre-request')return'A ação pré-request tem prioridade sobre esta captura.';
+  if(initialSource==='vault')return'O cofre tem prioridade sobre a captura em ambiente.';
+  if(initialSource==='locked'||initialSource==='unavailable')return'O cofre bloqueado ou indisponível impede usar esta captura.';
+  return'Outro escopo tem prioridade sobre esta captura.';
+}
+function runnerDependencyInitialLine(prefix,reference,candidates){
+  if(reference.initialSource==='missing'&&!candidates.length)return `${prefix}: referência sem origem inicial ou captura anterior identificada.`;
+  if(reference.initialSource==='locked')return `${prefix}: cofre bloqueado; a resolução falha fechada.`;
+  if(reference.initialSource==='unavailable')return `${prefix}: cofre indisponível; a resolução falha fechada.`;
+  if(reference.initialSource!=='missing')return `${prefix}: origem inicial ${runnerDependencySourceLabel(reference.initialSource)}.`;
+  return'';
+}
+function runnerDependencyCandidateLines(prefix,reference,candidates){
+  const lines=[];
+  for(const[target,candidate]of candidates){
+    if(candidate.shadowed)lines.push(`${prefix}: captura no ${runnerDependencyCandidateLabel(target)} existe, mas ${runnerDependencyShadowText(target,reference.initialSource)}`);
+    else lines.push(`${prefix}: pode usar captura do caso ${candidate.ordinal}${candidate.crossDataset?' do conjunto anterior':''}; depende do sucesso da captura.`);
+    if(candidate.count>1)lines.push(`${prefix}: ${candidate.count} capturas anteriores no ${runnerDependencyCandidateLabel(target)}; a mais recente pode falhar e uma anterior ou o valor inicial pode continuar vigente.`);
+  }
+  if(candidates.length>1)lines.push(`${prefix}: candidatos separados por destino; o cofre tem prioridade sobre o ambiente.`);
+  return lines;
+}
+function runnerDependencyPreviousLines(prefix,previousCandidates){
+  const lines=[];
+  for(const[target,candidate]of Object.entries(previousCandidates||{})){
+    const blocked=candidate.blocked?'; o cofre está bloqueado ou indisponível e a resolução falha fechada':'';
+    lines.push(`${prefix}: produtor da rodada anterior fora deste subconjunto no ${runnerDependencyCandidateLabel(target)} (${candidate.count} captura(s)); não será reexecutado e o valor pode ser antigo${blocked}.`);
+  }
+  return lines;
+}
+function runnerDependencyReferenceLines(reference){
+  const prefix=`{{${reference.name}}} (${reference.field})`,candidates=Object.entries(reference.candidatesByTarget||{});
+  const lines=[runnerDependencyInitialLine(prefix,reference,candidates),...runnerDependencyCandidateLines(prefix,reference,candidates),...runnerDependencyPreviousLines(prefix,reference.previousCandidatesByTarget)];
+  if(reference.conditional&&!candidates.length)lines.push(`${prefix}: disponibilidade condicional; a ação ou origem pode não existir.`);
+  return lines.filter(Boolean);
+}
+function runnerDependencySummaryState(analysis,visible){
+  if(analysis.complete===false)return'warning';
+  return visible.some(item=>item.issues?.length)?'warning':'';
+}
+function runnerDependencySummaryText(analysis,visible,references,captures){
+  const prefix=runnerDependencyStale?'Previsão anterior ao envio. ':'';
+  const base=visible.length?`${visible.length} passo(s) com relações · ${references} referência(s) · ${captures} captura(s) possível(is).`:'Nenhuma relação de captura identificada.';
+  const partial=analysis.complete===false?' Análise parcial; confira os dados antes de executar.':'';
+  return prefix+base+partial;
+}
+function runnerDependencyCaseHeading(item,showDataset){
+  const parts=[`Caso ${item.caseOrdinal}`,`Passo ${item.stepOrdinal}`];
+  if(showDataset)parts.push(`Conjunto ${item.datasetOrdinal}`);
+  parts.push(`${item.references.length} referência(s)`);
+  if(item.capture)parts.push('captura');
+  if(item.issues.length)parts.push('avisos');
+  return parts.join(' · ');
+}
+function runnerDependencyAppendRow(list,text,kind=''){
+  const row=document.createElement('li');
+  if(kind)row.dataset.kind=kind;
+  row.textContent=text;
+  list.append(row);
+}
+function runnerDependencyCaseList(item){
+  const list=document.createElement('ul');
+  if(item.capture)runnerDependencyAppendRow(list,`Captura prevista de {{${item.capture.name}}} para ${runnerDependencyCandidateLabel(item.capture.target)}; depende do sucesso da resposta e da captura.`);
+  for(const reference of item.references)for(const line of runnerDependencyReferenceLines(reference))runnerDependencyAppendRow(list,line);
+  for(const issue of item.issues)runnerDependencyAppendRow(list,runnerDependencyIssueLabel(issue),/unsupported|invalid|vault_/.test(issue)?'danger':'warning');
+  return list;
+}
+function runnerDependencyCaseDetails(item,showDataset){
+  const details=document.createElement('details'),heading=document.createElement('summary'),content=document.createElement('div');
+  details.className='runner-dependency-item';heading.textContent=runnerDependencyCaseHeading(item,showDataset);
+  content.className='runner-dependency-case';content.append(runnerDependencyCaseList(item));
+  details.append(heading,content);
+  return details;
+}
+function renderRunnerDependencies(analysis){
+  const summary=byId('runner-dependency-summary'),container=byId('runner-dependency-details');
+  if(!summary||!container)return;
+  container.replaceChildren();container.hidden=true;summary.textContent='';summary.hidden=true;summary.dataset.state='';
+  if(!analysis)return;
+  if((analysis.issues||[]).includes('invalid_dataset')){summary.hidden=false;summary.dataset.state='warning';summary.textContent='Revise os conjuntos de dados';return;}
+  const cases=Array.isArray(analysis.cases)?analysis.cases:[],visible=cases.filter(item=>item.references?.length||item.capture||item.issues?.length);
+  const references=cases.reduce((total,item)=>total+(item.references?.length||0),0),captures=cases.filter(item=>item.capture).length;
+  summary.hidden=false;summary.dataset.state=runnerDependencySummaryState(analysis,visible);
+  summary.textContent=runnerDependencySummaryText(analysis,visible,references,captures);
+  if(!visible.length)return;
+  container.hidden=false;
+  const showDataset=cases.some(item=>item.datasetOrdinal>1);
+  for(const item of visible)container.append(runnerDependencyCaseDetails(item,showDataset));
+}
+function analyzeRunnerDependencyCases(cases,options={}){
+  const presence=runnerDependencyPresence();
+  return RunnerLogic.analyzeRunnerDependencies({cases,environment:presence.environment,vault:presence.vault,previousCaptures:options.previousCaptures,includedPreviousOrdinals:options.includedPreviousOrdinals,...(options.datasets?{datasets:options.datasets}:{})});
+}
+function createRunnerDependencyExecutionSnapshot(analysis){
+  const cases=(analysis?.cases||[]).map(item=>Object.freeze({
+    caseOrdinal:item.caseOrdinal,
+    stepOrdinal:item.stepOrdinal,
+    datasetOrdinal:item.datasetOrdinal,
+    capture:item.capture?Object.freeze({name:item.capture.name,target:item.capture.target}):null
+  }));
+  return Object.freeze({analysisVersion:1,cases:Object.freeze(cases)});
+}
+function cancelRunnerDependencyPreviewTimer(){
+  if(!runnerDependencyPreviewTimer)return;
+  clearTimeout(runnerDependencyPreviewTimer);
+  runnerDependencyPreviewTimer=0;
+}
+function scheduleRunnerDependencyPreview(){
+  if(!byId('runner-dialog')?.open)return;
+  cancelRunnerDependencyPreviewTimer();
+  runnerDependencyPreviewTimer=setTimeout(()=>{
+    runnerDependencyPreviewTimer=0;
+    if(byId('runner-dialog')?.open)renderRunnerPlan(runnerEntries);
+  },RUNNER_DEPENDENCY_DEBOUNCE_MS);
+}
+function refreshRunnerDependencyPreview(parsed){
+  if(runnerBusy){runnerDependencyStale=true;renderRunnerDependencies(runnerDependencyAnalysis);return runnerDependencyAnalysis;}
+  if(!runnerEntries.length){runnerDependencyAnalysis=null;runnerDependencyStale=false;renderRunnerDependencies(null);return null;}
+  const data=parsed||runnerDependencyDatasets();
+  if(!data.datasets){runnerDependencyAnalysis={analysisVersion:1,complete:false,issues:['invalid_dataset'],cases:[]};runnerDependencyStale=false;renderRunnerDependencies(runnerDependencyAnalysis);return runnerDependencyAnalysis;}
+  const total=runnerEntries.length*data.datasets.length,cases=RunnerLogic.createRunnerCases(runnerEntries,data.datasets,RUNNER_DEPENDENCY_CASE_LIMIT),analysis=analyzeRunnerDependencyCases(cases,{datasets:data.datasets});
+  if(total>RUNNER_DEPENDENCY_CASE_LIMIT){analysis.complete=false;if(!analysis.issues.includes('case_limit'))analysis.issues.push('case_limit');}
+  runnerDependencyAnalysis=analysis;runnerDependencyStale=false;renderRunnerDependencies(analysis);return analysis;
+}
+function refreshRunnerDependencyPreviewIfOpen(){
+  if(byId('runner-dialog')?.open)refreshRunnerDependencyPreview();
+}
+function inspectSavedRequestOriginsAcrossDatasets(request,datasets,authScopes){
+  const merged=new Map();
+  let varying=false;
+  for(const dataset of datasets){
+    for(const reference of inspectSavedRequestOrigins(request,dataset,authScopes)){
+      const key=`${reference.field}\u0000${reference.name}`,existing=merged.get(key);
+      if(existing&&existing.source!==reference.source)varying=true;
+      if(!existing)merged.set(key,{field:reference.field,name:reference.name,source:reference.source});
+    }
+  }
+  return{references:[...merged.values()],varying};
 }
 function renderRunnerPlan(entries){
-  const list=byId('runner-plan-list'),previewDataset=runnerPreviewDataset();
+  const list=byId('runner-plan-list'),parsed=runnerDependencyDatasets();
   list.replaceChildren();
+  let inspectionBudget=RUNNER_DEPENDENCY_CASE_LIMIT;
   for(const entry of entries){
     const row=document.createElement('div');row.className='runner-plan-item';
     const badge=document.createElement('span');badge.className=`method-dot ${String(entry.request.method||'GET').toLowerCase()}`;badge.textContent=String(entry.request.method||'GET').toUpperCase();
     const copy=document.createElement('div');copy.className='runner-item-copy';
     const name=document.createElement('strong');name.textContent=entry.request.name||entry.request.route||'Request';copy.append(name);
     const path=document.createElement('small');path.textContent=entry.request.tokenRequest?'Credenciais exigem o fluxo Solicitar token.':entry.path;copy.append(path);
-    const origins=inspectSavedRequestOrigins(entry.request,previewDataset,entry.authScopes);
-    if(origins.length){const originNote=document.createElement('small');originNote.className='runner-origin-note';originNote.textContent='Origens sem valores: '+formatInspectorOrigins(origins);copy.append(originNote);}
+    if(parsed.datasets&&inspectionBudget>0){
+      const datasets=parsed.datasets.slice(0,inspectionBudget),inspection=inspectSavedRequestOriginsAcrossDatasets(entry.request,datasets,entry.authScopes);
+      inspectionBudget-=datasets.length;
+      if(inspection.references.length){const originNote=document.createElement('small');originNote.className='runner-origin-note';originNote.textContent='Origens sem valores: '+formatInspectorOrigins(inspection.references)+(inspection.varying?' · origens variam entre conjuntos':'');copy.append(originNote);}
+    }
     row.append(badge,copy);list.append(row);
   }
+  if(parsed.datasets&&entries.length*parsed.datasets.length>RUNNER_DEPENDENCY_CASE_LIMIT){
+    const note=document.createElement('p');note.className='runner-origin-note';note.setAttribute('role','note');note.textContent='Inspeção de origens parcial: limite de 500 casos. As requests continuam listadas; reduza o escopo ou os conjuntos para executar até 500 casos.';list.append(note);
+  }
+  refreshRunnerDependencyPreview(parsed);
+}
+async function confirmRunnerDependencyReview(cases,analysis){
+  const count=Array.isArray(cases)?cases.length:0;
+  if(!count)return false;
+  const refs=(analysis?.cases||[]).reduce((total,item)=>total+(item.references?.length||0),0),omitted=(analysis?.cases||[]).some(item=>item.issues?.includes('producer_omitted'));
+  const detail=[`${count} caso(s) selecionado(s) para reexecução.`,omitted?'Há produtor da rodada anterior fora deste subconjunto; uma captura antiga pode ser reutilizada.':'Nenhum produtor anterior identificado fora do subconjunto.',analysis?.complete===false?'Análise parcial; confira os dados antes de executar.':'',refs?`${refs} referência(s) no subconjunto.`:''].filter(Boolean).join(' ');
+  return confirmWithDialog({eyebrow:'REEXECUÇÃO DE FALHAS',title:`Reexecutar ${count} falha(s)?`,description:`${count} caso(s) selecionado(s).`,detail,warning:'A revisão não repete produtores nem capturas automaticamente. Os guards de escrita, HTTP e TESTE continuam obrigatórios; confirmações antigas não autorizam este novo contexto.',confirmLabel:'Continuar para os guards',danger:false});
 }
 function renderRunnerCases(cases){
   const list=byId('runner-results');list.replaceChildren();
@@ -1232,6 +1407,7 @@ function fitRunnerDialog(){
   dialog.style.width=`${Math.max(240,Math.min(760,(width-40)/scale))}px`;
 }
 function openRunnerDialog(){
+  cancelRunnerDependencyPreviewTimer();
   const collection=findCollection(selectedContainer.collectionId),target=findFolder(collection,selectedContainer.folderId);
   if(!collection||!target){showToast('Seleção indisponível','Selecione uma coleção ou pasta válida.','error');return;}
   const folderPath=selectedContainer.folderId?findFolderPath(collection,selectedContainer.folderId):[];
@@ -1264,6 +1440,7 @@ function requestRunnerStop(){if(!runnerBusy)return;runnerStopRequested=true;byId
 function updateRunnerOptionsDisabled(disabled){const locked=disabled||runnerBusy||runnerHistoryMutating;byId('runner-options').disabled=locked;byId('start-runner').disabled=locked;byId('cancel-runner').disabled=locked;byId('close-runner').disabled=locked;byId('rerun-failed').disabled=locked;byId('runner-history-list').querySelectorAll('[data-runner-history-delete]').forEach(button=>{button.disabled=locked;});byId('clear-runner-history').disabled=locked||!byId('runner-history-list').querySelector('.runner-history-item');}
 async function runRunnerCases(cases,options,allowWrites){
   const runCases=[...cases];runnerBusy=true;runnerStopRequested=false;runnerFailedCases=[];clearRunnerError();renderRunnerCases(runCases);
+  runnerDependencyStale=true;renderRunnerDependencies(runnerDependencyAnalysis);
   const progress=byId('runner-progress');progress.hidden=false;progress.max=Math.max(1,runCases.length);progress.value=0;byId('runner-progress-label').textContent=`0 / ${runCases.length}`;byId('runner-summary').hidden=true;byId('rerun-failed').hidden=true;byId('stop-runner').hidden=false;byId('stop-runner').disabled=false;byId('stop-runner').textContent='Parar após esta request';updateRunnerOptionsDisabled(true);
   const started=performance.now(),startedAt=new Date().toISOString();let passed=0,failed=0,partial=0,skipped=0,processed=0,stoppedByFailure=false;
   const historySteps=[],skippedStep=ordinal=>({ordinal,outcome:'skipped',status:null,durationMs:0,tests:{passed:0,failed:0,partial:0}});
@@ -1316,21 +1493,39 @@ async function runRunnerCases(cases,options,allowWrites){
   runnerBusy=false;updateRunnerOptionsDisabled(false);
 }
 async function startRunnerFromForm(event){
-  event.preventDefault();if(runnerBusy||runnerHistoryMutating)return;clearRunnerError();
+  event.preventDefault();if(runnerBusy||runnerHistoryMutating){return;}clearRunnerError();cancelRunnerDependencyPreviewTimer();
   try{
     const datasets=RunnerLogic.parseDataSets(byId('runner-datasets').value),total=runnerEntries.length*datasets.length;
-    if(total>500)throw Error('A execução excede o limite de 500 requests. Reduza os conjuntos de dados ou selecione uma pasta menor.');
-    const delay=Number(byId('runner-delay').value);if(!Number.isInteger(delay)||delay<0||delay>5000)throw Error('O intervalo precisa ficar entre 0 e 5000 ms.');
-    const cases=[];for(let datasetIndex=0;datasetIndex<datasets.length;datasetIndex++)for(const entry of runnerEntries)cases.push({...entry,dataset:datasets[datasetIndex],datasetNumber:datasetIndex+1});
-    const writes=runnerWriteCases(cases);
+    if(total>RUNNER_DEPENDENCY_CASE_LIMIT){throw new Error('A execução excede o limite de 500 requests. Reduza os conjuntos de dados ou selecione uma pasta menor.');}
+    const delay=Number(byId('runner-delay').value);if(!Number.isInteger(delay)||delay<0||delay>5000){throw new Error('O intervalo precisa ficar entre 0 e 5000 ms.');}
+    const cases=RunnerLogic.createRunnerCases(runnerEntries,datasets),writes=runnerWriteCases(cases),analysis=refreshRunnerDependencyPreview({datasets});
+    const assertPreviewCurrent=()=>{if(runnerDependencyAnalysis!==analysis)throw new Error('O contexto do Runner mudou. Revise a execução novamente.');};
     if(writes.length&&!(await confirmRunnerWrites(cases)))return;
+    assertPreviewCurrent();
     if(!(await confirmRunnerRemoteHttp(cases)))return;
+    assertPreviewCurrent();
+    runnerExecutionDependencySnapshot=createRunnerDependencyExecutionSnapshot(analysis);
     await runRunnerCases(cases,{delay,stopOnError:byId('runner-stop-on-error').checked},writes.length>0);
-  }catch(error){showRunnerError(error.message||'Revise as opções do Runner.');}
+  }catch(error){refreshRunnerDependencyPreview();showRunnerError(error.message||'Revise as opções do Runner.');}
 }
 async function rerunRunnerFailures(){
-  if(runnerBusy||runnerHistoryMutating||!runnerFailedCases.length)return;const cases=[...runnerFailedCases],writes=runnerWriteCases(cases);
-  try{if(writes.length&&!(await confirmRunnerWrites(cases)))return;if(!(await confirmRunnerRemoteHttp(cases)))return;await runRunnerCases(cases,{delay:Number(byId('runner-delay').value)||0,stopOnError:byId('runner-stop-on-error').checked},writes.length>0);}
+  if(runnerBusy||runnerHistoryMutating||!runnerFailedCases.length)return;
+  cancelRunnerDependencyPreviewTimer();
+  const cases=[...runnerFailedCases],writes=runnerWriteCases(cases),preview=runnerDependencyAnalysis,snapshot=runnerExecutionDependencySnapshot;
+  const assertReviewCurrent=()=>{if(runnerDependencyAnalysis!==preview)throw new Error('O contexto do Runner mudou. Revise a reexecução novamente.');};
+  try{
+    const previousCaptures=snapshot?snapshot.cases.filter(item=>item.capture).map(item=>({name:item.capture.name,target:item.capture.target,caseOrdinal:item.caseOrdinal,datasetOrdinal:item.datasetOrdinal})):[];
+    const includedPreviousOrdinals=snapshot?snapshot.cases.filter(item=>cases.some(selected=>selected.stepOrdinal===item.stepOrdinal&&selected.datasetOrdinal===item.datasetOrdinal)).map(item=>item.caseOrdinal):[];
+    const analysis=analyzeRunnerDependencyCases(cases,{previousCaptures,includedPreviousOrdinals});
+    if(!(await confirmRunnerDependencyReview(cases,analysis)))return;
+    assertReviewCurrent();
+    if(writes.length&&!(await confirmRunnerWrites(cases)))return;
+    assertReviewCurrent();
+    if(!(await confirmRunnerRemoteHttp(cases)))return;
+    assertReviewCurrent();
+    runnerDependencyAnalysis=analysis;runnerDependencyStale=false;renderRunnerDependencies(analysis);
+    await runRunnerCases(cases,{delay:Number(byId('runner-delay').value)||0,stopOnError:byId('runner-stop-on-error').checked},writes.length>0);
+  }
   catch(error){showRunnerError(error.message||'Revise as opções do Runner.');}
 }
 function activeWorkspaceTab(){return workspaceTabs.find(tab=>tab.id===activeWorkspaceTabId)||null;}
@@ -2522,27 +2717,7 @@ function templateFieldsFromForm(){
   return fields;
 }
 function templateFieldsFromSavedRequest(request={},authScopes=[]){
-  const fields={};
-  addTemplateField(fields,'baseUrl',request?.baseUrl);
-  addTemplateField(fields,'route',request?.route);
-  addTemplateField(fields,'headers',request?.headers);
-  const auth=RunnerLogic.resolveInheritedAuth(request||{},authScopes);
-  if(auth.authType==='bearer')addTemplateField(fields,'auth.bearerToken',auth.bearerToken);
-  if(auth.authType==='basic'){addTemplateField(fields,'auth.basicUsername',auth.basicUsername);addTemplateField(fields,'auth.basicPassword',auth.basicPassword);}
-  if(auth.authType==='apiKey'){addTemplateField(fields,'auth.apiKeyName',auth.apiKeyName);addTemplateField(fields,'auth.apiKeyValue',auth.apiKeyValue);}
-  const mode=normalizeBodyMode(request?.bodyMode);
-  if(mode==='graphql'){
-    addTemplateField(fields,'graphql.query',request?.graphqlQuery);
-    addTemplateField(fields,'graphql.variables',request?.graphqlVariables);
-    addTemplateField(fields,'graphql.operationName',request?.graphqlOperationName);
-  }else if(mode==='multipart'){
-    for(const [index,field] of (request?.multipartFields||[]).entries()){
-      if(field?.type!=='text')continue;
-      addTemplateField(fields,`multipart[${index}].name`,field.name);
-      addTemplateField(fields,`multipart[${index}].value`,field.value);
-    }
-  }else addTemplateField(fields,'body',request?.body);
-  return fields;
+  return RunnerLogic.templateFieldsFromSavedRequest(request,authScopes);
 }
 function inspectorSourceLabel(source){return({environment:'environment',vault:'vault',dataset:'dataset','pre-request':'pré-request',missing:'missing',locked:'locked',unavailable:'unavailable'})[source]||String(source);}
 function formatInspectorOrigins(references){return(references||[]).map(item=>`${item.field}:{{${item.name}}}=${inspectorSourceLabel(item.source)}`).join(', ');}
@@ -2676,7 +2851,7 @@ function renderEnvironmentSelect(){
   activeEnvironmentId=id;clearGraphqlSchema('Ambiente alterado; carregue o schema GraphQL novamente.');clearRequestBodyContractResult();
   await dbWrite('settings',{key:'activeEnvironmentId',value:id});renderEnvironmentSelect();await loadSecretVaultForActiveEnvironment();
   if(baseUrlAuto)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';
-  await loadTokenRequestConfig();await loadOAuth2TokenConfig();await loadOAuthPkceConfig();syncActiveWorkspaceTab(false);
+  await loadTokenRequestConfig();await loadOAuth2TokenConfig();await loadOAuthPkceConfig();syncActiveWorkspaceTab(false);refreshRunnerDependencyPreviewIfOpen();
   showToast('Ambiente alterado',`Requests usarão “${getEnvironment().name}”.`,'info',3000);
 }
 
@@ -2816,7 +2991,7 @@ async function loadSecretVaultForActiveEnvironment(){
   }catch{
     if(expected===secretVaultEnvironmentId)secretVaultUnavailable='Não foi possível ler o cofre deste ambiente; o envio com templates foi bloqueado para evitar usar valores obsoletos do ambiente.';
   }finally{
-    if(expected===secretVaultEnvironmentId){secretVaultLoading=false;renderSecretVaultUi();refreshRequestInspector();}
+    if(expected===secretVaultEnvironmentId){secretVaultLoading=false;renderSecretVaultUi();refreshRequestInspector();refreshRunnerDependencyPreviewIfOpen();}
   }
 }
 async function persistSecretVaultSnapshot(){
@@ -2845,7 +3020,7 @@ async function createSecretVaultFromUi(){
     const vault=await RunnerLogic.createLocalSecretVault(passphrase);secretVault=vault;secretVaultValues=Object.create(null);secretVaultEnvironmentId=activeEnvironmentId||'default';
     await persistSecretVaultSnapshot();showToast('Cofre criado','Segredos deste ambiente serão cifrados com AES-GCM-256. A senha não é salva e não pode ser recuperada.','success',7000);
   }catch(error){await recoverSecretVaultAfterFailure();showToast('Não foi possível criar o cofre','A criação não foi confirmada no armazenamento. '+(error.message||'Revise a senha e o armazenamento.'),'error');}
-  finally{secretVaultBusy=false;input.value='';renderSecretVaultUi();refreshRequestInspector();if(secretVaultValues)byId('secret-vault-value').focus();}
+  finally{secretVaultBusy=false;input.value='';renderSecretVaultUi();refreshRequestInspector();refreshRunnerDependencyPreviewIfOpen();if(secretVaultValues)byId('secret-vault-value').focus();}
 }
 async function unlockSecretVaultFromUi(){
   invalidateStructuredDiagnosticContext();
@@ -2862,12 +3037,12 @@ async function unlockSecretVaultFromUi(){
     secretVault=vault;secretVaultValues=values;secretVaultNames=names;secretVaultEnvironmentId=expected;
     showToast('Cofre desbloqueado','Segredos disponíveis apenas na memória desta aba até bloquear ou recarregar.','success');
   }catch(error){secretVault=null;secretVaultValues=null;showToast('Não foi possível desbloquear',error.message||'Senha incorreta ou cofre danificado.','error');}
-  finally{secretVaultBusy=false;input.value='';renderSecretVaultUi();refreshRequestInspector();if(secretVaultValues)byId('secret-vault-name').focus();}
+  finally{secretVaultBusy=false;input.value='';renderSecretVaultUi();refreshRequestInspector();refreshRunnerDependencyPreviewIfOpen();if(secretVaultValues)byId('secret-vault-name').focus();}
 }
 async function lockSecretVaultFromUi(){
   invalidateStructuredDiagnosticContext();
   if(secretVault){try{await secretVault.lock();}catch{}}
-  secretVault=null;secretVaultValues=null;renderSecretVaultUi();refreshRequestInspector();showToast('Cofre bloqueado','Os valores descriptografados foram removidos da memória desta aba.','info');
+  secretVault=null;secretVaultValues=null;renderSecretVaultUi();refreshRequestInspector();refreshRunnerDependencyPreviewIfOpen();showToast('Cofre bloqueado','Os valores descriptografados foram removidos da memória desta aba.','info');
 }
 async function addSecretVaultEntry(event){
   invalidateStructuredDiagnosticContext();
@@ -2886,7 +3061,7 @@ async function addSecretVaultEntry(event){
     Object.defineProperty(values,name,{value,writable:true,enumerable:true,configurable:true});
     delete nameInput.dataset.editingName;nameInput.value='';valueInput.value='';nameInput.focus();
     showToast('Segredo salvo',`{{${name}}} foi cifrado no cofre do ambiente “${getEnvironment().name}”. O valor não é exibido.`,'success');
-    renderSecretVaultUi();refreshRequestInspector();
+    renderSecretVaultUi();refreshRequestInspector();refreshRunnerDependencyPreviewIfOpen();
   }catch(error){await recoverSecretVaultAfterFailure();showToast('Segredo não salvo','O valor não foi confirmado no armazenamento e foi descartado. '+(error.message||'Não foi possível atualizar o cofre.'),'error');}
 }
 async function removeSecretVaultEntry(name){
@@ -2899,7 +3074,7 @@ async function removeSecretVaultEntry(name){
     await vault.remove(name);await persistSecretVaultSnapshot();
     if(secretVault!==vault||secretVaultValues!==values)throw Error('O cofre foi bloqueado antes de confirmar a gravação.');
     delete values[name];
-    renderSecretVaultUi();refreshRequestInspector();showToast('Segredo removido',`O nome “${name}” saiu do cofre.`,'success');
+    renderSecretVaultUi();refreshRequestInspector();refreshRunnerDependencyPreviewIfOpen();showToast('Segredo removido',`O nome “${name}” saiu do cofre.`,'success');
   }catch(error){await recoverSecretVaultAfterFailure();showToast('Segredo não removido','A remoção não foi confirmada no armazenamento. '+(error.message||'Não foi possível atualizar o cofre.'),'error');}
 }
 async function removeSecretVault(){
@@ -2912,7 +3087,7 @@ async function removeSecretVault(){
     await dbWrite('settings',secretVaultStorageKey(environmentId),true);
     await loadSecretVaultForActiveEnvironment();
     if(secretVaultEnvelope||secretVaultUnavailable)throw Error('O cofre ainda está presente após a remoção.');
-    showToast('Cofre removido','O cofre deste ambiente foi removido do armazenamento local.','success');
+    refreshRunnerDependencyPreviewIfOpen();showToast('Cofre removido','O cofre deste ambiente foi removido do armazenamento local.','success');
   }catch(error){await recoverSecretVaultAfterFailure();showToast('Cofre não removido','O registro anterior foi recarregado ou bloqueado. '+(error.message||'Não foi possível atualizar o armazenamento.'),'error');}
 }
 function openSettingsDialog(){syncHistorySettingsControls();renderSecretVaultUi();byId('settings-dialog').showModal();}
@@ -2934,7 +3109,7 @@ async function saveEnvironmentDraft(event){
     if(!next.some(env=>env.id===secretVaultEnvironmentId))await loadSecretVaultForActiveEnvironment();
     environmentDraft=[];await dbWrite('settings',{key:'activeEnvironmentId',value:activeEnvironmentId});renderEnvironmentSelect();await loadTokenRequestConfig();await loadOAuth2TokenConfig();await loadOAuthPkceConfig();
     if(baseUrlAuto)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';
-    byId('environment-dialog').close();showToast('Ambientes salvos','Grupos e variáveis persistidos no banco local.','success');
+    byId('environment-dialog').close();refreshRunnerDependencyPreviewIfOpen();showToast('Ambientes salvos','Grupos e variáveis persistidos no banco local.','success');
   }catch(error){showToast('Falha ao salvar',error.message||'Não foi possível persistir os ambientes.','error');}
 }
 function tokenCandidate(value){if(typeof value!=='string')return'';const token=value.trim().replace(/^Bearer\s+/i,'');return token.length>=16&&!/\s/.test(token)?token:'';}
@@ -3063,15 +3238,24 @@ function updateResponseCaptureUi(){
 }
 function validateResponseCaptureForm(){
   if(!byId('capture-response-variable').checked)return;
-  const name=byId('response-variable-name').value.trim();if(!/^[A-Za-z0-9_.-]{1,80}$/.test(name)||['__proto__','prototype','constructor'].includes(name))throw Error('Informe um nome de variável válido (até 80 caracteres).');
-  if(byId('response-value-source').value==='json'){const path=byId('response-json-path').value.trim();if(!path)throw Error('Informe o caminho do campo JSON, por exemplo access_token.');parseJsonPath(path);}
-  if(byId('response-capture-target').value==='vault')assertVaultCaptureAvailable({environmentId:activeEnvironmentId||'default'});
+  const name=byId('response-variable-name').value.trim();
+  if(!RunnerLogic.isValidCaptureVariableName(name)){throw new Error('Informe um nome de variável válido (até 80 caracteres).');}
+  if(byId('response-value-source').value==='json'){
+    const path=byId('response-json-path').value.trim();
+    if(!path){throw new Error('Informe o caminho do campo JSON, por exemplo access_token.');}
+    parseJsonPath(path);
+  }
+  if(byId('response-capture-target').value==='vault'){assertVaultCaptureAvailable({environmentId:activeEnvironmentId||'default'});}
 }
 function showResponseVariableResult(title,kind='success'){const section=byId('response-variable-result');section.hidden=false;section.dataset.kind=kind;byId('response-variable-result-title').textContent=title;}
 async function saveEnvironmentVariable(name,value,environmentId=activeEnvironmentId){
-  if(!/^[A-Za-z0-9_.-]{1,80}$/.test(name)||['__proto__','prototype','constructor'].includes(name))throw Error('Nome da variável inválido.');
-  const serialized=typeof value==='string'?value:JSON.stringify(value);if(serialized===undefined||serialized.length>100000)throw Error('O valor está vazio ou excede 100 KB.');
-  const current=environments.find(environment=>environment.id===environmentId);if(!current)throw Error('Ambiente de captura indisponível.');const updated={...current,variables:{...(current.variables||{})}};Object.defineProperty(updated.variables,name,{value:serialized,writable:true,enumerable:true,configurable:true});
+  if(!RunnerLogic.isValidCaptureVariableName(name)){throw new Error('Nome da variável inválido.');}
+  const serialized=typeof value==='string'?value:JSON.stringify(value);
+  if(serialized===undefined||serialized.length>100000){throw new Error('O valor está vazio ou excede 100 KB.');}
+  const current=environments.find(environment=>environment.id===environmentId);
+  if(!current){throw new Error('Ambiente de captura indisponível.');}
+  const updated={...current,variables:{...current.variables}};
+  Object.defineProperty(updated.variables,name,{value:serialized,writable:true,enumerable:true,configurable:true});
   await dbWrite('environments',updated);environments=environments.map(environment=>environment.id===updated.id?updated:environment);renderEnvironmentSelect();return updated;
 }
 async function captureResponseVariable(request,result,quiet=false){
@@ -3392,7 +3576,7 @@ function addEventListeners(){
     const change=()=>{if(['method','route','body','base-url','headers'].includes(id)){byId('confirm-test-data').checked=false;clearRequestBodyContractResult();}if(id==='base-url')baseUrlAuto=false;updateGuard();updateTokenButton();if(id==='body'){renderBodyHighlight();updateJsonTools();}};byId(id).addEventListener('input',change);byId(id).addEventListener('change',change);
   }
   body.addEventListener('scroll',renderBodyHighlight);byId('body-mode').addEventListener('change',clearRequestBodyContractResult);byId('token-client-id').addEventListener('input',updateTokenButton);byId('token-client-secret').addEventListener('input',updateTokenButton);
-  byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('auth-inheritance-mode').addEventListener('change',()=>{const authMode=authModeFromForm();applyAuthFields(authMode==='custom'?{authMode,authType:'none'}:{authMode});syncActiveWorkspaceTab(true);});byId('save-auth-default').onclick=()=>void saveAuthDefault();byId('body-mode').addEventListener('change',updateBodyModeUi);byId('multipart-add-text').onclick=()=>addMultipartField('text');byId('multipart-add-file').onclick=()=>addMultipartField('file');byId('graphql-load-schema').onclick=()=>void loadGraphqlSchema();byId('graphql-schema-type').addEventListener('change',renderGraphqlSchemaFields);const graphqlQueryField=byId('graphql-query');graphqlQueryField.addEventListener('input',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keyup',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('click',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keydown',handleGraphqlAutocompleteKeydown);byId('format-graphql-variables').onclick=formatGraphqlVariables;for(const id of ['graphql-query','graphql-variables','graphql-operation-name']){byId(id).addEventListener('input',()=>{byId('confirm-test-data').checked=false;updateGuard();});byId(id).addEventListener('change',()=>{byId('confirm-test-data').checked=false;updateGuard();});}byId('clear-cookie-jar').onclick=clearCookieJar;byId('inspect-references').onclick=refreshRequestInspector;byId('request-inspector').addEventListener('toggle',()=>{if(byId('request-inspector').open)refreshRequestInspector();});byId('runner-datasets').addEventListener('input',()=>{if(byId('runner-dialog').open)renderRunnerPlan(runnerEntries);});
+  byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('auth-inheritance-mode').addEventListener('change',()=>{const authMode=authModeFromForm();applyAuthFields(authMode==='custom'?{authMode,authType:'none'}:{authMode});syncActiveWorkspaceTab(true);});byId('save-auth-default').onclick=async()=>{await saveAuthDefault();};byId('body-mode').addEventListener('change',updateBodyModeUi);byId('multipart-add-text').onclick=()=>addMultipartField('text');byId('multipart-add-file').onclick=()=>addMultipartField('file');byId('graphql-load-schema').onclick=()=>{loadGraphqlSchema();};byId('graphql-schema-type').addEventListener('change',renderGraphqlSchemaFields);const graphqlQueryField=byId('graphql-query');graphqlQueryField.addEventListener('input',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keyup',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('click',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keydown',handleGraphqlAutocompleteKeydown);byId('format-graphql-variables').onclick=formatGraphqlVariables;for(const id of ['graphql-query','graphql-variables','graphql-operation-name']){byId(id).addEventListener('input',()=>{byId('confirm-test-data').checked=false;updateGuard();});byId(id).addEventListener('change',()=>{byId('confirm-test-data').checked=false;updateGuard();});}byId('clear-cookie-jar').onclick=clearCookieJar;byId('inspect-references').onclick=refreshRequestInspector;byId('request-inspector').addEventListener('toggle',()=>{if(byId('request-inspector').open)refreshRequestInspector();});byId('runner-datasets').addEventListener('input',()=>scheduleRunnerDependencyPreview());
   for(const id of ['token-route','token-client-id-field','token-client-secret-field','token-credential-mode']){byId(id).addEventListener('input',updateTokenButton);byId(id).addEventListener('change',()=>void persistTokenRequestConfig());}
     for(const id of ['oauth2-token-url','oauth2-client-id','oauth2-scope'])byId(id).addEventListener('input',updateOAuth2TokenButton);
   byId('refresh-agent-safe-state').onclick=refreshAgentSafeState;for(const id of ['token-helper','oauth2-helper','oauth-pkce-helper'])byId(id).addEventListener('toggle',updateAdvancedToolsIndicator);
