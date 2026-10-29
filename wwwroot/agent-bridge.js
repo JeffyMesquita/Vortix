@@ -37,7 +37,8 @@
       default: return false;
     }
   };
-  const countChildren = id => byId(id)?.children?.length || 0;
+  const configuredParamsCount = () => Array.from(byId('query-params')?.children || [])
+    .filter(row => String(row.querySelector?.('[data-query-name]')?.value || '').trim()).length;
   const countEnvironments = select => Array.from(select?.options || [])
     .filter(option => String(option?.value ?? '').trim() !== '').length;
   const responseState = () => {
@@ -121,7 +122,7 @@
         method,
         baseUrlPresent: hasValue('base-url'),
         routePresent: hasValue('route'),
-        paramsCount: countChildren('query-params'),
+        paramsCount: configuredParamsCount(),
         headersPresent: hasValue('headers'),
         bodyPresent: bodyPresent(),
         bodyMode: valueOf('body-mode'),

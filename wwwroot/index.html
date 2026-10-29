@@ -24,7 +24,7 @@
   <meta name="twitter:description" content="Crie, organize e teste requisições HTTP no navegador. Use coleções, ambientes e testes de resposta no Vortix, sem criar conta.">
   <meta name="twitter:image" content="https://vortixapiclient.jeffymesquita.dev/social/vortix-og-v2.jpg">
   <meta name="twitter:image:alt" content="Card de marca do Vortix com o nome Vortix, o subtítulo Cliente de APIs no navegador e conexões abstratas ao fundo">
-  <link rel="icon" type="image/svg+xml" href="/vortix-mark.svg">
+  <link rel="icon" type="image/svg+xml" href="/vortix-favicon.svg">
   <link rel="preload" href="/fonts/fira-code-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/fonts/fonts.css">
   <link rel="stylesheet" href="/style.css">
@@ -41,7 +41,7 @@
   <main class="app-shell">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="Vortix, início">
-        <span class="brand-icon" aria-hidden="true"><img src="/vortix-mark.svg" alt=""></span>
+        <span class="brand-icon" aria-hidden="true"><img src="/vortix-symbol.svg" alt=""></span>
         <span><strong>Vortix</strong><small>API CLIENT</small></span>
       </a>
       <div class="sidebar-tools">
@@ -72,7 +72,11 @@
 
       <details class="history-panel side-section" id="history-panel" data-vortix-region="history">
         <summary><span>Histórico</span><span class="history-count" id="history-count">0</span></summary>
-        <p class="history-hint">Responses salvas neste computador. Marque duas para comparar.</p>
+        <button class="help-trigger" type="button" popovertarget="history-help">Sobre o histórico</button>
+        <div id="history-help" class="help-popover" popover>
+          <p class="history-hint">Responses salvas neste computador. Marque duas para comparar.</p>
+          <button type="button" class="help-popover-close" popovertarget="history-help" popovertargetaction="hide">Fechar</button>
+        </div>
         <div class="history-list" id="request-history"></div>
         <button class="text-button history-compare-button" id="compare-history-responses" type="button" disabled hidden>Comparar respostas</button>
         <button class="text-button history-clear" id="clear-history" type="button" disabled>Limpar histórico</button>
@@ -80,7 +84,9 @@
 
       <div class="sidebar-bottom">
         <span class="local-dot"></span>
-        <div><strong>Workspace local</strong><small id="sidebar-storage-note">SQLite local · proteção de dados</small></div>
+        <div><strong>Workspace local</strong><small id="sidebar-storage-note">SQLite local · proteção de dados</small>
+          <button class="help-trigger" type="button" popovertarget="workspace-help">Sobre o workspace</button>
+        </div>
       </div>
     </aside>
 
@@ -113,45 +119,62 @@
 
       <div class="workspace-grid" id="request-workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-0" data-vortix-region="request-workspace">
         <section class="editor-column" aria-label="Editor da requisição" data-vortix-region="request-editor">
-          <label class="base-url-label" for="base-url">URL base</label>
-          <div class="base-url-wrap"><span class="base-url-icon" aria-hidden="true">↗</span><input id="base-url" data-vortix-field="request.base-url" type="url" autocomplete="off" placeholder="https://api.example.com/" spellcheck="false"></div>
-          <p class="hint base-url-hint">Servidor da API (ex.: <code>https://api.example.com</code>). Pode vir do ambiente ativo; HTTPS é recomendado e HTTP em localhost funciona sem configuração extra.</p>
+          <section class="endpoint-surface" aria-labelledby="endpoint-heading">
+            <div class="surface-head">
+              <span class="section-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="6" cy="12" r="2.2"></circle><circle cx="18" cy="12" r="2.2"></circle><path d="M8.2 12h7.6"></path></svg>
+              </span>
+              <h2 id="endpoint-heading">Endereço</h2>
+              <button class="help-trigger" type="button" popovertarget="endpoint-help">Sobre o endereço</button>
+            </div>
+            <div class="surface-body">
+              <label class="base-url-label" for="base-url">URL base</label>
+              <div class="base-url-wrap"><input id="base-url" data-vortix-field="request.base-url" type="url" autocomplete="off" placeholder="https://api.example.com/" spellcheck="false"></div>
+              <div class="endpoint-route-row">
+                <div class="endpoint-field">
+                  <label for="method">Método</label>
+                  <select id="method" data-vortix-field="request.method" class="method-select method-get" aria-label="Método HTTP">
+                    <option>GET</option><option>HEAD</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>OPTIONS</option>
+                  </select>
+                </div>
+                <div class="endpoint-field">
+                  <label for="route">Rota</label>
+                  <input id="route" data-vortix-field="request.route" class="route-input" type="text" autocomplete="off" spellcheck="false" aria-label="Rota da API" placeholder="/v1/resource">
+                </div>
+              </div>
+            </div>
+          </section>
 
-          <div class="request-line">
-            <label class="visually-hidden" for="method">Método</label>
-            <select id="method" data-vortix-field="request.method" class="method-select method-get" aria-label="Método HTTP">
-              <option>GET</option><option>HEAD</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>OPTIONS</option>
-            </select>
-            <label class="visually-hidden" for="route">Rota</label>
-            <input id="route" data-vortix-field="request.route" class="route-input" type="text" autocomplete="off" spellcheck="false" aria-label="Rota da API" placeholder="/v1/resource">
-          </div>
-          <p class="hint request-route-hint">Rota é o caminho após o servidor (ex.: <code>/v1/resource</code>). O envio combina os dois.</p>
-
+          <section class="data-workspace" aria-labelledby="data-heading">
+            <div class="section-head">
+              <span class="section-icon muted" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 7h14M5 12h14M5 17h14"></path></svg>
+              </span>
+              <h2 id="data-heading">Dados da requisição</h2>
+            </div>
           <nav class="editor-tabs" id="request-editor-tabs" aria-label="Seções da requisição" role="tablist" data-vortix-region="request-editor-tabs">
             <button class="editor-tab active" type="button" id="editor-tab-params" role="tab" aria-selected="true" aria-controls="editor-panel-params" tabindex="0" data-editor-tab="params">Params <span class="tab-count" id="params-count">0</span></button>
             <button class="editor-tab" type="button" id="editor-tab-headers" role="tab" aria-selected="false" aria-controls="editor-panel-headers" tabindex="-1" data-editor-tab="headers">Headers</button>
             <button class="editor-tab" type="button" id="editor-tab-body" role="tab" aria-selected="false" aria-controls="editor-panel-body" tabindex="-1" data-editor-tab="body">Body</button>
             <button class="editor-tab" type="button" id="editor-tab-auth" role="tab" aria-selected="false" aria-controls="editor-panel-auth" tabindex="-1" data-editor-tab="auth">Auth</button>
-            <button class="editor-tab editor-tab-secondary" type="button" id="editor-tab-scripts" role="tab" aria-selected="false" aria-controls="editor-panel-scripts" tabindex="-1" data-editor-tab="scripts" title="Automação: ações antes e depois do envio">Scripts <span class="editor-tab-note">automação</span></button>
-            <button class="editor-tab editor-tab-secondary" type="button" id="editor-tab-tests" role="tab" aria-selected="false" aria-controls="editor-panel-tests" tabindex="-1" data-editor-tab="tests" title="Automação: testes e contratos da resposta">Testes <span class="editor-tab-note">automação</span></button>
+            <button class="editor-tab" type="button" id="editor-tab-scripts" role="tab" aria-selected="false" aria-controls="editor-panel-scripts" tabindex="-1" data-editor-tab="scripts">Scripts</button>
+            <button class="editor-tab" type="button" id="editor-tab-tests" role="tab" aria-selected="false" aria-controls="editor-panel-tests" tabindex="-1" data-editor-tab="tests">Testes</button>
           </nav>
 
           <div class="tab-panel" id="editor-panel-params" role="tabpanel" aria-labelledby="editor-tab-params" data-editor-panel="params">
-            <div class="panel-heading"><div><h2>Query Params</h2><p>Parâmetros são adicionados à URL ao enviar.</p></div><button class="button secondary compact-button" id="add-query-param" data-vortix-action="request.params.add" type="button">＋ Adicionar</button></div>
-            <div class="params-header"><span>CHAVE</span><span>VALOR</span><span></span></div>
+            <div class="panel-heading"><div><h2>Query Params</h2></div><div class="panel-actions"><button class="button secondary compact-button" id="add-query-param" data-vortix-action="request.params.add" type="button">＋ Adicionar</button><button class="help-trigger" type="button" popovertarget="params-help">Sobre parâmetros</button></div></div>
+            <div class="params-header"><span>Parâmetro</span><span>Valor</span><span></span></div>
             <div id="query-params" class="query-params" data-vortix-region="request-params"></div>
-            <p class="hint">Nomes repetidos e valores vazios são aceitos. Valores sensíveis são mascarados nos campos.</p>
           </div>
 
           <div class="tab-panel" id="editor-panel-headers" role="tabpanel" aria-labelledby="editor-tab-headers" data-editor-panel="headers" hidden>
-            <div class="panel-heading"><div><h2>Headers</h2><p>Um cabeçalho por linha no formato <code>Nome: valor</code>.</p></div></div>
+            <div class="panel-heading"><div><h2>Headers</h2></div><button class="help-trigger" type="button" popovertarget="headers-help">Sobre headers</button></div>
             <label class="visually-hidden" for="headers">Cabeçalhos adicionais</label>
             <textarea id="headers" data-vortix-field="request.headers" class="compact code-input" rows="8" autocomplete="off" spellcheck="false">Accept: application/json</textarea>
-            <p class="hint">Authorization é preenchido pelo campo Bearer na aba Auth.</p>
           </div>
 
           <div class="tab-panel" id="editor-panel-body" role="tabpanel" aria-labelledby="editor-tab-body" data-editor-panel="body" hidden>
-            <div class="panel-heading"><div><h2>Request Body</h2><p>Escolha o formato do conteúdo; o Content-Type padrão é aplicado ao enviar.</p></div><div class="code-tools"><span class="language-badge" id="body-mode-badge">JSON</span><button class="text-button format-button" id="format-json" type="button" title="Formatar JSON">Identar</button><button class="text-button format-button" id="minify-json" type="button" title="Remover espaços do JSON">Compactar</button></div></div>
+            <div class="panel-heading"><div><h2>Request Body</h2></div><div class="code-tools"><button class="help-trigger" type="button" popovertarget="body-help">Sobre o body</button><span class="language-badge" id="body-mode-badge">JSON</span><button class="text-button format-button" id="format-json" data-vortix-action="request.body.format" type="button" title="Formatar JSON">Identar</button><button class="text-button format-button" id="minify-json" data-vortix-action="request.body.minify" type="button" title="Remover espaços do JSON">Compactar</button></div></div>
             <div class="body-mode-row"><label for="body-mode">Formato</label><select id="body-mode" data-vortix-field="request.body-mode"><option value="json">JSON</option><option value="text">Texto</option><option value="xml">XML</option><option value="urlencoded">Form URL-encoded</option><option value="multipart">Multipart form-data</option><option value="graphql">GraphQL</option></select><span class="hint" id="body-mode-hint">Content-Type: application/json</span></div>
             <div class="code-editor" id="raw-body-editor">
               <pre id="body-highlight" class="code-highlight" aria-hidden="true"></pre>
@@ -187,7 +210,7 @@
           </div>
 
           <div class="tab-panel auth-panel" id="editor-panel-auth" role="tabpanel" aria-labelledby="editor-tab-auth" data-editor-panel="auth" hidden>
-            <div class="panel-heading"><div><h2>Autentica&ccedil;&atilde;o</h2><p>Escolha como esta request comprova identidade.</p></div><span class="auth-badge" id="auth-type-badge">Bearer</span></div>
+            <div class="panel-heading"><div><h2>Autentica&ccedil;&atilde;o</h2></div><div class="panel-actions"><button class="help-trigger" type="button" popovertarget="auth-help">Sobre a autentica&ccedil;&atilde;o</button><span class="auth-badge" id="auth-type-badge">Bearer</span></div></div>
             <div class="auth-inheritance-row">
               <div><label for="auth-inheritance-mode">Autentica&ccedil;&atilde;o desta request</label>
                 <select id="auth-inheritance-mode" aria-describedby="auth-inheritance-source">
@@ -278,7 +301,7 @@
                 <label for="oauth-pkce-redirect-uri">Redirect URI para cadastrar no provedor</label>
                 <div class="oauth-pkce-redirect-controls">
                   <input id="oauth-pkce-redirect-uri" type="text" readonly autocomplete="off" aria-label="Redirect URI exata">
-                  <button class="button secondary compact-button" id="oauth-pkce-redirect-copy" type="button" disabled>Copiar</button>
+                  <button class="button secondary compact-button copy-with-icon" id="oauth-pkce-redirect-copy" data-vortix-action="auth.pkce.redirect.copy" type="button" disabled aria-label="Copiar redirect URI" title="Copiar redirect URI"><svg class="copy-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="11" height="11" rx="1.5"></rect><path d="M5 16V6.5A1.5 1.5 0 0 1 6.5 5H16"></path></svg><span class="visually-hidden">Copiar</span></button>
                 </div>
               </div>
               <p class="hint">Cadastre a URI exata mostrada. O provedor precisa aceitar Authorization Code com PKCE S256. Fluxos remotos exigem HTTPS.</p>
@@ -336,7 +359,7 @@ Template → request_label = {{tenant}}-{{request_id}}</code></pre>
               <p>Depois de receber a resposta, o Insomnia usa <code>insomnia.response.json()</code> e <code>insomnia.environment.set()</code>. O código equivalente abaixo pode ser copiado para Scripts → After-response.</p>
               <pre><code id="insomnia-script-preview">const body = insomnia.response.json();
 insomnia.environment.set("token", body.access_token);</code></pre>
-              <button class="button secondary compact-button" id="copy-insomnia-script" type="button">Copiar exemplo Insomnia</button>
+              <button class="button secondary compact-button copy-with-icon" id="copy-insomnia-script" data-vortix-action="request.capture-example.copy" type="button" aria-label="Copiar exemplo Insomnia" title="Copiar exemplo Insomnia"><svg class="copy-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="11" height="11" rx="1.5"></rect><path d="M5 16V6.5A1.5 1.5 0 0 1 6.5 5H16"></path></svg><span class="visually-hidden">Copiar exemplo Insomnia</span></button>
               <p>Exemplos de caminho: <code>access_token</code>, <code>data.token</code> ou <code>result.jwt</code>. Para uma resposta sem JSON, escolha “Texto inteiro”.</p>
             </details>
             <section class="script-result" id="response-variable-result" role="status" aria-live="polite" hidden>
@@ -374,8 +397,10 @@ insomnia.environment.set("token", body.access_token);</code></pre>
               <p>As regras são convertidas em scripts After-response do Insomnia e Post-response do Postman ao exportar nesses formatos. Scripts são código executável; revise antes de usar.</p>
             </details>
           </div>
+          </section>
 
-          <div class="request-action-area">
+          <fieldset class="request-action-area send-strip">
+            <legend class="visually-hidden">Envio</legend>
             <fieldset class="write-guard" id="write-guard" hidden>
               <legend>Proteção para escrita</legend>
               <p>POST, PUT, PATCH e DELETE podem alterar dados. Use somente ambiente e dados descartáveis de teste.</p>
@@ -384,9 +409,12 @@ insomnia.environment.set("token", body.access_token);</code></pre>
               <label class="check-row" for="confirm-test-data"><input id="confirm-test-data" type="checkbox"><span>Confirmo que URL e dados são de teste e podem ser alterados.</span></label>
               <p class="warning-text">Uma confirmação visual aparecerá antes de cada envio.</p>
             </fieldset>
+            <span class="send-strip-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m4 12 15-7-4 14-3-5-4-1z"></path><path d="m12 14 7-9"></path></svg>
+            </span>
             <output id="request-send-status" class="hint request-send-status" data-vortix-field="request.send-status" aria-live="polite" aria-atomic="true">Informe uma rota para enviar a requisição.</output>
             <button class="button primary send-button" id="send-request" data-vortix-action="request.send" aria-describedby="request-send-status" type="button"><span aria-hidden="true">▶</span> Enviar</button>
-          </div>
+          </fieldset>
 
           <details id="advanced-tools" class="advanced-tools">
             <summary><span>Ferramentas avançadas</span> <span id="advanced-active-indicator" class="advanced-active-indicator" hidden></span></summary>
@@ -445,6 +473,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
             <div class="response-title-actions">
               <button class="copy-button" id="save-response-example" data-vortix-action="response.save-example" type="button" disabled title="Salva esta resposta na request da coleção">Salvar exemplo</button>
               <span id="response-status" data-vortix-field="response.status" class="status idle" role="status" aria-live="polite">Aguardando</span>
+              <button class="help-trigger" type="button" popovertarget="response-help">Sobre a resposta</button>
             </div>
           </div>
           <p id="response-example-save-hint" class="hint response-example-save-hint" role="status"></p>
@@ -459,7 +488,6 @@ insomnia.environment.set("token", body.access_token);</code></pre>
             </div>
             <p class="hint">O body fica salvo na coleção local e pode conter dados sensíveis.</p>
           </form>
-          <p class="hint response-guidance">Envie a request para ver o status e o corpo aqui; os cabeçalhos ficam em uma seção secundária.</p>
           <div class="response-section response-body-section">
             <div class="output-heading response-body-heading">
               <h2>Body</h2>
@@ -469,7 +497,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
                   <button class="response-view-mode" type="button" data-response-view="tree" aria-pressed="false" disabled>Árvore</button>
                   <button class="response-view-mode" type="button" data-response-view="raw" aria-pressed="false" disabled>Raw</button>
                 </div>
-                <button class="copy-button" id="copy-body" data-vortix-action="response.copy-body" type="button" disabled>Copiar</button>
+                <button class="copy-button copy-with-icon" id="copy-body" data-vortix-action="response.copy-body" type="button" disabled aria-label="Copiar body da resposta" title="Copiar body da resposta"><svg class="copy-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="11" height="11" rx="1.5"></rect><path d="M5 16V6.5A1.5 1.5 0 0 1 6.5 5H16"></path></svg><span class="visually-hidden">Copiar</span></button>
               </div>
             </div>
             <div class="response-search-row">
@@ -484,7 +512,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
           </div>
           <details class="response-section response-headers-section" id="response-headers-section">
             <summary>Ver cabeçalhos da resposta</summary>
-            <div class="output-heading"><h2>Cabeçalhos</h2><button class="copy-button" id="copy-headers" data-vortix-action="response.copy-headers" type="button" disabled>Copiar</button></div>
+            <div class="output-heading"><h2>Cabeçalhos</h2><button class="copy-button copy-with-icon" id="copy-headers" data-vortix-action="response.copy-headers" type="button" disabled aria-label="Copiar cabeçalhos da resposta" title="Copiar cabeçalhos da resposta"><svg class="copy-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="11" height="11" rx="1.5"></rect><path d="M5 16V6.5A1.5 1.5 0 0 1 6.5 5H16"></path></svg><span class="visually-hidden">Copiar</span></button></div>
             <pre id="response-headers" data-vortix-field="response.headers" class="output empty">Os cabeçalhos aparecerão após o envio.</pre>
           </details>
           <details id="response-examples-panel" class="response-examples-panel" hidden>
@@ -498,9 +526,37 @@ insomnia.environment.set("token", body.access_token);</code></pre>
           <div class="response-footer"><span class="response-indicator"></span><span id="response-persistence-note">Resposta temporária · não armazenada</span></div>
         </section>
       </div>
-      <footer class="app-footer" id="app-storage-note">No modo local, dados ficam no SQLite deste computador. Backups simples não são criptografados; use backup com senha para transportar o workspace.</footer>
     </section>
   </main>
+
+  <div id="workspace-help" class="help-popover" popover>
+    <footer class="app-footer" id="app-storage-note">No modo local, dados ficam no SQLite deste computador. Backups simples não são criptografados; use backup com senha para transportar o workspace.</footer>
+    <button class="help-popover-close" type="button" popovertarget="workspace-help" popovertargetaction="hide">Fechar</button>
+  </div>
+  <div id="endpoint-help" class="help-popover" popover>
+    <p>A URL base vem do ambiente e a rota é anexada a ela no envio. HTTPS é recomendado; HTTP em localhost funciona sem configuração extra.</p>
+    <button type="button" class="help-popover-close" popovertarget="endpoint-help" popovertargetaction="hide">Fechar</button>
+  </div>
+  <div id="params-help" class="help-popover" popover>
+    <p>Parâmetros são anexados à URL ao enviar. Nomes repetidos e valores vazios são aceitos; valores sensíveis são mascarados nos campos.</p>
+    <button type="button" class="help-popover-close" popovertarget="params-help" popovertargetaction="hide">Fechar</button>
+  </div>
+  <div id="headers-help" class="help-popover" popover>
+    <p>Use um cabeçalho por linha no formato Nome: valor. Authorization é preenchido pelo campo Bearer na aba Auth.</p>
+    <button type="button" class="help-popover-close" popovertarget="headers-help" popovertargetaction="hide">Fechar</button>
+  </div>
+  <div id="body-help" class="help-popover" popover>
+    <p>Escolha o formato do conteúdo; o Content-Type padrão é aplicado ao enviar.</p>
+    <button type="button" class="help-popover-close" popovertarget="body-help" popovertargetaction="hide">Fechar</button>
+  </div>
+  <div id="auth-help" class="help-popover" popover>
+    <p>Escolha como esta request comprova identidade.</p>
+    <button type="button" class="help-popover-close" popovertarget="auth-help" popovertargetaction="hide">Fechar</button>
+  </div>
+  <div id="response-help" class="help-popover" popover>
+    <p>Envie a request para ver o status e o corpo aqui; os cabeçalhos ficam em uma seção secundária. A resposta é temporária e não é armazenada.</p>
+    <button type="button" class="help-popover-close" popovertarget="response-help" popovertargetaction="hide">Fechar</button>
+  </div>
 
   <dialog class="app-dialog ai-help-dialog" id="ai-help-dialog" aria-labelledby="ai-help-title" aria-describedby="ai-help-description" data-vortix-region="agent-help">
     <div class="dialog-heading"><div><h2 id="ai-help-title">Use Vortix com IA</h2><p class="dialog-description" id="ai-help-description">Conecte um agente ao Portal do Maestri pela CLI nativa; não precisa servidor MCP. O Vortix oferece descoberta de controles e estado seguro pela página.</p></div><button class="icon-button dialog-close" id="close-ai-help" type="button" aria-label="Fechar ajuda de IA">×</button></div>
@@ -514,7 +570,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
         <li>Use o prompt abaixo ou salve-o nas instruções da responsabilidade <strong>Vortix Operator</strong> em Ajustes → Agentes.</li>
       </ol>
       <div class="agent-safe-context-copy">
-        <button class="button secondary compact-button" id="copy-ai-safe-context" data-vortix-action="agent.context.copy" type="button">Copiar contexto seguro</button>
+        <button class="button secondary compact-button copy-with-icon" id="copy-ai-safe-context" data-vortix-action="agent.context.copy" type="button" aria-label="Copiar contexto seguro" title="Copiar contexto seguro"><svg class="copy-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="11" height="11" rx="1.5"></rect><path d="M5 16V6.5A1.5 1.5 0 0 1 6.5 5H16"></path></svg><span class="visually-hidden">Copiar contexto seguro</span></button>
         <output id="ai-safe-context-status" class="hint" aria-live="polite" hidden></output>
         <label class="visually-hidden" for="ai-safe-context-fallback">Contexto seguro para copiar manualmente</label>
         <textarea id="ai-safe-context-fallback" class="compact" rows="8" readonly hidden></textarea>
@@ -522,7 +578,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
       <details class="ai-help-prompt" open>
         <summary>Prompt recomendado</summary>
         <pre id="maestri-agent-prompt">Use o Vortix somente pela interface do Portal do Maestri. Consulte window.vortixAgent.describe({region:'request-editor',includeState:true}) apenas para descobrir controles da região necessária; use window.vortixAgent.snapshot() para estado resumido sem valores. Estados dos controles não comprovam consentimento. Prepare e envie chamadas pela interface visível; confira ambiente, método e destino antes de cada envio. Desative “Salvar credenciais de Auth nas requests deste workspace” antes de enviar. POST, PUT, PATCH e DELETE exigem minha autorização explícita para aquela operação e a confirmação da interface. Peça autorização antes de salvar, importar, exportar, apagar dados ou executar Runner em lote. Nunca leia nem repita tokens, senhas ou valores do cofre. Não use fetch, curl, scripts ou endpoints para enviar chamadas.</pre>
-        <button class="button secondary compact-button" id="copy-maestri-agent-prompt" data-vortix-action="agent.prompt.copy" type="button">Copiar prompt</button>
+        <button class="button secondary compact-button copy-with-icon" id="copy-maestri-agent-prompt" data-vortix-action="agent.prompt.copy" type="button" aria-label="Copiar prompt do Maestro" title="Copiar prompt do Maestro"><svg class="copy-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="11" height="11" rx="1.5"></rect><path d="M5 16V6.5A1.5 1.5 0 0 1 6.5 5H16"></path></svg><span class="visually-hidden">Copiar prompt</span></button>
       </details>
       <nav class="ai-help-links" aria-label="Documentação de IA">
         <a href="https://github.com/JeffyMesquita/Vortix/blob/master/docs/maestri-portal.md" target="_blank" rel="noopener noreferrer">Guia do Vortix</a>
@@ -570,7 +626,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
           <section class="settings-section" aria-labelledby="settings-appearance-title">
             <h3 id="settings-appearance-title" class="visually-hidden">Aparência</h3>
             <div class="settings-grid">
-              <label for="theme-select">Tema<select id="theme-select" aria-label="Tema"><option value="dracula">Dracula</option><option value="monokai">Monokai</option><option value="one-dark">One Dark</option><option value="nord">Nord</option><option value="solarized-dark">Solarized Dark</option><option value="github-dark">GitHub Dark</option><option value="paper">Papel</option><option value="graphite">Grafite</option><option value="tide">Maré</option></select></label>
+              <label for="theme-select">Tema<select id="theme-select" aria-label="Tema"><option value="dracula">Dracula</option><option value="monokai">Monokai</option><option value="one-dark">One Dark</option><option value="nord">Nord</option><option value="solarized-dark">Solarized Dark</option><option value="github-dark">GitHub Dark</option><option value="paper">Papel</option><option value="graphite">Grafite</option><option value="tide">Maré</option><option value="aurora">Aurora</option><option value="areia">Areia</option></select></label>
               <label for="font-select">Fonte global<select id="font-select" aria-label="Fonte global"><option value="fira-code">Fira Code</option><option value="jetbrains-mono">JetBrains Mono</option><option value="cascadia-code">Cascadia Code</option><option value="cascadia-mono">Cascadia Mono</option><option value="ibm-plex-mono">IBM Plex Mono</option></select></label>
             </div>
             <div class="settings-scale">
@@ -762,7 +818,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
         <p class="hint curl-export-hint" id="curl-export-hint" role="status" aria-live="polite"></p>
         <p class="hint command-import-error" id="curl-export-error" role="alert" hidden></p>
       </div>
-      <div class="dialog-actions"><button class="button secondary" id="cancel-curl-export" type="button">Fechar</button><button class="button primary" id="copy-curl-command" type="button" disabled>Copiar cURL</button></div>
+      <div class="dialog-actions"><button class="button secondary" id="cancel-curl-export" type="button">Fechar</button><button class="button primary copy-with-icon" id="copy-curl-command" data-vortix-action="request.command.copy" type="button" disabled aria-label="Copiar comando cURL" title="Copiar comando cURL"><svg class="copy-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="11" height="11" rx="1.5"></rect><path d="M5 16V6.5A1.5 1.5 0 0 1 6.5 5H16"></path></svg><span id="copy-curl-label" class="visually-hidden">Copiar cURL</span></button></div>
     </form>
   </dialog>
 

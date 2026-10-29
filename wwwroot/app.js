@@ -12,7 +12,7 @@ const DB_STORES = ['history','collections','environments','settings'];
 const writeMethods = new Set(['POST','PUT','PATCH','DELETE']), toastTimers = new Map();
 const RunnerLogic = window.ApiStudioRunner;
 const parseJsonPath = RunnerLogic.parseJsonPath, jsonPathValue = RunnerLogic.jsonPathValue;
-const themes = new Set(['dracula','monokai','one-dark','nord','solarized-dark','github-dark','paper','graphite','tide']);
+const themes = new Set(['dracula','monokai','one-dark','nord','solarized-dark','github-dark','paper','graphite','tide','aurora','areia']);
 const fontFamilies = new Map([
   ['fira-code','"Fira Code", "Cascadia Code", "IBM Plex Mono", monospace'],
   ['jetbrains-mono','"JetBrains Mono", "Cascadia Code", "IBM Plex Mono", monospace'],
@@ -610,11 +610,11 @@ function sanitizeBody(value) {
 }
 function createQueryParamRow(name='',value='') {
   const n=++queryId,row=document.createElement('div');row.className='query-param-row';
-  const nl=document.createElement('label');nl.htmlFor=`query-param-${n}-name`;nl.textContent='Chave';
-  const ni=document.createElement('input');ni.id=nl.htmlFor;ni.type='text';ni.autocomplete='off';ni.spellcheck=false;ni.value=name;ni.dataset.queryName='';ni.setAttribute('aria-label','Chave do parâmetro');
+  const nl=document.createElement('label');nl.htmlFor=`query-param-${n}-name`;nl.textContent='Parâmetro';
+  const ni=document.createElement('input');ni.id=nl.htmlFor;ni.type='text';ni.autocomplete='off';ni.spellcheck=false;ni.value=name;ni.dataset.queryName='';ni.placeholder='Ex.: page';ni.setAttribute('aria-label','Parâmetro');
   const nf=document.createElement('div');nf.append(nl,ni);
   const vl=document.createElement('label');vl.htmlFor=`query-param-${n}-value`;vl.textContent='Valor';
-  const vi=document.createElement('input');vi.id=vl.htmlFor;vi.type=isSensitiveName(name)?'password':'text';vi.autocomplete=isSensitiveName(name)?'new-password':'off';vi.spellcheck=false;vi.value=value;vi.dataset.queryValue='';vi.setAttribute('aria-label','Valor do parâmetro');
+  const vi=document.createElement('input');vi.id=vl.htmlFor;vi.type=isSensitiveName(name)?'password':'text';vi.autocomplete=isSensitiveName(name)?'new-password':'off';vi.spellcheck=false;vi.value=value;vi.dataset.queryValue='';vi.placeholder='Ex.: 1';vi.setAttribute('aria-label','Valor');
   const vf=document.createElement('div');vf.append(vl,vi);
   const remove=document.createElement('button');remove.className='button secondary';remove.type='button';remove.textContent='×';remove.setAttribute('aria-label',`Remover parâmetro ${n}`);
   remove.onclick=()=>{row.remove();byId('confirm-test-data').checked=false;updateGuard();updateParamsCount();};
@@ -622,6 +622,7 @@ function createQueryParamRow(name='',value='') {
   vi.oninput=()=>{byId('confirm-test-data').checked=false;updateGuard();updateParamsCount();};row.append(nf,vf,remove);return row;
 }
 function renderQueryParams(entries){queryParams.replaceChildren();for(const [k,v]of entries)queryParams.append(createQueryParamRow(k,v));updateParamsCount();}
+function ensureQueryParamRow(){if(!queryParams.children.length){queryParams.append(createQueryParamRow());updateParamsCount();}}
 function addQueryParamRow(k='',v=''){const row=createQueryParamRow(k,v);queryParams.append(row);row.querySelector('[data-query-name]').focus();updateParamsCount();}
 function updateParamsCount(){byId('params-count').textContent=String([...queryParams.children].filter(r=>r.querySelector('[data-query-name]').value.trim()).length);}
 function buildRequestRoute(resolveValues=false,allowEmpty=false,preRequestOverrides={}){
@@ -724,7 +725,7 @@ async function loadOAuthPkceConfig(){
 }
 async function copyOAuthPkceRedirectUri(){
   const uri=byId('oauth-pkce-redirect-uri').value;if(!uri)return;
-  try{await navigator.clipboard.writeText(uri);showToast('Redirect URI copiada','Cadastre a URI exata no provedor OAuth.','success');}
+  try{await copyToClipboard(uri);}
   catch{showToast('Falha ao copiar','O navegador bloqueou a área de transferência. Selecione e copie a URI.','error');}
 }
 async function requestOAuthAuthorizationCodeToken(){
@@ -981,7 +982,7 @@ function applyHistoryEntry(entry,notify=true){
   }
   renderEnvironmentSelect();if(environmentChanged)void loadSecretVaultForActiveEnvironment();
   byId('base-url').value=entry.baseUrl||'';baseUrlAuto=false;byId('allow-insecure-http').checked=entry.allowInsecureHttp===true;method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(entry.method)?entry.method:'GET';
-  const parts=splitRoute(sanitizeRoute(String(entry.route||'')).value);route.value=parts.route;renderQueryParams(parts.params);
+  const parts=splitRoute(sanitizeRoute(String(entry.route||'')).value);route.value=parts.route;renderQueryParams(parts.params);ensureQueryParamRow();
   byId('headers').value=sanitizeHeaders(String(entry.headers||'')).value;body.value=entry.tokenRequest?'':sanitizeBody(String(entry.body||'')).value;applyBodyMode(entry.bodyMode);renderMultipartFields(entry.multipartFields||[]);renderGraphqlFields(entry);if(entry.collectionId&&findCollection(entry.collectionId)){const parent=findCollection(entry.collectionId),folder=findFolder(parent,entry.folderId);selectedContainer={collectionId:entry.collectionId,folderId:folder?.id||''};}
   applyAuthFields(entry);const isOAuth2=entry.tokenFlow==='oauth2-client-credentials';if(hasAuthCredentials(entry))byId('save-token-history').checked=true;
   byId('token-client-id').value=entry.tokenRequest?String(entry.tokenClientId||''):'';byId('token-client-secret').value='';
@@ -1393,7 +1394,7 @@ function syncActiveWorkspaceTab(markDirty=false){
 }
 function clearWorkspaceResponse(){clearCurrentResponseExample();showResponse('Aguardando','idle','','');byId('response-variable-result').hidden=true;renderResponseTestResults([]);}
 function applyWorkspaceDraft(draft){
-  method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(draft.method)?draft.method:'GET';byId('base-url').value=draft.baseUrl||'';baseUrlAuto=!!draft.baseUrlAuto;byId('allow-insecure-http').checked=draft.allowInsecureHttp===true;route.value=String(draft.route??'');renderQueryParams(Array.isArray(draft.params)?draft.params:[]);byId('headers').value=draft.headers||'';body.value=draft.body||'';applyBodyMode(draft.bodyMode);renderMultipartFields(draft.multipartFields||[]);renderGraphqlFields(draft);selectedContainer={collectionId:draft.collectionId||'',folderId:draft.folderId||''};byId('save-token-history').checked=draft.saveBearerToken!==false;applyAuthFields(draft);byId('token-client-id').value=draft.tokenClientId||'';byId('token-client-secret').value='';byId('token-helper').open=!!draft.tokenHelperOpen;
+  method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(draft.method)?draft.method:'GET';byId('base-url').value=draft.baseUrl||'';baseUrlAuto=!!draft.baseUrlAuto;byId('allow-insecure-http').checked=draft.allowInsecureHttp===true;route.value=String(draft.route??'');renderQueryParams(Array.isArray(draft.params)?draft.params:[]);ensureQueryParamRow();byId('headers').value=draft.headers||'';body.value=draft.body||'';applyBodyMode(draft.bodyMode);renderMultipartFields(draft.multipartFields||[]);renderGraphqlFields(draft);selectedContainer={collectionId:draft.collectionId||'',folderId:draft.folderId||''};byId('save-token-history').checked=draft.saveBearerToken!==false;applyAuthFields(draft);byId('token-client-id').value=draft.tokenClientId||'';byId('token-client-secret').value='';byId('token-helper').open=!!draft.tokenHelperOpen;
   renderPreRequestActions(draft.preRequestActions||[]);byId('pre-request-actions-enabled').checked=draft.preRequestActionsEnabled!==false;byId('pre-request-literal-consent').checked=draft.preRequestActionsLiteralConsent===true;updatePreRequestActionsUi();byId('capture-response-variable').checked=!!draft.captureResponseVariable;byId('response-variable-name').value=draft.responseVariableName||'token';byId('response-value-source').value=draft.responseValueSource==='text'?'text':'json';byId('response-json-path').value=draft.responseJsonPath||'access_token';byId('response-success-only').checked=draft.responseSuccessOnly!==false;byId('response-capture-target').value=draft.responseCaptureTarget==='vault'?'vault':'environment';byId('response-variable-result').hidden=true;restoreResponseTestDraft(draft.responseTests);
   setActiveResponseContract(draft.responseContract||null);clearCurrentResponseExample();activeSaved=draft.activeSaved||null;byId('request-title').textContent=draft.title||'Nova requisição';clearWriteConfirmation();updateGuard();updateTokenButton();updateCopyButtons();updateResponseCaptureUi();renderBodyHighlight();updateJsonTools();renderCollectionTree();setEditorTab(draft.editorSection||'params');
 }
@@ -1424,7 +1425,7 @@ function nextWorkspaceDraftTitle(){let index=1,title='Nova requisição';while(w
 function resetEditorForNewWorkspaceTab(title){
   method.value='GET';byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';baseUrlAuto=true;route.value='';byId('allow-insecure-http').checked=false;byId('headers').value='Accept: application/json';body.value='';applyBodyMode('json');byId('save-token-history').checked=true;selectedContainer={collectionId:collections[0]?.id||'',folderId:''};applyAuthFields({authMode:'inherit'});
   byId('token-client-id').value='';byId('token-client-secret').value='';byId('token-helper').open=false;renderPreRequestActions([]);byId('pre-request-actions-enabled').checked=true;byId('pre-request-literal-consent').checked=false;byId('capture-response-variable').checked=false;byId('response-variable-name').value='token';byId('response-value-source').value='json';byId('response-json-path').value='access_token';byId('response-success-only').checked=true;setResponseTests([]);setActiveResponseContract(null);updateResponseCaptureUi();
-  activeSaved=null;byId('request-title').textContent=title;renderQueryParams([]);clearWriteConfirmation();updateGuard();renderBodyHighlight();updateJsonTools();setEditorTab('params');
+  activeSaved=null;byId('request-title').textContent=title;renderQueryParams([]);ensureQueryParamRow();clearWriteConfirmation();updateGuard();renderBodyHighlight();updateJsonTools();setEditorTab('params');
 }
 function createNewWorkspaceTab(notify=true){
   invalidateStructuredDiagnosticContext(false);
@@ -2038,7 +2039,7 @@ function updateCurlExportPreview(){
     if(request.bodyMode==='multipart')warnings.push('Body multipart não foi incluído; selecione arquivos e monte o formulário no terminal.');
     if(request.hasCookieJar)warnings.push('O Cookie jar do ambiente ativo não é exportado; configure os cookies manualmente no terminal.');
     if(request.hasPreRequestActions)warnings.push('Ações pré-request não são executadas no terminal; substitua os templates manualmente.');
-    byId('curl-export-title').textContent='Gerar comando '+formatName;copy.textContent='Copiar '+formatName;copy.title='Copiar comando '+formatName;
+    byId('curl-export-title').textContent='Gerar comando '+formatName;const copyLabel=byId('copy-curl-label');if(copyLabel){copyLabel.textContent='Copiar '+formatName;}copy.title='Copiar comando '+formatName;copy.setAttribute('aria-label','Copiar comando '+formatName);
     preview.textContent=generated.command;hint.textContent=warnings.join(' ');copy.disabled=!generated.command;
   }catch(exception){error.textContent=exception.message||'Não foi possível gerar o comando '+formatName+'.';error.hidden=false;}
 }
@@ -2055,7 +2056,7 @@ async function confirmCurlSensitiveMode(){
 }
 async function copyCurlCommand(){
   const command=byId('curl-command-preview').textContent.trim(),format=byId('curl-format').value==='httpie'?'HTTPie':'cURL';if(!command)return;
-  try{await navigator.clipboard.writeText(command);showToast('Comando '+format+' copiado','A request não foi enviada nem salva.','success');}
+  try{await copyToClipboard(command);}
   catch{showToast('Falha ao copiar '+format,'O navegador bloqueou a área de transferência. Selecione o comando na prévia e copie manualmente.','error');}
 }
 function openImportDialog(){byId('command-import-error').hidden=true;byId('command-import-error').textContent='';byId('command-import-source').value='';byId('command-import-format').value='curl';updateCommandImportUi();byId('import-dialog').showModal();byId('command-import-source').focus();}
@@ -2069,7 +2070,7 @@ function openImportedCommandDraft(){
     if(safeRoute.redacted||safeBase.redacted)throw Error('Remova credenciais e fragmentos da URL antes de importar.');
     if(!createNewWorkspaceTab(false))return;
     method.value=imported.method;byId('base-url').value=safeBase.value;baseUrlAuto=false;route.value=safeRoute.value;
-    renderQueryParams(routeParts.params);byId('headers').value=imported.headers.map(([name,value])=>`${name}: ${value}`).join('\n');body.value=imported.body;applyBodyMode(bodyModeFromHeaderEntries(imported.headers));
+    renderQueryParams(routeParts.params);ensureQueryParamRow();byId('headers').value=imported.headers.map(([name,value])=>`${name}: ${value}`).join('\n');body.value=imported.body;applyBodyMode(bodyModeFromHeaderEntries(imported.headers));
     applyAuthFields({authType:imported.bearerToken?'bearer':'none',bearerToken:imported.bearerToken});if(imported.bearerToken)byId('save-token-history').checked=false;
     byId('request-title').textContent=`${httpie?'HTTPie':'cURL'} - ${imported.method} ${safeRoute.value||'/'}`;activeSaved=null;setEditorTab('params');
     byId('import-dialog').close();updateGuard();updateCopyButtons();renderBodyHighlight();updateJsonTools();syncActiveWorkspaceTab(true);renderWorkspaceTabs();scheduleWorkspaceTabsPersist();
@@ -2156,7 +2157,7 @@ async function saveCollectionRequest(event){
 function loadCollectionRequest(request,collectionId,folderId,notify=true){
   clearCurrentResponseExample();
   byId('base-url').value=request.baseUrl||'{{baseUrl}}';baseUrlAuto=request.baseUrl==='{{baseUrl}}';byId('allow-insecure-http').checked=request.allowInsecureHttp===true;method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET';
-  const split=splitRoute(request.route||'');route.value=split.route;renderQueryParams(split.params);byId('headers').value=request.headers||'';body.value=request.body||'';applyBodyMode(request.bodyMode);renderMultipartFields(request.multipartFields||[]);renderGraphqlFields(request);selectedContainer={collectionId,folderId};applyAuthFields(request);
+  const split=splitRoute(request.route||'');route.value=split.route;renderQueryParams(split.params);ensureQueryParamRow();byId('headers').value=request.headers||'';body.value=request.body||'';applyBodyMode(request.bodyMode);renderMultipartFields(request.multipartFields||[]);renderGraphqlFields(request);selectedContainer={collectionId,folderId};applyAuthFields(request);
   byId('token-client-id').value=request.tokenRequest?request.tokenClientId||'':'';byId('token-client-secret').value='';byId('token-credential-mode').value=request.tokenCredentialMode==='query'?'query':'body';byId('token-helper').open=!!request.tokenRequest;
   if(request.tokenRequest){byId('token-route').value=split.route;byId('token-client-id-field').value=request.tokenClientIdField||'client_id';byId('token-client-secret-field').value=request.tokenClientSecretField||'client_secret';tokenRequestConfig=RunnerLogic.normalizeTokenRequestConfig({route:split.route,clientIdField:byId('token-client-id-field').value,clientSecretField:byId('token-client-secret-field').value,credentialMode:byId('token-credential-mode').value});}
    renderPreRequestActions(request.preRequestActions||[]);byId('pre-request-actions-enabled').checked=request.preRequestActionsEnabled!==false;byId('pre-request-literal-consent').checked=request.preRequestActionsLiteralConsent===true;updatePreRequestActionsUi();byId('capture-response-variable').checked=!!request.captureResponseVariable;byId('response-variable-name').value=request.responseVariableName||'token';byId('response-value-source').value=request.responseValueSource==='text'?'text':'json';byId('response-json-path').value=request.responseJsonPath||'access_token';byId('response-success-only').checked=request.responseSuccessOnly!==false;byId('response-capture-target').value=request.responseCaptureTarget==='vault'?'vault':'environment';byId('response-variable-result').hidden=true;updateResponseCaptureUi();setResponseTests(request.responseTests||[]);setActiveResponseContract(request.responseContract||null);
@@ -2250,19 +2251,30 @@ function renderResponseBody(){
 
 function responseValuePreview(value){if(Array.isArray(value))return '['+value.length+' itens]';if(value&&typeof value==='object')return '{'+Object.keys(value).length+' propriedades}';if(typeof value==='string')return JSON.stringify(value);return value===null?'null':String(value);}
 
+function responseTreeValueClass(value,container){
+  if(container)return 'json-punctuation';
+  if(typeof value==='string')return 'json-string';
+  if(typeof value==='number')return 'json-number';
+  return 'json-literal';
+}
+
+function appendResponseTreeChildren(entry,line,label,value,pathParts,depth,state){
+  const toggle=document.createElement('button'),children=document.createElement('div'),expanded=depth<1;toggle.type='button';toggle.className='response-tree-toggle';toggle.setAttribute('aria-expanded',String(expanded));toggle.setAttribute('aria-label',(expanded?'Recolher ':'Expandir ')+label);
+  children.className='response-tree-children';children.hidden=!expanded;toggle.onclick=()=>{const open=toggle.getAttribute('aria-expanded')!=='true';toggle.setAttribute('aria-expanded',String(open));toggle.setAttribute('aria-label',(open?'Recolher ':'Expandir ')+label);children.hidden=!open;};
+  line.append(toggle);entry.append(line,children);const isArray=Array.isArray(value),items=isArray?value.map((child,index)=>[index,child]):Object.entries(value);
+  for(const[key,child]of items){if(state.count>=2000){state.truncated=true;break;}appendResponseTreeEntry(children,isArray?'['+key+']':key,child,[...pathParts,key],depth+1,state);if(state.truncated)break;}
+}
+
 function appendResponseTreeEntry(parent,label,value,pathParts,depth,state){
   if(state.count>=2000){state.truncated=true;return;}state.count++;
   const entry=document.createElement('div'),line=document.createElement('div'),container=value!==null&&typeof value==='object';entry.className='response-tree-entry';
   const preview=responseValuePreview(value);entry.dataset.searchText=(pathParts.length?String(label)+' '+(container?'':preview):'').toLocaleLowerCase();line.className='response-tree-line';
   if(container){
-    const toggle=document.createElement('button'),children=document.createElement('div'),expanded=depth<1;toggle.type='button';toggle.className='response-tree-toggle';toggle.setAttribute('aria-expanded',String(expanded));toggle.setAttribute('aria-label',(expanded?'Recolher ':'Expandir ')+label);
-    children.className='response-tree-children';children.hidden=!expanded;toggle.onclick=()=>{const open=toggle.getAttribute('aria-expanded')!=='true';toggle.setAttribute('aria-expanded',String(open));toggle.setAttribute('aria-label',(open?'Recolher ':'Expandir ')+label);children.hidden=!open;};
-    line.append(toggle);entry.append(line,children);const items=Array.isArray(value)?value.map((child,index)=>[index,child]):Object.entries(value);
-    for(const[key,child]of items){if(state.count>=2000){state.truncated=true;break;}appendResponseTreeEntry(children,Array.isArray(value)?'['+key+']':key,child,[...pathParts,key],depth+1,state);if(state.truncated)break;}
+    appendResponseTreeChildren(entry,line,label,value,pathParts,depth,state);
   }else{const spacer=document.createElement('span');spacer.className='response-tree-spacer';spacer.setAttribute('aria-hidden','true');line.append(spacer);entry.append(line);}
   const key=document.createElement('span'),valueElement=document.createElement('span');key.className='response-tree-key';key.textContent=String(label);
-  valueElement.className='response-tree-value '+(container?'json-punctuation':typeof value==='string'?'json-string':typeof value==='number'?'json-number':'json-literal');valueElement.textContent=preview.length>120?preview.slice(0,117)+'…':preview;if(preview.length>120)valueElement.title=preview;line.append(key,valueElement);
-  if(pathParts.length){const path=RunnerLogic.formatJsonPath(pathParts),copy=document.createElement('button');copy.type='button';copy.className='copy-button response-tree-copy';copy.textContent='Copiar';copy.dataset.copyJsonPath=path;copy.title='Copiar caminho JSON '+path;copy.setAttribute('aria-label','Copiar caminho JSON '+path);line.append(copy);}
+  valueElement.className='response-tree-value '+responseTreeValueClass(value,container);valueElement.textContent=preview.length>120?preview.slice(0,117)+'…':preview;if(preview.length>120){valueElement.title=preview;}line.append(key,valueElement);
+  if(pathParts.length){const path=RunnerLogic.formatJsonPath(pathParts),copy=document.createElement('button');copy.type='button';copy.className='copy-button copy-with-icon response-tree-copy';copy.id='response-path-copy-'+(++responsePathCopyId);copy.innerHTML=COPY_ICON_SVG+'<span class="visually-hidden">Copiar</span>';copy.dataset.copyJsonPath=path;copy.dataset.vortixAction='response.path.copy';copy.title='Copiar caminho JSON';copy.setAttribute('aria-label','Copiar caminho JSON');line.append(copy);}
   parent.append(entry);
 }
 
@@ -2286,13 +2298,16 @@ function highlightResponseMatches(element,query){
     for(const match of matches){fragment.append(document.createTextNode(text.slice(cursor,match.start)));const mark=document.createElement('mark');mark.className='response-search-hit';mark.textContent=text.slice(match.start,match.end);fragment.append(mark);cursor=match.end;}fragment.append(document.createTextNode(text.slice(cursor)));textNode.replaceWith(fragment);}
 }
 
+const COPY_ICON_SVG = '<svg class="copy-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="11" height="11" rx="1.5"></rect><path d="M5 16V6.5A1.5 1.5 0 0 1 6.5 5H16"></path></svg>';
+let responsePathCopyId = 0;
+async function copyToClipboard(text){await navigator.clipboard.writeText(text);showToast('Copiado','Copiado para a área de transferência.','info');}
 async function copyOutput(id,label){
   const output=byId(id),text=id==='response-body'?(responseBodyView==='raw'?responseBodyState.raw:responseBodyState.pretty):output.textContent;if(!text.trim())return;
-  try{await navigator.clipboard.writeText(text);showToast('Copiado',label+' copiado para a área de transferência.','success');}
+  try{await copyToClipboard(text);}
   catch{showToast('Falha ao copiar','O navegador bloqueou a área de transferência. Tente novamente pelo botão.','error');}
 }
 async function copyResponsePath(path){
-  try{await navigator.clipboard.writeText(path);showToast('Caminho copiado',path+' pronto para colar em Scripts ou Testes.','success');}
+  try{await copyToClipboard(path);}
   catch{showToast('Falha ao copiar caminho','O navegador bloqueou a área de transferência. Tente novamente pelo botão.','error');}
 }
 function apiStatusToast(status,reason){
@@ -2616,8 +2631,7 @@ async function copyAiSafeContext(){
     showToast('Contexto seguro indisponível',message,'error');return;
   }
   try{
-    await navigator.clipboard.writeText(context);
-    showToast('Contexto seguro copiado','JSON seguro copiado para a área de transferência. Nenhuma request foi enviada.','success');
+    await copyToClipboard(context);
   }catch{
     const message='O navegador bloqueou a área de transferência. O JSON seguro está selecionado para cópia manual.';
     if(fallback){fallback.value=context;fallback.hidden=false;fallback.focus();fallback.select();}
@@ -2628,7 +2642,7 @@ async function copyAiSafeContext(){
 async function copyMaestriAgentPrompt(){
   const prompt=byId('maestri-agent-prompt')?.textContent?.trim();
   if(!prompt){showToast('Prompt indisponível','Atualize a página e tente novamente.','error');return;}
-  try{await navigator.clipboard.writeText(prompt);showToast('Prompt copiado','Cole nas instruções da responsabilidade Vortix Operator no Maestri.','success');}
+  try{await copyToClipboard(prompt);}
   catch{showToast('Falha ao copiar prompt','O navegador bloqueou a área de transferência. Selecione o texto e copie manualmente.','error');}
 }
 function vaultCaptureError(request){
@@ -3371,7 +3385,7 @@ function addEventListeners(){
   const editorTabList=byId('request-editor-tabs');editorTabList.addEventListener('click',event=>{const button=event.target.closest('[data-editor-tab]');if(button)setEditorTab(button.dataset.editorTab);});editorTabList.addEventListener('keydown',handleEditorTabKeydown);byId('format-json').onclick=()=>formatBodyJson(false);byId('minify-json').onclick=()=>formatBodyJson(true);body.addEventListener('keydown',handleJsonKeydown);
   for(const id of ['response-variable-name','response-json-path','response-value-source','response-success-only','capture-response-variable','response-capture-target']){byId(id).addEventListener('input',updateResponseCaptureUi);byId(id).addEventListener('change',updateResponseCaptureUi);}
   byId('insert-token-script').onclick=async()=>{const isDefault=byId('response-variable-name').value.trim()==='token'&&byId('response-json-path').value.trim()==='access_token';if(!isDefault&&!(await confirmWithDialog({eyebrow:'EXEMPLO DE TOKEN',title:'Usar o exemplo de token?',description:'Os campos do extrator serão preenchidos com token e access_token.',confirmLabel:'Usar exemplo'})))return;byId('capture-response-variable').checked=true;byId('response-value-source').value='json';byId('response-variable-name').value='token';byId('response-json-path').value='access_token';byId('response-success-only').checked=true;byId('response-capture-target').value='environment';updateResponseCaptureUi();showToast('Exemplo pronto','Confira o caminho access_token na resposta antes de enviar.','info');};
-  byId('copy-insomnia-script').onclick=async()=>{try{await navigator.clipboard.writeText(byId('insomnia-script-preview').textContent);showToast('Exemplo copiado','Script pronto para Scripts → After-response no Insomnia.','success');}catch{showToast('Falha ao copiar','O navegador bloqueou a área de transferência.','error');}};
+  byId('copy-insomnia-script').onclick=async()=>{try{await copyToClipboard(byId('insomnia-script-preview').textContent);}catch{showToast('Falha ao copiar','O navegador bloqueou a área de transferência.','error');}};
   byId('clear-token').onclick=()=>{byId('bearer-token').value='';byId('bearer-token').focus();showToast('Token removido','O campo Bearer foi limpo desta sessão.','info');};
   byId('new-request').onclick=createNewWorkspaceTab;
   for(const id of ['method','route','body','base-url','headers','allow-insecure-http','confirm-test-data','test-data-phrase']){
@@ -3389,7 +3403,7 @@ function addEventListeners(){
   oauth2TokenButton.onclick=()=>void requestOAuthClientCredentialsToken();byId('oauth-pkce-start').onclick=()=>void requestOAuthAuthorizationCodeToken();byId('oauth-pkce-cancel').onclick=cancelOAuthPkceAuthorization;byId('oauth-pkce-redirect-copy').onclick=copyOAuthPkceRedirectUri;sendButton.onclick=sendCurrentRequest;tokenRequestButton.onclick=requestTokenFromHelper;
 }
 async function startApp(){
-  addEventListeners();updateAiFriendlyStatus();renderQueryParams([]);renderMultipartFields([]);renderGraphqlFields({});updateAuthTypeUi();updateBodyModeUi();renderBodyHighlight();
+  addEventListeners();updateAiFriendlyStatus();renderQueryParams([]);ensureQueryParamRow();renderMultipartFields([]);renderGraphqlFields({});updateAuthTypeUi();updateBodyModeUi();renderBodyHighlight();
   try{await initializeHostingMode();await initializeDb();await loadSecretVaultForActiveEnvironment();await loadTokenRequestConfig();await loadOAuth2TokenConfig();applyTheme(activeTheme);applyTypography();applyUiScale();renderCollectionTree();renderEnvironmentSelect();await loadOAuthPkceConfig();if(!byId('base-url').value)byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';await renderHistory();await initializeWorkspaceTabs();updateGuard();updateCopyButtons();updateTokenButton();updateJsonTools();updateResponseCaptureUi();
     initializeStructuredExecution();byId('protect-existing-secrets').hidden=hostedMode;
     if(hostedMode){byId('sidebar-storage-note').textContent='Coleções e histórico neste navegador';document.querySelector('.sidebar-bottom strong').textContent='Workspace do navegador';byId('history-panel').querySelector('.history-hint').textContent='Histórico e dados ficam neste navegador; exporte backups para transferi-los.';byId('app-storage-note').textContent='Coleções, ambientes, requests e histórico ficam no IndexedDB deste navegador, sem criptografia automática. Use Backup com senha para transportar uma cópia protegida.';}

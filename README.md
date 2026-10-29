@@ -261,7 +261,11 @@ O editor segue URL base, método/rota, abas de preenchimento e área **Enviar**,
 
 Na lateral, **Ferramentas da coleção** reúne importação, exportação e Runner. **Ajuda e exibição**, no cabeçalho, contém a ajuda do bridge e **Tela cheia**. **Configurações** organiza Aparência, Ambientes, Histórico e privacidade, Cofre e Backup/proteção em seções expansíveis. Segurança, consentimentos e avisos de persistência continuam nos respectivos fluxos.
 
-Em **Configurações → Aparência**, escolha **Papel** para uma superfície clara, **Grafite** para tons escuros neutros ou **Maré** para azul profundo com destaque âmbar. A escolha é salva no workspace, mantendo os seis temas anteriores disponíveis. Os novos temas incluem cores de sintaxe JSON, estados e foco por teclado.
+Em **Configurações → Aparência**, há 11 temas: Dracula, Monokai, One Dark, Nord, Solarized Dark, GitHub Dark, Papel, Grafite, Maré, Aurora e Areia. **Aurora** combina uma superfície escura com destaque verde-água; **Areia** usa uma superfície clara e quente. A escolha é salva no workspace sem alterar fonte ou escala. Os temas incluem cores de sintaxe JSON, estados e foco por teclado.
+
+O endereço fica em destaque, os dados mantêm as seis abas e a faixa de envio reúne ação e confirmações. A ajuda estática abre em popovers com botão **Fechar**; status, erros e consentimentos permanecem no fluxo. Params começa com uma linha vazia sem roubar o foco: essa linha não conta como parâmetro nem entra na URL. Preencher apenas o valor, sem nome, continua gerando erro.
+
+As ações **Copiar** usam o ícone de dois retângulos, com nome acessível e título contextual. A confirmação **Copiado para a área de transferência** aparece como toast de informação somente após a cópia funcionar. Falhas continuam mostrando erro, sem confirmação falsa. A ponte IA descobre essas ações pelo contrato DOM, usando os mesmos handlers da interface.
 
 O botão **Tela cheia** usa a Fullscreen API do navegador. Clique novamente ou pressione **Esc** para sair. O controle informa o estado por `aria-pressed`; fica desativado quando o navegador não oferece suporte e mostra um aviso se a solicitação for recusada. A disponibilidade depende do navegador e das permissões do portal.
 
