@@ -1,6 +1,6 @@
 # Dependências do Runner — validação local em 29/10/2026
 
-Implementado localmente em `feat/runner-dependencies`, sobre `0816037` (PR #38). SDD aprovado pelo usuário; a autorização seguinte iniciou a implementação. Apenas o SDD inicial foi commitado nesta branch (`3bcbe17`); a implementação e documentação de entrega ainda não têm commit/PR/publicação.
+Relatório local da entrega do [PR #39](https://github.com/JeffyMesquita/Vortix/pull/39), branch `feat/runner-dependencies`, sobre `0816037` (PR #38). SDD inicial em `3bcbe17`, implementação em `53fc96844e5aa23eb8bb6b215193f6233b4bf272`. Usuário aprovou SDD, implementação e publicação. Os números abaixo descrevem os testes locais anteriores ao PR; consultar o PR para SHA final, checks remotos e merge.
 
 ## Resultado
 
@@ -27,7 +27,7 @@ Hange conferiu esses quatro ajustes somente por leitura de código/testes, sem p
 - `RunnerDependencies.test.cjs`: **26/26**; cobertura de matching por nome/destino, seed, cofre, pré-request ordenada, Auth herdada, GraphQL/multipart, limites, sentinelas, ausência de mutação, datasets inválidos, reexecução/cancelamento, estado obsoleto e renderização mínima.
 - `node --check wwwroot/app.js` e `node --check wwwroot/runner-logic.js`: aprovados.
 - Build Release `--no-restore -o ./artifacts/runner-deps-qa/build`: aprovado, zero avisos/erros. Nenhuma dependência foi instalada/restaurada. Log local: `artifacts/runner-deps-qa/final-build.log`.
-- `git diff --check` e links documentais conferidos. CI atualizada para incluir o teste novo; nenhum run remoto desta implementação foi executado nesta etapa.
+- `git diff --check` e links documentais conferidos. CI atualizada para incluir o teste novo; os runs remotos da publicação são acompanhados no PR, separadamente desta evidência local.
 
 ## Smoke pelo Portal, com mock de loopback
 

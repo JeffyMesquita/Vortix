@@ -376,7 +376,7 @@ Integrada em `master` pelo PR #34, junto à correção do selo do PR #31 e à at
 
 ### 24. Dependências visuais no Runner
 
-**Status: implementada e validada localmente; [evidências e limites](docs/superpowers/validation/2026-10-29-runner-dependencies.md). Sem publicação desta feature.**
+**Status: implementada e validada localmente; entrega no [PR #39](https://github.com/JeffyMesquita/Vortix/pull/39). [Evidências e limites locais](docs/superpowers/validation/2026-10-29-runner-dependencies.md); estado de merge e checks no PR.**
 
 - [x] Aprovar [SDD](docs/superpowers/specs/2026-10-29-runner-dependencies-design.md) e autorizar [plano](docs/superpowers/plans/2026-10-29-runner-dependencies.md) em terminais visíveis.
 - [x] Análise pura/efêmera com precedência existente, capturas condicionais, datasets e limites explícitos.
