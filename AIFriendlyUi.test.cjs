@@ -806,3 +806,46 @@ test('copy actions share an accessible icon, contextual labels and stable action
   assert.match(app, /copy\.title='Copiar caminho JSON'/);
   assert.match(app, /copy\.innerHTML=COPY_ICON_SVG\+'<span class="visually-hidden">Copiar<\/span>'/);
 });
+
+test('response tree preserves expansion, literal classes, opaque copy controls and item limit', async () => {
+  const app = await fs.readFile(path.join(root, 'wwwroot', 'app.js'), 'utf8');
+  const start = app.indexOf('function responseValuePreview(');
+  const end = app.indexOf('\nfunction buildResponseTree(', start);
+  const createElement = () => ({
+    children: [], dataset: {}, attributes: {}, hidden: false,
+    append(...children) { this.children.push(...children); },
+    setAttribute(name, value) { this.attributes[name] = value; },
+    getAttribute(name) { return this.attributes[name]; }
+  });
+  const appendEntry = vm.runInNewContext(`let responsePathCopyId=0; const COPY_ICON_SVG='<svg></svg>'; ${app.slice(start, end)}; appendResponseTreeEntry`, {
+    document: { createElement },
+    RunnerLogic: { formatJsonPath: parts => parts.join('.') }
+  });
+  const treeRoot = createElement(), state = { count: 0, truncated: false };
+  appendEntry(treeRoot, 'Resposta', { secretKey: ['value', 7, null, true] }, [], 0, state);
+  const flatten = element => [element, ...element.children.flatMap(flatten)];
+  const nodes = flatten(treeRoot);
+  assert.equal(state.count, 6);
+  const toggles = nodes.filter(node => node.className === 'response-tree-toggle');
+  assert.equal(toggles[0].getAttribute('aria-expanded'), 'true');
+  assert.equal(toggles[1].getAttribute('aria-expanded'), 'false');
+  const rootChildren = treeRoot.children[0].children[1];
+  toggles[0].onclick();
+  assert.equal(rootChildren.hidden, true);
+  toggles[0].onclick();
+  assert.equal(rootChildren.hidden, false);
+  const values = nodes.filter(node => node.className?.startsWith('response-tree-value '));
+  assert.deepEqual(values.map(node => node.className.split(' ').at(-1)), ['json-punctuation', 'json-punctuation', 'json-string', 'json-number', 'json-literal', 'json-literal']);
+  const copies = nodes.filter(node => node.dataset.vortixAction === 'response.path.copy');
+  assert.equal(copies.length, 5);
+  assert.equal(new Set(copies.map(node => node.id)).size, 5);
+  assert.equal(copies.at(-1).dataset.copyJsonPath, 'secretKey.3');
+  for (const copy of copies) {
+    assert.match(copy.id, /^response-path-copy-\d+$/);
+    assert.equal(copy.getAttribute('aria-label'), 'Copiar caminho JSON');
+  }
+  const limited = { count: 0, truncated: false };
+  appendEntry(createElement(), 'Resposta', Array.from({ length: 2100 }, (_, index) => index), [], 0, limited);
+  assert.equal(limited.count, 2000);
+  assert.equal(limited.truncated, true);
+});

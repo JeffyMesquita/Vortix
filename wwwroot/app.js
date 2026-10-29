@@ -2039,7 +2039,7 @@ function updateCurlExportPreview(){
     if(request.bodyMode==='multipart')warnings.push('Body multipart não foi incluído; selecione arquivos e monte o formulário no terminal.');
     if(request.hasCookieJar)warnings.push('O Cookie jar do ambiente ativo não é exportado; configure os cookies manualmente no terminal.');
     if(request.hasPreRequestActions)warnings.push('Ações pré-request não são executadas no terminal; substitua os templates manualmente.');
-    byId('curl-export-title').textContent='Gerar comando '+formatName;const copyLabel=byId('copy-curl-label');if(copyLabel)copyLabel.textContent='Copiar '+formatName;copy.title='Copiar comando '+formatName;copy.setAttribute('aria-label','Copiar comando '+formatName);
+    byId('curl-export-title').textContent='Gerar comando '+formatName;const copyLabel=byId('copy-curl-label');if(copyLabel){copyLabel.textContent='Copiar '+formatName;}copy.title='Copiar comando '+formatName;copy.setAttribute('aria-label','Copiar comando '+formatName);
     preview.textContent=generated.command;hint.textContent=warnings.join(' ');copy.disabled=!generated.command;
   }catch(exception){error.textContent=exception.message||'Não foi possível gerar o comando '+formatName+'.';error.hidden=false;}
 }
@@ -2251,18 +2251,29 @@ function renderResponseBody(){
 
 function responseValuePreview(value){if(Array.isArray(value))return '['+value.length+' itens]';if(value&&typeof value==='object')return '{'+Object.keys(value).length+' propriedades}';if(typeof value==='string')return JSON.stringify(value);return value===null?'null':String(value);}
 
+function responseTreeValueClass(value,container){
+  if(container)return 'json-punctuation';
+  if(typeof value==='string')return 'json-string';
+  if(typeof value==='number')return 'json-number';
+  return 'json-literal';
+}
+
+function appendResponseTreeChildren(entry,line,label,value,pathParts,depth,state){
+  const toggle=document.createElement('button'),children=document.createElement('div'),expanded=depth<1;toggle.type='button';toggle.className='response-tree-toggle';toggle.setAttribute('aria-expanded',String(expanded));toggle.setAttribute('aria-label',(expanded?'Recolher ':'Expandir ')+label);
+  children.className='response-tree-children';children.hidden=!expanded;toggle.onclick=()=>{const open=toggle.getAttribute('aria-expanded')!=='true';toggle.setAttribute('aria-expanded',String(open));toggle.setAttribute('aria-label',(open?'Recolher ':'Expandir ')+label);children.hidden=!open;};
+  line.append(toggle);entry.append(line,children);const isArray=Array.isArray(value),items=isArray?value.map((child,index)=>[index,child]):Object.entries(value);
+  for(const[key,child]of items){if(state.count>=2000){state.truncated=true;break;}appendResponseTreeEntry(children,isArray?'['+key+']':key,child,[...pathParts,key],depth+1,state);if(state.truncated)break;}
+}
+
 function appendResponseTreeEntry(parent,label,value,pathParts,depth,state){
   if(state.count>=2000){state.truncated=true;return;}state.count++;
   const entry=document.createElement('div'),line=document.createElement('div'),container=value!==null&&typeof value==='object';entry.className='response-tree-entry';
   const preview=responseValuePreview(value);entry.dataset.searchText=(pathParts.length?String(label)+' '+(container?'':preview):'').toLocaleLowerCase();line.className='response-tree-line';
   if(container){
-    const toggle=document.createElement('button'),children=document.createElement('div'),expanded=depth<1;toggle.type='button';toggle.className='response-tree-toggle';toggle.setAttribute('aria-expanded',String(expanded));toggle.setAttribute('aria-label',(expanded?'Recolher ':'Expandir ')+label);
-    children.className='response-tree-children';children.hidden=!expanded;toggle.onclick=()=>{const open=toggle.getAttribute('aria-expanded')!=='true';toggle.setAttribute('aria-expanded',String(open));toggle.setAttribute('aria-label',(open?'Recolher ':'Expandir ')+label);children.hidden=!open;};
-    line.append(toggle);entry.append(line,children);const items=Array.isArray(value)?value.map((child,index)=>[index,child]):Object.entries(value);
-    for(const[key,child]of items){if(state.count>=2000){state.truncated=true;break;}appendResponseTreeEntry(children,Array.isArray(value)?'['+key+']':key,child,[...pathParts,key],depth+1,state);if(state.truncated)break;}
+    appendResponseTreeChildren(entry,line,label,value,pathParts,depth,state);
   }else{const spacer=document.createElement('span');spacer.className='response-tree-spacer';spacer.setAttribute('aria-hidden','true');line.append(spacer);entry.append(line);}
   const key=document.createElement('span'),valueElement=document.createElement('span');key.className='response-tree-key';key.textContent=String(label);
-  valueElement.className='response-tree-value '+(container?'json-punctuation':typeof value==='string'?'json-string':typeof value==='number'?'json-number':'json-literal');valueElement.textContent=preview.length>120?preview.slice(0,117)+'…':preview;if(preview.length>120)valueElement.title=preview;line.append(key,valueElement);
+  valueElement.className='response-tree-value '+responseTreeValueClass(value,container);valueElement.textContent=preview.length>120?preview.slice(0,117)+'…':preview;if(preview.length>120)valueElement.title=preview;line.append(key,valueElement);
   if(pathParts.length){const path=RunnerLogic.formatJsonPath(pathParts),copy=document.createElement('button');copy.type='button';copy.className='copy-button copy-with-icon response-tree-copy';copy.id='response-path-copy-'+(++responsePathCopyId);copy.innerHTML=COPY_ICON_SVG+'<span class="visually-hidden">Copiar</span>';copy.dataset.copyJsonPath=path;copy.dataset.vortixAction='response.path.copy';copy.title='Copiar caminho JSON';copy.setAttribute('aria-label','Copiar caminho JSON');line.append(copy);}
   parent.append(entry);
 }

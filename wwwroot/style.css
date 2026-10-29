@@ -1182,7 +1182,7 @@ textarea.compact { min-height: 165px; }
 /* Beginner flow: base URL, action area, advanced disclosure and grouped settings. */
 .editor-column > .base-url-label:first-child { margin-top: 0; }
 .request-route-hint { margin: 7px 0 0; }
-.request-action-area { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 6px; margin-top: 16px; padding: 9px 12px; background: var(--panel, var(--surface)); }
+.request-action-area { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; border: 1px solid var(--border); border-radius: 6px; margin: 16px 0 0; padding: 9px 12px; background: var(--panel, var(--surface)); }
 .request-action-area .request-send-status { flex: 1 1 240px; margin: 0; }
 .request-action-area .send-button { margin: 0 0 0 auto; }
 .request-action-area .write-guard { flex: 1 0 100%; margin: 0; }

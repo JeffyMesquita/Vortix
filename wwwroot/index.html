@@ -399,7 +399,8 @@ insomnia.environment.set("token", body.access_token);</code></pre>
           </div>
           </section>
 
-          <div class="request-action-area send-strip" role="group" aria-label="Envio">
+          <fieldset class="request-action-area send-strip">
+            <legend class="visually-hidden">Envio</legend>
             <fieldset class="write-guard" id="write-guard" hidden>
               <legend>Proteção para escrita</legend>
               <p>POST, PUT, PATCH e DELETE podem alterar dados. Use somente ambiente e dados descartáveis de teste.</p>
@@ -413,7 +414,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
             </span>
             <output id="request-send-status" class="hint request-send-status" data-vortix-field="request.send-status" aria-live="polite" aria-atomic="true">Informe uma rota para enviar a requisição.</output>
             <button class="button primary send-button" id="send-request" data-vortix-action="request.send" aria-describedby="request-send-status" type="button"><span aria-hidden="true">▶</span> Enviar</button>
-          </div>
+          </fieldset>
 
           <details id="advanced-tools" class="advanced-tools">
             <summary><span>Ferramentas avançadas</span> <span id="advanced-active-indicator" class="advanced-active-indicator" hidden></span></summary>

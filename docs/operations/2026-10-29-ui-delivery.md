@@ -4,6 +4,8 @@ Publicação em revisão em 29/10/2026: [PR #38](https://github.com/JeffyMesquit
 
 Revisão final independente de Hange, somente leitura do commit inicial: nenhum bloqueador concreto em clipboard, Params, ponte readonly, guards ou seleção dos 21 arquivos. Nenhuma edição ou API real durante a revisão. A atualização posterior da continuidade e deste registro é exclusivamente documental.
 
+O SonarCloud do SHA `c3e8c1f` terminou cancelado com três anotações concretas. Corrigidos o agrupamento de Envio para `fieldset`/`legend` nativos e o `if` do label de cURL com chaves. A função da árvore JSON, já complexa na base, foi dividida entre entrada, filhos e classe visual, preservando limite de 2.000 itens, expansão e IDs opacos de cópia. Novo teste executa a árvore real com DOM mínimo e cobre esses comportamentos. Suíte atual: 421 testes, 420 aprovados, zero falhas e um skip. No Portal QA, geometria da faixa de envio conferida em aproximadamente 606×64px; POST sem confirmação manteve Enviar desabilitado. A captura atual não ficou disponível porque a janela do Portal estava minimizada; as três imagens versionadas continuam sendo evidência anterior à extração. Nenhuma chamada real foi enviada. O CI Windows anterior a esses ajustes passou; conferir novamente os checks do novo SHA antes do merge.
+
 ## Resultado para quem usa
 
 - Endereço em destaque, dados em área aberta e envio compacto; sidebar, resposta e seis abas preservados. Ajuda estática em popovers com Fechar; erros, status e confirmações continuam próximos das ações.
