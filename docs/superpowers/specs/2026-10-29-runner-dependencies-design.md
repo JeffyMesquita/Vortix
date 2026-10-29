@@ -1,6 +1,6 @@
 # Dependências visuais no Runner — primeira fatia
 
-Estado: SDD proposto para revisão, sem implementação. Direção aprovada pelo usuário: explicar dependências na sequência existente e riscos de reexecutar falhas. Este documento fecha o recorte concreto antes do plano de implementação. Base inspecionada: `0816037` (PR #38). A alteração local da logo no README e os sete arquivos untracked anteriores permanecem preservados.
+Estado: SDD aprovado pelo usuário em 29/10/2026; plano e implementação autorizados. Direção aprovada: explicar dependências na sequência existente e riscos de reexecutar falhas. Base inspecionada: `0816037` (PR #38). A alteração local da logo no README e os sete arquivos untracked anteriores permanecem preservados.
 
 ## Objetivo e cenário
 
@@ -75,6 +75,8 @@ Adicionar uma função pura `analyzeRunnerDependencies` em `runner-logic.js`, co
 - `analysisVersion: 1`, `complete: boolean`, `issues: string[]`.
 - `cases[]`: `caseOrdinal`, `stepOrdinal`, `datasetOrdinal`, `issues`, contagens por origem, referências e captura prevista. Não retornar um booleano genérico de executabilidade.
 - Cada referência: nome configurado local, categoria fixa de campo, `initialSource`, `candidatesByTarget`, `conditional` e `shadowed`. `candidatesByTarget` contém no máximo duas entradas, uma por destino `environment`/`vault`, com ordinal do candidato anterior mais recente, quantidade de candidatos daquele destino e `crossDataset`. Ordinais referem-se à lista de casos analisada; não escolher uma origem final entre ramos condicionais.
+- Produtores são indexados por nome e destino; uma captura de outro nome nunca constitui candidata. Alternativas de conjuntos anteriores permanecem sinalizadas mesmo quando o candidato mais recente pertence ao conjunto atual.
+- Referências de reexecução também podem conter `previousCandidatesByTarget`, separado dos candidatos atuais, com `ordinal`, `count`, `previous: true` e `blocked` (`locked`, `unavailable` ou string vazia). A UI identifica a rodada anterior explicitamente; captura em cofre atualmente bloqueado/indisponível não vira produtora atual nem candidata utilizável.
 - Origem inicial: `dataset`, `pre-request`, `vault`, `environment`, `locked`, `unavailable`, `missing`, exatamente as categorias de `templateReferenceSource`. Campo não extraível não inventa uma origem `unknown`: sinalizar `unsupported_reference` e `complete: false`.
 - Captura: nome configurado local, destino `environment` ou `vault`, `conditional: true`; omitir captura inválida como candidata e emitir issue fixa.
 - Issues: `invalid_dataset`, `case_limit`, `reference_limit`, `invalid_capture`, `unsupported_request`, `unsupported_reference`, `producer_omitted`, `cross_dataset`, `multiple_candidates`, `existing_value`, `vault_locked`, `vault_unavailable`.

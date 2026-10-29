@@ -374,6 +374,17 @@ Integrada em `master` pelo PR #34, junto à correção do selo do PR #31 e à at
 - [x] Conferir imagens reais em Dracula/Papel, 1280×900/900×800, com diagnóstico e controles acessíveis pela rolagem. Captura do Portal funcionou ao ativar Tela cheia no Vortix.
 - [ ] Medir descoberta comparável e economia de tokens; não demonstradas pelo benchmark sintético atual.
 
+### 24. Dependências visuais no Runner
+
+**Status: implementada e validada localmente; [evidências e limites](docs/superpowers/validation/2026-10-29-runner-dependencies.md). Sem publicação desta feature.**
+
+- [x] Aprovar [SDD](docs/superpowers/specs/2026-10-29-runner-dependencies-design.md) e autorizar [plano](docs/superpowers/plans/2026-10-29-runner-dependencies.md) em terminais visíveis.
+- [x] Análise pura/efêmera com precedência existente, capturas condicionais, datasets e limites explícitos.
+- [x] Explicação com semântica nativa na sequência atual e revisão do subconjunto antes de reexecutar falhas; foco DOM conferido, teclado nativo via Portal não confirmado.
+- [x] Preservar guards, histórico, CLI, ponte readonly e ausência de valores na projeção.
+- [x] Testes comportamentais, revisão independente, build e smoke isolado com dados fictícios: 447 testes/446 aprovados/zero falhas/um skip; produtor não repetido na reexecução.
+- [x] Documentar resultado e limites em evidência de validação antes da entrega.
+
 ## Regra de sequência
 
 Fechamos cada feature com teste, documentação e revisão. Busca, histórico, comparação, HTTPie, schema GraphQL e fluxo PKCE visual foram validados em ambiente local/mock.

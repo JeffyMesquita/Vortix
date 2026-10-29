@@ -75,7 +75,8 @@ test('response capture writes into the explicit environment rather than the acti
   let stored;
   const context = {
     activeEnvironmentId: 'another', environments: [{ id: 'another', variables: {} }, { id: 'target', variables: {} }],
-    dbWrite: async (store, value) => { stored = value; }, renderEnvironmentSelect() {}
+    dbWrite: async (store, value) => { stored = value; }, renderEnvironmentSelect() {},
+    RunnerLogic: require('./wwwroot/runner-logic.js')
   };
   const handler = vm.runInNewContext(`${save}\nsaveEnvironmentVariable`, context);
   await handler('id', 'fixture', 'target');

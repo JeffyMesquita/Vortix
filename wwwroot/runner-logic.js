@@ -143,6 +143,16 @@
   }
   const reservedNames = new Set(['__proto__', 'prototype', 'constructor']);
   const maxDataSets = 100;
+  const runnerDependencyAnalysisVersion = 1;
+  const runnerDependencyCaseLimit = 500;
+  const runnerDependencyReferenceLimit = 2000;
+  const runnerDependencySources = ['dataset', 'pre-request', 'vault', 'environment', 'locked', 'unavailable', 'missing'];
+  const runnerDependencyTargets = ['environment', 'vault'];
+
+  function isValidCaptureVariableName(value) {
+    const name = String(value ?? '');
+    return /^[A-Za-z0-9_.-]{1,80}$/.test(name) && !reservedNames.has(name);
+  }
 
   function flattenRequests(node, ancestors = [], depth = 0, folderId = '', inheritedAuthScopes = [], folderIds = []) {
     if (depth > 20) throw Error('A coleção ultrapassa 20 níveis de pastas.');
@@ -449,6 +459,27 @@
       }
       return variables;
     });
+  }
+
+  function createRunnerCases(entries, datasets = [{}], maxCases = Infinity) {
+    const sourceEntries = Array.isArray(entries) ? entries : [];
+    const sourceDatasets = Array.isArray(datasets) && datasets.length ? datasets : [{}];
+    const limit = Number.isFinite(Number(maxCases)) ? Math.max(0, Math.floor(Number(maxCases))) : Infinity;
+    const cases = [];
+    for (let datasetIndex = 0; datasetIndex < sourceDatasets.length; datasetIndex++) {
+      for (let stepIndex = 0; stepIndex < sourceEntries.length; stepIndex++) {
+        if (cases.length >= limit) return cases;
+        const entry = sourceEntries[stepIndex] && typeof sourceEntries[stepIndex] === 'object' ? sourceEntries[stepIndex] : {};
+        cases.push({
+          ...entry,
+          dataset: sourceDatasets[datasetIndex],
+          datasetNumber: datasetIndex + 1,
+          datasetOrdinal: datasetIndex + 1,
+          stepOrdinal: stepIndex + 1
+        });
+      }
+    }
+    return cases;
   }
 
   function normalizePreRequestActions(actions) {
@@ -3458,13 +3489,330 @@
     return lines.join('\n');
   }
 
-  function prepareSavedRequest(saved, environment, dataset, allowWrites = false, authScopes = [], vaultSecrets = {}, preRequestOverrides = {}) {
+  function appendRunnerTemplateField(fields, field, value) {
+    if (value == null) return;
+    const text = String(value);
+    if (text) fields[field] = text;
+  }
+
+  function templateFieldsFromSavedRequest(request = {}, authScopes = []) {
+    const fields = {};
+    appendRunnerTemplateField(fields, 'baseUrl', request?.baseUrl);
+    appendRunnerTemplateField(fields, 'route', request?.route);
+    appendRunnerTemplateField(fields, 'headers', request?.headers);
+    const auth = resolveInheritedAuth(request || {}, authScopes);
+    if (auth.authType === 'bearer') appendRunnerTemplateField(fields, 'auth.bearerToken', auth.bearerToken);
+    if (auth.authType === 'basic') {
+      appendRunnerTemplateField(fields, 'auth.basicUsername', auth.basicUsername);
+      appendRunnerTemplateField(fields, 'auth.basicPassword', auth.basicPassword);
+    }
+    if (auth.authType === 'apiKey') {
+      appendRunnerTemplateField(fields, 'auth.apiKeyName', auth.apiKeyName);
+      appendRunnerTemplateField(fields, 'auth.apiKeyValue', auth.apiKeyValue);
+    }
+    const mode = normalizeBodyMode(request?.bodyMode);
+    if (mode === 'graphql') {
+      appendRunnerTemplateField(fields, 'graphql.query', request?.graphqlQuery);
+      appendRunnerTemplateField(fields, 'graphql.variables', request?.graphqlVariables);
+      appendRunnerTemplateField(fields, 'graphql.operationName', request?.graphqlOperationName);
+    } else if (mode === 'multipart') {
+      for (const [index, field] of (request?.multipartFields || []).entries()) {
+        if (field?.type !== 'text') continue;
+        appendRunnerTemplateField(fields, `multipart[${index}].name`, field.name);
+        appendRunnerTemplateField(fields, `multipart[${index}].value`, field.value);
+      }
+    } else appendRunnerTemplateField(fields, 'body', request?.body);
+    return fields;
+  }
+
+  function runnerRequestShape(saved = {}) {
     const method = String(saved?.method || 'GET').toUpperCase();
+    let bodyMode = '', bodyModeError = '', multipartFields = [], multipartError = '';
+    try { bodyMode = normalizeBodyMode(saved?.bodyMode, true); }
+    catch (error) { bodyModeError = error.message || 'Modo de body não suportado.'; }
+    if (!bodyModeError && bodyMode === 'multipart') {
+      try { multipartFields = normalizeMultipartFields(saved?.multipartFields); }
+      catch (error) { multipartError = error.message || 'Campo multipart inválido.'; }
+    }
+    return {
+      method,
+      tokenRequest: saved?.tokenRequest === true,
+      methodSupported: methods.has(method),
+      bodyMode,
+      bodyModeError,
+      multipartFields,
+      multipartError,
+      multipartFile: multipartFields.some(field => field.type === 'file'),
+      graphqlWithoutPost: bodyMode === 'graphql' && method !== 'POST'
+    };
+  }
+
+  function runnerRequestStaticIssue(saved = {}) {
+    const shape = runnerRequestShape(saved);
+    if (shape.tokenRequest) return { code: 'unsupported_request', message: 'Requests de credenciais manuais precisam ser enviadas pelo fluxo de token.' };
+    if (!shape.methodSupported) return { code: 'unsupported_request', message: 'Método não suportado na coleção: ' + shape.method };
+    if (shape.bodyModeError) return { code: 'unsupported_request', message: shape.bodyModeError };
+    if (shape.multipartError) return { code: 'unsupported_request', message: shape.multipartError };
+    if (shape.multipartFile) return { code: 'unsupported_request', message: 'O Runner não carrega arquivos salvos. Abra a request e selecione os arquivos novamente.' };
+    if (shape.graphqlWithoutPost) return { code: 'unsupported_request', message: 'GraphQL usa POST no Vortix.' };
+    return null;
+  }
+
+  function runnerDependencyPlainObject(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function runnerDependencySourceCounts() {
+    const counts = {};
+    for (const source of runnerDependencySources) counts[source] = 0;
+    return counts;
+  }
+
+  function runnerDependencyCaptureShadowed(target, initialSource) {
+    if (target === 'environment') return ['dataset', 'pre-request', 'vault', 'locked', 'unavailable'].includes(initialSource);
+    return ['dataset', 'pre-request'].includes(initialSource);
+  }
+
+  function runnerDependencyProducerCandidates(producers, name, datasetOrdinal, initialSource, vault) {
+    const candidatesByTarget = {};
+    let totalCandidates = 0, crossDataset = false, shadowed = false, effectiveCandidate = false, vaultBlocked = '';
+    for (const target of runnerDependencyTargets) {
+      const producer = producers[target].get(name);
+      if (!producer?.count || !producer.latest) continue;
+      const candidateCrossDataset = producer.latest.datasetOrdinal !== datasetOrdinal;
+      const blocked = target === 'vault' ? vault.unavailable ? 'unavailable' : vault.locked ? 'locked' : '' : '';
+      const candidateShadowed = runnerDependencyCaptureShadowed(target, initialSource) || !!blocked;
+      candidatesByTarget[target] = {
+        ordinal: producer.latest.caseOrdinal,
+        count: producer.count,
+        crossDataset: candidateCrossDataset,
+        shadowed: candidateShadowed
+      };
+      totalCandidates += producer.count;
+      crossDataset = crossDataset || [...producer.datasetOrdinals].some(ordinal => ordinal !== datasetOrdinal);
+      shadowed = shadowed || candidateShadowed;
+      effectiveCandidate = effectiveCandidate || !candidateShadowed;
+      if (blocked) vaultBlocked = blocked;
+    }
+    return { candidatesByTarget, totalCandidates, crossDataset, shadowed, effectiveCandidate, vaultBlocked };
+  }
+
+  function runnerDependencyPreviousCandidates(previousCaptures, includedPreviousOrdinals, name, vault) {
+    const grouped = {};
+    if (!includedPreviousOrdinals) return grouped;
+    for (const capture of previousCaptures) {
+      if (capture.name !== name || includedPreviousOrdinals.has(capture.caseOrdinal)) continue;
+      const current = grouped[capture.target];
+      if (!current) {
+        grouped[capture.target] = {
+          ordinal: capture.caseOrdinal,
+          count: 1,
+          previous: true,
+          ...(capture.target === 'vault' && (vault.unavailable || vault.locked) ? { blocked: vault.unavailable ? 'unavailable' : 'locked' } : {})
+        };
+      } else {
+        current.count += 1;
+        current.ordinal = Math.max(current.ordinal, capture.caseOrdinal);
+      }
+    }
+    return grouped;
+  }
+
+  function addDependencyIssue(issues, issue) {
+    if (!issues.includes(issue)) issues.push(issue);
+  }
+
+  function runnerDependencyBuildReference(name, field, initialSource, candidates, preRequestConditional, previousCandidatesByTarget) {
+    const issues = [], previous = previousCandidatesByTarget || {};
+    if (Object.keys(previous).length) addDependencyIssue(issues, 'producer_omitted');
+    if (candidates.totalCandidates > 1) addDependencyIssue(issues, 'multiple_candidates');
+    if (candidates.crossDataset) addDependencyIssue(issues, 'cross_dataset');
+    if (initialSource === 'locked' || candidates.vaultBlocked === 'locked' || previous.vault?.blocked === 'locked') addDependencyIssue(issues, 'vault_locked');
+    if (initialSource === 'unavailable' || candidates.vaultBlocked === 'unavailable' || previous.vault?.blocked === 'unavailable') addDependencyIssue(issues, 'vault_unavailable');
+    if ((initialSource === 'environment' || initialSource === 'vault') && candidates.effectiveCandidate) addDependencyIssue(issues, 'existing_value');
+    const conditional = candidates.effectiveCandidate || (initialSource === 'pre-request' && preRequestConditional[name] === true);
+    return {
+      issues,
+      reference: {
+        name,
+        field,
+        initialSource,
+        candidatesByTarget: candidates.candidatesByTarget,
+        previousCandidatesByTarget: previous,
+        conditional,
+        shadowed: candidates.shadowed
+      }
+    };
+  }
+
+  function runnerDependencyCaptureState(request, staticIssue, vault) {
+    if (!request.captureResponseVariable || staticIssue) return null;
+    const rawName = String(request.responseVariableName || 'token'), name = rawName.trim();
+    if (!isValidCaptureVariableName(name)) return { issue: 'invalid_capture', capture: null };
+    const target = request.responseCaptureTarget === 'vault' ? 'vault' : 'environment';
+    if (target === 'vault' && (vault.unavailable || vault.locked)) {
+      return { issue: vault.unavailable ? 'vault_unavailable' : 'vault_locked', capture: null };
+    }
+    return { issue: '', capture: { name, target, conditional: true } };
+  }
+
+  function analyzeRunnerDependencies(input = {}) {
+    const casesInput = Array.isArray(input.cases) ? input.cases : [];
+    if (Object.hasOwn(input, 'datasets')) {
+      const datasets = input.datasets;
+      if (!Array.isArray(datasets) || datasets.length < 1 || datasets.length > maxDataSets || datasets.some(item => !runnerDependencyPlainObject(item))) {
+        return { analysisVersion: runnerDependencyAnalysisVersion, complete: false, issues: ['invalid_dataset'], cases: [] };
+      }
+    }
+
+    const environment = runnerDependencyPlainObject(input.environment) ? input.environment : {};
+    const vault = normalizeVaultSecrets(input.vault);
+    const previousCaptures = (Array.isArray(input.previousCaptures) ? input.previousCaptures : [])
+      .filter(item => runnerDependencyPlainObject(item) && typeof item.name === 'string' && runnerDependencyTargets.includes(item.target));
+    const includedPreviousOrdinals = Array.isArray(input.includedPreviousOrdinals)
+      ? new Set(input.includedPreviousOrdinals.map(Number).filter(Number.isFinite))
+      : null;
+    const issues = [];
+    const cases = casesInput.slice(0, runnerDependencyCaseLimit);
+    let complete = true;
+    let referenceLimitHit = false;
+    const seenReferences = new Set();
+    const producers = {
+      environment: new Map(),
+      vault: new Map()
+    };
+
+    if (casesInput.length > runnerDependencyCaseLimit) {
+      complete = false;
+      issues.push('case_limit');
+    }
+
+    const addIssue = (caseResult, issue) => {
+      if (!caseResult.issues.includes(issue)) caseResult.issues.push(issue);
+      if (!issues.includes(issue)) issues.push(issue);
+    };
+
+    for (let index = 0; index < cases.length; index++) {
+      const source = runnerDependencyPlainObject(cases[index]) ? cases[index] : {};
+      const request = source.request;
+      const dataset = runnerDependencyPlainObject(source.dataset) ? source.dataset : {};
+      const caseOrdinal = index + 1;
+      const stepOrdinal = Number.isSafeInteger(Number(source.stepOrdinal)) && Number(source.stepOrdinal) > 0 ? Number(source.stepOrdinal) : caseOrdinal;
+      const datasetOrdinal = Number.isSafeInteger(Number(source.datasetOrdinal ?? source.datasetNumber)) && Number(source.datasetOrdinal ?? source.datasetNumber) > 0 ? Number(source.datasetOrdinal ?? source.datasetNumber) : 1;
+      const caseResult = {
+        caseOrdinal,
+        stepOrdinal,
+        datasetOrdinal,
+        issues: [],
+        sources: runnerDependencySourceCounts(),
+        references: [],
+        capture: null
+      };
+      cases[index] = caseResult;
+
+      if (!runnerDependencyPlainObject(request)) {
+        addIssue(caseResult, 'unsupported_request');
+        addIssue(caseResult, 'unsupported_reference');
+        complete = false;
+        continue;
+      }
+
+      const staticIssue = runnerRequestStaticIssue(request);
+      if (staticIssue) addIssue(caseResult, staticIssue.code);
+
+      let fields = {};
+      try { fields = templateFieldsFromSavedRequest(request, Array.isArray(source.authScopes) ? source.authScopes : []); }
+      catch {
+        addIssue(caseResult, 'unsupported_reference');
+        complete = false;
+      }
+
+      let actions = [];
+      if (request.preRequestActionsEnabled !== false) {
+        try { actions = normalizePreRequestActions(request.preRequestActions); }
+        catch {
+          addIssue(caseResult, 'unsupported_reference');
+          complete = false;
+        }
+      }
+
+      const preRequest = Object.create(null);
+      const preRequestConditional = Object.create(null);
+
+      const recordReference = (rawName, field) => {
+        const name = String(rawName ?? '');
+        const key = JSON.stringify([caseOrdinal, field, name]);
+        if (seenReferences.has(key)) return null;
+        if (seenReferences.size >= runnerDependencyReferenceLimit) {
+          complete = false;
+          if (!referenceLimitHit) {
+            referenceLimitHit = true;
+            addIssue(caseResult, 'reference_limit');
+          }
+          return null;
+        }
+        seenReferences.add(key);
+
+        const initialSource = templateReferenceSource(name, environment, dataset, vault, preRequest);
+        const candidates = runnerDependencyProducerCandidates(producers, name, datasetOrdinal, initialSource, vault);
+        const previousCandidates = runnerDependencyPreviousCandidates(previousCaptures, includedPreviousOrdinals, name, vault);
+        const built = runnerDependencyBuildReference(name, field, initialSource, candidates, preRequestConditional, previousCandidates);
+        for (const issue of built.issues) addIssue(caseResult, issue);
+        caseResult.references.push(built.reference);
+        caseResult.sources[initialSource] = (caseResult.sources[initialSource] || 0) + 1;
+        return built.reference;
+      };
+
+      for (const action of actions) {
+        let conditional = false;
+        if (action.type === 'template') {
+          let actionReferences = [];
+          try { actionReferences = inspectTemplateReferences({ 'pre-request': action.value }, environment, dataset, vault, preRequest); }
+          catch {
+            addIssue(caseResult, 'unsupported_reference');
+            complete = false;
+          }
+          for (const reference of actionReferences) {
+            const source = templateReferenceSource(reference.name, environment, dataset, vault, preRequest);
+            const guaranteed = source === 'dataset' || source === 'environment' || source === 'vault'
+              || (source === 'pre-request' && preRequestConditional[reference.name] !== true);
+            conditional = conditional || !guaranteed;
+            recordReference(reference.name, 'pre-request');
+          }
+        }
+        preRequest[action.name] = true;
+        preRequestConditional[action.name] = conditional;
+      }
+
+      for (const [field, raw] of Object.entries(fields)) {
+        for (const reference of inspectTemplateReferences({ [field]: raw }, environment, dataset, vault, preRequest)) {
+          recordReference(reference.name, field);
+        }
+      }
+
+      const captureState = runnerDependencyCaptureState(request, staticIssue, vault);
+      if (captureState?.issue) addIssue(caseResult, captureState.issue);
+      if (captureState?.capture) {
+        caseResult.capture = captureState.capture;
+        const targetProducers = producers[captureState.capture.target];
+        const producer = targetProducers.get(captureState.capture.name) || { count: 0, latest: null, datasetOrdinals: new Set() };
+        producer.count += 1;
+        producer.latest = { caseOrdinal, datasetOrdinal };
+        producer.datasetOrdinals.add(datasetOrdinal);
+        targetProducers.set(captureState.capture.name, producer);
+      }
+    }
+
+    return { analysisVersion: runnerDependencyAnalysisVersion, complete, issues, cases };
+  }
+
+  function prepareSavedRequest(saved, environment, dataset, allowWrites = false, authScopes = [], vaultSecrets = {}, preRequestOverrides = {}) {
+    const shape = runnerRequestShape(saved), method = shape.method;
     const responseContract = sanitizeOpenApiResponseContract(saved?.responseContract);
-    if (saved?.tokenRequest) {
+    if (shape.tokenRequest) {
       throw Error('Requests de credenciais manuais precisam ser enviadas pelo fluxo de token.');
     }
-    if (!methods.has(method)) throw Error('Método não suportado na coleção: ' + method);
+    if (!shape.methodSupported) throw Error('Método não suportado na coleção: ' + method);
     if (writeMethods.has(method) && !allowWrites) throw Error('Confirme as chamadas de escrita antes de executar.');
     const provenance = {};
     const resolve = value => {
@@ -3472,10 +3820,12 @@
       Object.assign(provenance, result.provenance);
       return result.text;
     };
-    const bodyMode = normalizeBodyMode(saved?.bodyMode,true);
-    const multipartFields = bodyMode === 'multipart' ? normalizeMultipartFields(saved?.multipartFields).map(field => ({ ...field, name: resolve(field.name), value: field.type === 'text' ? resolve(field.value) : '' })) : [];
-    if (multipartFields.some(field => field.type === 'file')) throw Error('O Runner não carrega arquivos salvos. Abra a request e selecione os arquivos novamente.');
-    if (bodyMode === 'graphql' && method !== 'POST') throw Error('GraphQL usa POST no Vortix.');
+    if (shape.bodyModeError) throw Error(shape.bodyModeError);
+    if (shape.multipartError) throw Error(shape.multipartError);
+    const bodyMode = shape.bodyMode;
+    const multipartFields = bodyMode === 'multipart' ? shape.multipartFields.map(field => ({ ...field, name: resolve(field.name), value: field.type === 'text' ? resolve(field.value) : '' })) : [];
+    if (shape.multipartFile) throw Error('O Runner não carrega arquivos salvos. Abra a request e selecione os arquivos novamente.');
+    if (shape.graphqlWithoutPost) throw Error('GraphQL usa POST no Vortix.');
     const graphqlQuery = bodyMode === 'graphql' ? String(saved?.graphqlQuery || '') : '';
     const graphqlVariables = bodyMode === 'graphql' ? String(saved?.graphqlVariables || '') : '';
     const graphqlOperationName = bodyMode === 'graphql' ? String(saved?.graphqlOperationName || '') : '';
@@ -3887,5 +4237,5 @@
     return makeLocalSecretVault({ salt: saltBytes, key, cryptoProvider, secrets, envelope: { ...envelope, names: [...secrets.keys()] } });
   }
 
-  return { buildOpenApi31Export, parseOpenApiSpec, sanitizeOpenApiResponseContract, validateOpenApiResponseContract, validateOpenApiRequestBodyContract, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, buildCurlCommand, buildHttpieCommand, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
+  return { buildOpenApi31Export, parseOpenApiSpec, sanitizeOpenApiResponseContract, validateOpenApiResponseContract, validateOpenApiRequestBodyContract, parseCurlCommand, parseHttpieCommand, flattenRequests, searchRequests, normalizeWorkspaceTabs, normalizeEnvironmentPickerEntries, isSensitiveVariableName, exportEnvironmentVariables, buildPostmanEnvironmentExport, importPostmanEnvironment, normalizeMultipartFields, persistAuthFields, normalizeImportedAuthMode, resolveInheritedAuth, buildGraphqlBody, buildPostmanGraphqlBody, buildInsomniaGraphqlBody, parseGraphqlSchemaResponse, suggestGraphqlFields, normalizeGraphqlImportBody, normalizeTokenRequestConfig, normalizeOAuthClientCredentialsConfig, normalizeOAuthPkceConfig, buildOAuthClientCredentialsRequest, parseOAuthTokenResponse, maxWorkspaceTabs, parseDataSets, createRunnerCases, isValidCaptureVariableName, normalizePreRequestActions, preRequestActionHasLiteralText, persistablePreRequestActions, preRequestActionsAffectBaseUrl, runPreRequestActions, buildPreRequestScript, parsePreRequestScript, resolveTemplate, resolveTemplateWithProvenance, inspectTemplateReferences, redactSecretValues, secretValuesUsedByProvenance, vaultCaptureEnvironmentError, splitRoute, remoteHttpOrigin, remoteHttpOrigins, templateFieldsFromSavedRequest, runnerRequestStaticIssue, analyzeRunnerDependencies, prepareSavedRequest, writeMethods, parseResponseBody, formatJsonPath, findTextMatches, parseJsonPath, jsonPathValue, normalizeHistorySettings, normalizeHistoryResponseHeaders, createResponseHistorySnapshot, retainNewestHistoryEntries, createRunnerHistorySnapshot, retainNewestRunnerHistoryEntries, sanitizeRunnerHistoryValue, runnerHistoryAnnouncement, runnerHistoryCompatibilityWarning, runnerHistoryLimit, runnerHistoryStorageLimitBytes, compareHistoryResponses, normalizeResponseExamples, addResponseExample, appendResponseExampleToRequest, importResponseExamples, buildPostmanResponseExamples, responseExampleToInsomniaResource, responseExampleRequestMatches, buildResponseExampleMock, normalizeResponseTests, responseTestLabel, evaluateResponseTests, buildResponseTestScript, buildCurlCommand, buildHttpieCommand, createWorkspaceBackup, parseWorkspaceBackup, readHostedCookieJars, replaceHostedCookieJars, isEncryptedWorkspaceBackup, createWorkspaceBackupVault, encryptWorkspaceBackup, decryptWorkspaceBackup, createLocalSecretVault, openLocalSecretVault, localSecretVaultFormat, maxWorkspaceBackupBytes, maxEncryptedWorkspaceBackupBytes, workspaceBackupPassphraseMinLength };
 });
