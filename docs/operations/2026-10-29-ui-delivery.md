@@ -1,6 +1,8 @@
 # Preparação de entrega — editor, IA, cópias e temas
 
-Estado em 29/10/2026: implementação concluída localmente; documentação e seleção preparadas para revisão. Sem stage, commit, PR, push, merge ou deploy deste pacote. Base local: `master/c8ace4f23eb2c6d9f6720d11b585939ca4df2de5`. A referência `origin/master` foi conferida localmente, sem fetch; não comprova ausência de alterações posteriores no remoto.
+Publicação em revisão em 29/10/2026: [PR #38](https://github.com/JeffyMesquita/Vortix/pull/38), branch `feat/editor-copy-themes`, commit inicial `1a5d977b261607385276bfe82d74aa674539b77f`. Fetch confirmou base remota `master/c8ace4f23eb2c6d9f6720d11b585939ca4df2de5`. Usuário autorizou seguir com PR e merge; integração condicionada aos checks e ao SHA final. Consulte o PR para estado vivo, merge commit e checks; os registros abaixo distinguem preparação e evidências anteriores.
+
+Revisão final independente de Hange, somente leitura do commit inicial: nenhum bloqueador concreto em clipboard, Params, ponte readonly, guards ou seleção dos 21 arquivos. Nenhuma edição ou API real durante a revisão. A atualização posterior da continuidade e deste registro é exclusivamente documental.
 
 ## Resultado para quem usa
 
@@ -63,4 +65,4 @@ Branch proposta: `feat/editor-copy-themes`. Base: `master`. Consulta de 29/10 n�
 
 Antes de publicar, revisar o diff dos 21 arquivos, links e ausência de dados privados; conferir a base remota e criar a branch sem descartar mudanças locais. Preparar descrição conforme `.github/PULL_REQUEST_TEMPLATE.md`, distinguindo evidência anterior e atual. Não marcar restore, suíte PowerShell ou smoke não executado.
 
-Antes do merge, conferir o SHA final do PR, conflitos, revisão e checks atuais. O workflow CI executa build, dez arquivos de testes JS e cinco integrações PowerShell no Windows. Não dispensar uma falha por existir evidência local anterior; registrar também o resultado dos demais checks que efetivamente aparecerem. Após merge, registrar commit e CI pós-merge na continuidade. Publicação e merge não ocorreram durante esta preparação.
+Antes do merge, conferir o SHA final do PR, conflitos, revisão e checks atuais. O workflow CI executa build, dez arquivos de testes JS e cinco integrações PowerShell no Windows. Não dispensar uma falha por existir evidência local anterior; registrar também o resultado dos demais checks que efetivamente aparecerem. Após merge, registrar commit e CI pós-merge no checkpoint operacional local; o link do PR na continuidade permanece a referência versionada para o resultado vivo.
