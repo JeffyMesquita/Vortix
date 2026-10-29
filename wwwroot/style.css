@@ -879,6 +879,7 @@ textarea.compact { min-height: 165px; }
 .runner-section-heading output, .runner-plan-count { color: var(--muted); font-size: 12px; }
 .runner-plan-list, .runner-results { display: grid; gap: 6px; max-height: 190px; overflow: auto; }
 .runner-dependency-summary { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.runner-dependency-summary:not([hidden]) { display: block; }
 .runner-dependency-summary[data-state="warning"] { color: var(--warning); }
 .runner-dependency-summary[data-state="danger"] { color: var(--danger); }
 .runner-dependency-details { display: grid; gap: 5px; margin-top: 6px; }

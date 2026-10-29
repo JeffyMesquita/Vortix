@@ -1092,21 +1092,74 @@ function runnerDependencyShadowText(target,initialSource){
   if(initialSource==='locked'||initialSource==='unavailable')return'O cofre bloqueado ou indisponível impede usar esta captura.';
   return'Outro escopo tem prioridade sobre esta captura.';
 }
-function runnerDependencyReferenceLines(reference){
-  const lines=[],prefix=`{{${reference.name}}} (${reference.field})`,candidates=Object.entries(reference.candidatesByTarget||{});
-  if(reference.initialSource==='missing'&&!candidates.length)lines.push(`${prefix}: referência sem origem inicial ou captura anterior identificada.`);
-  else if(reference.initialSource==='locked')lines.push(`${prefix}: cofre bloqueado; a resolução falha fechada.`);
-  else if(reference.initialSource==='unavailable')lines.push(`${prefix}: cofre indisponível; a resolução falha fechada.`);
-  else if(reference.initialSource!=='missing')lines.push(`${prefix}: origem inicial ${runnerDependencySourceLabel(reference.initialSource)}.`);
+function runnerDependencyInitialLine(prefix,reference,candidates){
+  if(reference.initialSource==='missing'&&!candidates.length)return `${prefix}: referência sem origem inicial ou captura anterior identificada.`;
+  if(reference.initialSource==='locked')return `${prefix}: cofre bloqueado; a resolução falha fechada.`;
+  if(reference.initialSource==='unavailable')return `${prefix}: cofre indisponível; a resolução falha fechada.`;
+  if(reference.initialSource!=='missing')return `${prefix}: origem inicial ${runnerDependencySourceLabel(reference.initialSource)}.`;
+  return'';
+}
+function runnerDependencyCandidateLines(prefix,reference,candidates){
+  const lines=[];
   for(const[target,candidate]of candidates){
     if(candidate.shadowed)lines.push(`${prefix}: captura no ${runnerDependencyCandidateLabel(target)} existe, mas ${runnerDependencyShadowText(target,reference.initialSource)}`);
     else lines.push(`${prefix}: pode usar captura do caso ${candidate.ordinal}${candidate.crossDataset?' do conjunto anterior':''}; depende do sucesso da captura.`);
     if(candidate.count>1)lines.push(`${prefix}: ${candidate.count} capturas anteriores no ${runnerDependencyCandidateLabel(target)}; a mais recente pode falhar e uma anterior ou o valor inicial pode continuar vigente.`);
   }
   if(candidates.length>1)lines.push(`${prefix}: candidatos separados por destino; o cofre tem prioridade sobre o ambiente.`);
-  for(const[target,candidate]of Object.entries(reference.previousCandidatesByTarget||{}))lines.push(`${prefix}: produtor da rodada anterior fora deste subconjunto no ${runnerDependencyCandidateLabel(target)} (${candidate.count} captura(s)); não será reexecutado e o valor pode ser antigo${candidate.blocked?'; o cofre está bloqueado ou indisponível e a resolução falha fechada':''}.`);
-  if(reference.conditional&&!candidates.length)lines.push(`${prefix}: disponibilidade condicional; a ação ou origem pode não existir.`);
   return lines;
+}
+function runnerDependencyPreviousLines(prefix,previousCandidates){
+  const lines=[];
+  for(const[target,candidate]of Object.entries(previousCandidates||{})){
+    const blocked=candidate.blocked?'; o cofre está bloqueado ou indisponível e a resolução falha fechada':'';
+    lines.push(`${prefix}: produtor da rodada anterior fora deste subconjunto no ${runnerDependencyCandidateLabel(target)} (${candidate.count} captura(s)); não será reexecutado e o valor pode ser antigo${blocked}.`);
+  }
+  return lines;
+}
+function runnerDependencyReferenceLines(reference){
+  const prefix=`{{${reference.name}}} (${reference.field})`,candidates=Object.entries(reference.candidatesByTarget||{});
+  const lines=[runnerDependencyInitialLine(prefix,reference,candidates),...runnerDependencyCandidateLines(prefix,reference,candidates),...runnerDependencyPreviousLines(prefix,reference.previousCandidatesByTarget)];
+  if(reference.conditional&&!candidates.length)lines.push(`${prefix}: disponibilidade condicional; a ação ou origem pode não existir.`);
+  return lines.filter(Boolean);
+}
+function runnerDependencySummaryState(analysis,visible){
+  if(analysis.complete===false)return'warning';
+  return visible.some(item=>item.issues?.length)?'warning':'';
+}
+function runnerDependencySummaryText(analysis,visible,references,captures){
+  const prefix=runnerDependencyStale?'Previsão anterior ao envio. ':'';
+  const base=visible.length?`${visible.length} passo(s) com relações · ${references} referência(s) · ${captures} captura(s) possível(is).`:'Nenhuma relação de captura identificada.';
+  const partial=analysis.complete===false?' Análise parcial; confira os dados antes de executar.':'';
+  return prefix+base+partial;
+}
+function runnerDependencyCaseHeading(item,showDataset){
+  const parts=[`Caso ${item.caseOrdinal}`,`Passo ${item.stepOrdinal}`];
+  if(showDataset)parts.push(`Conjunto ${item.datasetOrdinal}`);
+  parts.push(`${item.references.length} referência(s)`);
+  if(item.capture)parts.push('captura');
+  if(item.issues.length)parts.push('avisos');
+  return parts.join(' · ');
+}
+function runnerDependencyAppendRow(list,text,kind=''){
+  const row=document.createElement('li');
+  if(kind)row.dataset.kind=kind;
+  row.textContent=text;
+  list.append(row);
+}
+function runnerDependencyCaseList(item){
+  const list=document.createElement('ul');
+  if(item.capture)runnerDependencyAppendRow(list,`Captura prevista de {{${item.capture.name}}} para ${runnerDependencyCandidateLabel(item.capture.target)}; depende do sucesso da resposta e da captura.`);
+  for(const reference of item.references)for(const line of runnerDependencyReferenceLines(reference))runnerDependencyAppendRow(list,line);
+  for(const issue of item.issues)runnerDependencyAppendRow(list,runnerDependencyIssueLabel(issue),/unsupported|invalid|vault_/.test(issue)?'danger':'warning');
+  return list;
+}
+function runnerDependencyCaseDetails(item,showDataset){
+  const details=document.createElement('details'),heading=document.createElement('summary'),content=document.createElement('div');
+  details.className='runner-dependency-item';heading.textContent=runnerDependencyCaseHeading(item,showDataset);
+  content.className='runner-dependency-case';content.append(runnerDependencyCaseList(item));
+  details.append(heading,content);
+  return details;
 }
 function renderRunnerDependencies(analysis){
   const summary=byId('runner-dependency-summary'),container=byId('runner-dependency-details');
@@ -1116,24 +1169,12 @@ function renderRunnerDependencies(analysis){
   if((analysis.issues||[]).includes('invalid_dataset')){summary.hidden=false;summary.dataset.state='warning';summary.textContent='Revise os conjuntos de dados';return;}
   const cases=Array.isArray(analysis.cases)?analysis.cases:[],visible=cases.filter(item=>item.references?.length||item.capture||item.issues?.length);
   const references=cases.reduce((total,item)=>total+(item.references?.length||0),0),captures=cases.filter(item=>item.capture).length;
-  const prefix=runnerDependencyStale?'Previsão anterior ao envio. ':'';
-  const base=visible.length?`${visible.length} passo(s) com relações · ${references} referência(s) · ${captures} captura(s) possível(is).`:'Nenhuma relação de captura identificada.';
-  const partial=analysis.complete===false?' Análise parcial; confira os dados antes de executar.':'';
-  summary.hidden=false;summary.dataset.state=analysis.complete===false?'warning':visible.some(item=>item.issues?.length)?'warning':'';
-  summary.textContent=prefix+base+partial;
+  summary.hidden=false;summary.dataset.state=runnerDependencySummaryState(analysis,visible);
+  summary.textContent=runnerDependencySummaryText(analysis,visible,references,captures);
   if(!visible.length)return;
   container.hidden=false;
   const showDataset=cases.some(item=>item.datasetOrdinal>1);
-  for(const item of visible){
-    const details=document.createElement('details');details.className='runner-dependency-item';
-    const heading=document.createElement('summary');
-    heading.textContent=`Caso ${item.caseOrdinal} · Passo ${item.stepOrdinal}${showDataset?` · Conjunto ${item.datasetOrdinal}`:''} · ${item.references.length} referência(s)${item.capture?' · captura':''}${item.issues.length?' · avisos':''}`;
-    const content=document.createElement('div'),list=document.createElement('ul');content.className='runner-dependency-case';
-    if(item.capture){const row=document.createElement('li');row.textContent=`Captura prevista de {{${item.capture.name}}} para ${runnerDependencyCandidateLabel(item.capture.target)}; depende do sucesso da resposta e da captura.`;list.append(row);}
-    for(const reference of item.references)for(const line of runnerDependencyReferenceLines(reference)){const row=document.createElement('li');row.textContent=line;list.append(row);}
-    for(const issue of item.issues){const row=document.createElement('li');row.dataset.kind=/unsupported|invalid|vault_/.test(issue)?'danger':'warning';row.textContent=runnerDependencyIssueLabel(issue);list.append(row);}
-    content.append(list);details.append(heading,content);container.append(details);
-  }
+  for(const item of visible)container.append(runnerDependencyCaseDetails(item,showDataset));
 }
 function analyzeRunnerDependencyCases(cases,options={}){
   const presence=runnerDependencyPresence();
@@ -1434,7 +1475,7 @@ async function startRunnerFromForm(event){
 async function rerunRunnerFailures(){
   if(runnerBusy||runnerHistoryMutating||!runnerFailedCases.length)return;
   const cases=[...runnerFailedCases],writes=runnerWriteCases(cases),previous=runnerDependencyAnalysis;
-  const assertReviewCurrent=()=>{if(runnerDependencyAnalysis!==previous)throw Error('O contexto do Runner mudou. Revise a reexecução novamente.');};
+  const assertReviewCurrent=()=>{if(runnerDependencyAnalysis!==previous)throw new Error('O contexto do Runner mudou. Revise a reexecução novamente.');};
   try{
     const previousCaptures=previous?previous.cases.filter(item=>item.capture).map(item=>({name:item.capture.name,target:item.capture.target,caseOrdinal:item.caseOrdinal,datasetOrdinal:item.datasetOrdinal})):[];
     const includedPreviousOrdinals=previous?previous.cases.filter(item=>cases.some(selected=>selected.stepOrdinal===item.stepOrdinal&&selected.datasetOrdinal===item.datasetOrdinal)).map(item=>item.caseOrdinal):[];
@@ -3160,15 +3201,15 @@ function updateResponseCaptureUi(){
 }
 function validateResponseCaptureForm(){
   if(!byId('capture-response-variable').checked)return;
-  const name=byId('response-variable-name').value.trim();if(!RunnerLogic.isValidCaptureVariableName(name))throw Error('Informe um nome de variável válido (até 80 caracteres).');
-  if(byId('response-value-source').value==='json'){const path=byId('response-json-path').value.trim();if(!path)throw Error('Informe o caminho do campo JSON, por exemplo access_token.');parseJsonPath(path);}
+  const name=byId('response-variable-name').value.trim();if(!RunnerLogic.isValidCaptureVariableName(name))throw new Error('Informe um nome de variável válido (até 80 caracteres).');
+  if(byId('response-value-source').value==='json'){const path=byId('response-json-path').value.trim();if(!path)throw new Error('Informe o caminho do campo JSON, por exemplo access_token.');parseJsonPath(path);}
   if(byId('response-capture-target').value==='vault')assertVaultCaptureAvailable({environmentId:activeEnvironmentId||'default'});
 }
 function showResponseVariableResult(title,kind='success'){const section=byId('response-variable-result');section.hidden=false;section.dataset.kind=kind;byId('response-variable-result-title').textContent=title;}
 async function saveEnvironmentVariable(name,value,environmentId=activeEnvironmentId){
-  if(!RunnerLogic.isValidCaptureVariableName(name))throw Error('Nome da variável inválido.');
-  const serialized=typeof value==='string'?value:JSON.stringify(value);if(serialized===undefined||serialized.length>100000)throw Error('O valor está vazio ou excede 100 KB.');
-  const current=environments.find(environment=>environment.id===environmentId);if(!current)throw Error('Ambiente de captura indisponível.');const updated={...current,variables:{...(current.variables||{})}};Object.defineProperty(updated.variables,name,{value:serialized,writable:true,enumerable:true,configurable:true});
+  if(!RunnerLogic.isValidCaptureVariableName(name))throw new Error('Nome da variável inválido.');
+  const serialized=typeof value==='string'?value:JSON.stringify(value);if(serialized===undefined||serialized.length>100000)throw new Error('O valor está vazio ou excede 100 KB.');
+  const current=environments.find(environment=>environment.id===environmentId);if(!current)throw new Error('Ambiente de captura indisponível.');const updated={...current,variables:{...(current.variables||{})}};Object.defineProperty(updated.variables,name,{value:serialized,writable:true,enumerable:true,configurable:true});
   await dbWrite('environments',updated);environments=environments.map(environment=>environment.id===updated.id?updated:environment);renderEnvironmentSelect();return updated;
 }
 async function captureResponseVariable(request,result,quiet=false){

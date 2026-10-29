@@ -21,6 +21,10 @@ Na integração, Maestro reproduziu e corrigiu mais quatro casos com RED/GREEN:
 
 Hange conferiu esses quatro ajustes somente por leitura de código/testes, sem problema restante. A execução dos testes e smoke abaixo foi feita pelo Maestro. As revisões não são tratadas como execução automatizada ou auditoria completa.
 
+Na publicação, o SonarCloud do SHA `f35d277` terminou cancelado com 24 anotações, incluindo quatro funções acima do orçamento de complexidade. A correção foi delimitada: extração de análise por caso/ações/campos, preparo de body/Auth/captura e montagem de textos/DOM, mantendo ordem de validação, mensagens, Map por nome/destino e invalidação. Também usa `new Error`, Set/has e `<output>` nativo para o resumo, com display em bloco apenas quando visível. Suíte independente permaneceu em 447/446/0/1; no smoke adicional os dois GETs fictícios retornaram200 e o output manteve layout1280 sem overflow.
+
+Recomendações de mover helpers privados para escopo externo não foram aplicadas: eles ficam na factory UMD, instanciada uma vez por carregamento, para preservar o encapsulamento e evitar novos globais no navegador. Nenhuma regra foi desativada ou suprimida. A conferência remota do SHA final permanece no PR, sem apresentar análise cancelada como aprovada.
+
 ## Evidência automatizada atual
 
 - `node --test` dos dez arquivos anteriores do CI mais `RunnerDependencies.test.cjs`: **447 testes, 446 aprovados, zero falhas, um skip**. Skip de symlink por EPERM no Windows. Log local: `artifacts/runner-deps-qa/final-tests.log`.

@@ -147,7 +147,7 @@
   const runnerDependencyCaseLimit = 500;
   const runnerDependencyReferenceLimit = 2000;
   const runnerDependencySources = ['dataset', 'pre-request', 'vault', 'environment', 'locked', 'unavailable', 'missing'];
-  const runnerDependencyTargets = ['environment', 'vault'];
+  const runnerDependencyTargets = new Set(['environment', 'vault']);
 
   function isValidCaptureVariableName(value) {
     const name = String(value ?? '');
@@ -3580,7 +3580,7 @@
       const producer = producers[target].get(name);
       if (!producer?.count || !producer.latest) continue;
       const candidateCrossDataset = producer.latest.datasetOrdinal !== datasetOrdinal;
-      const blocked = target === 'vault' ? vault.unavailable ? 'unavailable' : vault.locked ? 'locked' : '' : '';
+      const blocked = runnerDependencyVaultBlocked(target, vault);
       const candidateShadowed = runnerDependencyCaptureShadowed(target, initialSource) || !!blocked;
       candidatesByTarget[target] = {
         ordinal: producer.latest.caseOrdinal,
@@ -3604,12 +3604,8 @@
       if (capture.name !== name || includedPreviousOrdinals.has(capture.caseOrdinal)) continue;
       const current = grouped[capture.target];
       if (!current) {
-        grouped[capture.target] = {
-          ordinal: capture.caseOrdinal,
-          count: 1,
-          previous: true,
-          ...(capture.target === 'vault' && (vault.unavailable || vault.locked) ? { blocked: vault.unavailable ? 'unavailable' : 'locked' } : {})
-        };
+        const blocked = runnerDependencyVaultBlocked(capture.target, vault);
+        grouped[capture.target] = { ordinal: capture.caseOrdinal, count: 1, previous: true, ...(blocked ? { blocked } : {}) };
       } else {
         current.count += 1;
         current.ordinal = Math.max(current.ordinal, capture.caseOrdinal);
@@ -3656,222 +3652,265 @@
     return { issue: '', capture: { name, target, conditional: true } };
   }
 
-  function analyzeRunnerDependencies(input = {}) {
-    const casesInput = Array.isArray(input.cases) ? input.cases : [];
-    if (Object.hasOwn(input, 'datasets')) {
-      const datasets = input.datasets;
-      if (!Array.isArray(datasets) || datasets.length < 1 || datasets.length > maxDataSets || datasets.some(item => !runnerDependencyPlainObject(item))) {
-        return { analysisVersion: runnerDependencyAnalysisVersion, complete: false, issues: ['invalid_dataset'], cases: [] };
-      }
-    }
-
-    const environment = runnerDependencyPlainObject(input.environment) ? input.environment : {};
-    const vault = normalizeVaultSecrets(input.vault);
-    const previousCaptures = (Array.isArray(input.previousCaptures) ? input.previousCaptures : [])
-      .filter(item => runnerDependencyPlainObject(item) && typeof item.name === 'string' && runnerDependencyTargets.includes(item.target));
-    const includedPreviousOrdinals = Array.isArray(input.includedPreviousOrdinals)
-      ? new Set(input.includedPreviousOrdinals.map(Number).filter(Number.isFinite))
-      : null;
-    const issues = [];
-    const cases = casesInput.slice(0, runnerDependencyCaseLimit);
-    let complete = true;
-    let referenceLimitHit = false;
-    const seenReferences = new Set();
-    const producers = {
-      environment: new Map(),
-      vault: new Map()
-    };
-
-    if (casesInput.length > runnerDependencyCaseLimit) {
-      complete = false;
-      issues.push('case_limit');
-    }
-
-    const addIssue = (caseResult, issue) => {
-      if (!caseResult.issues.includes(issue)) caseResult.issues.push(issue);
-      if (!issues.includes(issue)) issues.push(issue);
-    };
-
-    for (let index = 0; index < cases.length; index++) {
-      const source = runnerDependencyPlainObject(cases[index]) ? cases[index] : {};
-      const request = source.request;
-      const dataset = runnerDependencyPlainObject(source.dataset) ? source.dataset : {};
-      const caseOrdinal = index + 1;
-      const stepOrdinal = Number.isSafeInteger(Number(source.stepOrdinal)) && Number(source.stepOrdinal) > 0 ? Number(source.stepOrdinal) : caseOrdinal;
-      const datasetOrdinal = Number.isSafeInteger(Number(source.datasetOrdinal ?? source.datasetNumber)) && Number(source.datasetOrdinal ?? source.datasetNumber) > 0 ? Number(source.datasetOrdinal ?? source.datasetNumber) : 1;
-      const caseResult = {
-        caseOrdinal,
-        stepOrdinal,
-        datasetOrdinal,
-        issues: [],
-        sources: runnerDependencySourceCounts(),
-        references: [],
-        capture: null
-      };
-      cases[index] = caseResult;
-
-      if (!runnerDependencyPlainObject(request)) {
-        addIssue(caseResult, 'unsupported_request');
-        addIssue(caseResult, 'unsupported_reference');
-        complete = false;
-        continue;
-      }
-
-      const staticIssue = runnerRequestStaticIssue(request);
-      if (staticIssue) addIssue(caseResult, staticIssue.code);
-
-      let fields = {};
-      try { fields = templateFieldsFromSavedRequest(request, Array.isArray(source.authScopes) ? source.authScopes : []); }
-      catch {
-        addIssue(caseResult, 'unsupported_reference');
-        complete = false;
-      }
-
-      let actions = [];
-      if (request.preRequestActionsEnabled !== false) {
-        try { actions = normalizePreRequestActions(request.preRequestActions); }
-        catch {
-          addIssue(caseResult, 'unsupported_reference');
-          complete = false;
-        }
-      }
-
-      const preRequest = Object.create(null);
-      const preRequestConditional = Object.create(null);
-
-      const recordReference = (rawName, field) => {
-        const name = String(rawName ?? '');
-        const key = JSON.stringify([caseOrdinal, field, name]);
-        if (seenReferences.has(key)) return null;
-        if (seenReferences.size >= runnerDependencyReferenceLimit) {
-          complete = false;
-          if (!referenceLimitHit) {
-            referenceLimitHit = true;
-            addIssue(caseResult, 'reference_limit');
-          }
-          return null;
-        }
-        seenReferences.add(key);
-
-        const initialSource = templateReferenceSource(name, environment, dataset, vault, preRequest);
-        const candidates = runnerDependencyProducerCandidates(producers, name, datasetOrdinal, initialSource, vault);
-        const previousCandidates = runnerDependencyPreviousCandidates(previousCaptures, includedPreviousOrdinals, name, vault);
-        const built = runnerDependencyBuildReference(name, field, initialSource, candidates, preRequestConditional, previousCandidates);
-        for (const issue of built.issues) addIssue(caseResult, issue);
-        caseResult.references.push(built.reference);
-        caseResult.sources[initialSource] = (caseResult.sources[initialSource] || 0) + 1;
-        return built.reference;
-      };
-
-      for (const action of actions) {
-        let conditional = false;
-        if (action.type === 'template') {
-          let actionReferences = [];
-          try { actionReferences = inspectTemplateReferences({ 'pre-request': action.value }, environment, dataset, vault, preRequest); }
-          catch {
-            addIssue(caseResult, 'unsupported_reference');
-            complete = false;
-          }
-          for (const reference of actionReferences) {
-            const source = templateReferenceSource(reference.name, environment, dataset, vault, preRequest);
-            const guaranteed = source === 'dataset' || source === 'environment' || source === 'vault'
-              || (source === 'pre-request' && preRequestConditional[reference.name] !== true);
-            conditional = conditional || !guaranteed;
-            recordReference(reference.name, 'pre-request');
-          }
-        }
-        preRequest[action.name] = true;
-        preRequestConditional[action.name] = conditional;
-      }
-
-      for (const [field, raw] of Object.entries(fields)) {
-        for (const reference of inspectTemplateReferences({ [field]: raw }, environment, dataset, vault, preRequest)) {
-          recordReference(reference.name, field);
-        }
-      }
-
-      const captureState = runnerDependencyCaptureState(request, staticIssue, vault);
-      if (captureState?.issue) addIssue(caseResult, captureState.issue);
-      if (captureState?.capture) {
-        caseResult.capture = captureState.capture;
-        const targetProducers = producers[captureState.capture.target];
-        const producer = targetProducers.get(captureState.capture.name) || { count: 0, latest: null, datasetOrdinals: new Set() };
-        producer.count += 1;
-        producer.latest = { caseOrdinal, datasetOrdinal };
-        producer.datasetOrdinals.add(datasetOrdinal);
-        targetProducers.set(captureState.capture.name, producer);
-      }
-    }
-
-    return { analysisVersion: runnerDependencyAnalysisVersion, complete, issues, cases };
+  function runnerDependencyDatasetsValid(input) {
+    if (!Object.hasOwn(input, 'datasets')) return true;
+    const datasets = input.datasets;
+    return Array.isArray(datasets) && datasets.length >= 1 && datasets.length <= maxDataSets && datasets.every(runnerDependencyPlainObject);
   }
 
-  function prepareSavedRequest(saved, environment, dataset, allowWrites = false, authScopes = [], vaultSecrets = {}, preRequestOverrides = {}) {
-    const shape = runnerRequestShape(saved), method = shape.method;
-    const responseContract = sanitizeOpenApiResponseContract(saved?.responseContract);
-    if (shape.tokenRequest) {
-      throw Error('Requests de credenciais manuais precisam ser enviadas pelo fluxo de token.');
-    }
-    if (!shape.methodSupported) throw Error('Método não suportado na coleção: ' + method);
-    if (writeMethods.has(method) && !allowWrites) throw Error('Confirme as chamadas de escrita antes de executar.');
-    const provenance = {};
-    const resolve = value => {
-      const result = resolveTemplateWithProvenance(value, environment, dataset, vaultSecrets, preRequestOverrides);
-      Object.assign(provenance, result.provenance);
-      return result.text;
+  function runnerDependencyOrdinal(value, fallback) {
+    const number = Number(value);
+    return Number.isSafeInteger(number) && number > 0 ? number : fallback;
+  }
+
+  function runnerDependencyVaultBlocked(target, vault) {
+    if (target !== 'vault') return '';
+    if (vault.unavailable) return 'unavailable';
+    return vault.locked ? 'locked' : '';
+  }
+
+  function runnerDependencyAnalysisState(input) {
+    const casesInput = Array.isArray(input.cases) ? input.cases : [];
+    const state = {
+      environment: runnerDependencyPlainObject(input.environment) ? input.environment : {},
+      vault: normalizeVaultSecrets(input.vault),
+      previousCaptures: (Array.isArray(input.previousCaptures) ? input.previousCaptures : [])
+        .filter(item => runnerDependencyPlainObject(item) && typeof item.name === 'string' && runnerDependencyTargets.has(item.target)),
+      includedPreviousOrdinals: Array.isArray(input.includedPreviousOrdinals)
+        ? new Set(input.includedPreviousOrdinals.map(Number).filter(Number.isFinite))
+        : null,
+      issues: [],
+      cases: casesInput.slice(0, runnerDependencyCaseLimit),
+      complete: casesInput.length <= runnerDependencyCaseLimit,
+      referenceLimitHit: false,
+      seenReferences: new Set(),
+      producers: { environment: new Map(), vault: new Map() }
     };
-    if (shape.bodyModeError) throw Error(shape.bodyModeError);
-    if (shape.multipartError) throw Error(shape.multipartError);
+    if (!state.complete) state.issues.push('case_limit');
+    return state;
+  }
+
+  function runnerDependencyCaseMetadata(source, index) {
+    const safe = runnerDependencyPlainObject(source) ? source : {};
+    const caseOrdinal = index + 1;
+    return {
+      source: safe,
+      request: safe.request,
+      dataset: runnerDependencyPlainObject(safe.dataset) ? safe.dataset : {},
+      caseOrdinal,
+      stepOrdinal: runnerDependencyOrdinal(safe.stepOrdinal, caseOrdinal),
+      datasetOrdinal: runnerDependencyOrdinal(safe.datasetOrdinal ?? safe.datasetNumber, 1)
+    };
+  }
+
+  function runnerDependencyCaseResult(meta) {
+    return {
+      caseOrdinal: meta.caseOrdinal,
+      stepOrdinal: meta.stepOrdinal,
+      datasetOrdinal: meta.datasetOrdinal,
+      issues: [],
+      sources: runnerDependencySourceCounts(),
+      references: [],
+      capture: null
+    };
+  }
+
+  function runnerDependencyMarkIncomplete(caseResult, state, issue) {
+    addDependencyIssue(caseResult.issues, issue);
+    state.complete = false;
+  }
+
+  function runnerDependencyExtractCaseFields(request, authScopes, state, caseResult) {
+    let fields = {}, actions = [];
+    try { fields = templateFieldsFromSavedRequest(request, Array.isArray(authScopes) ? authScopes : []); }
+    catch { runnerDependencyMarkIncomplete(caseResult, state, 'unsupported_reference'); }
+    if (request.preRequestActionsEnabled !== false) {
+      try { actions = normalizePreRequestActions(request.preRequestActions); }
+      catch { runnerDependencyMarkIncomplete(caseResult, state, 'unsupported_reference'); }
+    }
+    return { fields, actions };
+  }
+
+  function runnerDependencyRecordReference(state, meta, field, rawName, preRequest, preRequestConditional, caseResult) {
+    const name = String(rawName ?? ''), key = JSON.stringify([meta.caseOrdinal, field, name]);
+    if (state.seenReferences.has(key)) return null;
+    if (state.seenReferences.size >= runnerDependencyReferenceLimit) {
+      state.complete = false;
+      if (!state.referenceLimitHit) {
+        state.referenceLimitHit = true;
+        addDependencyIssue(caseResult.issues, 'reference_limit');
+      }
+      return null;
+    }
+    state.seenReferences.add(key);
+    const initialSource = templateReferenceSource(name, state.environment, meta.dataset, state.vault, preRequest);
+    const candidates = runnerDependencyProducerCandidates(state.producers, name, meta.datasetOrdinal, initialSource, state.vault);
+    const previousCandidates = runnerDependencyPreviousCandidates(state.previousCaptures, state.includedPreviousOrdinals, name, state.vault);
+    const built = runnerDependencyBuildReference(name, field, initialSource, candidates, preRequestConditional, previousCandidates);
+    for (const issue of built.issues) addDependencyIssue(caseResult.issues, issue);
+    caseResult.references.push(built.reference);
+    caseResult.sources[initialSource] = (caseResult.sources[initialSource] || 0) + 1;
+    return built.reference;
+  }
+
+  function runnerDependencyAnalyzeActions(actions, state, meta, preRequest, preRequestConditional, caseResult, recordReference) {
+    for (const action of actions) {
+      let conditional = false;
+      if (action.type === 'template') {
+        let actionReferences = [];
+        try { actionReferences = inspectTemplateReferences({ 'pre-request': action.value }, state.environment, meta.dataset, state.vault, preRequest); }
+        catch { runnerDependencyMarkIncomplete(caseResult, state, 'unsupported_reference'); }
+        for (const reference of actionReferences) {
+          const source = templateReferenceSource(reference.name, state.environment, meta.dataset, state.vault, preRequest);
+          const guaranteed = source === 'dataset' || source === 'environment' || source === 'vault'
+            || (source === 'pre-request' && preRequestConditional[reference.name] !== true);
+          conditional = conditional || !guaranteed;
+          recordReference(reference.name, 'pre-request');
+        }
+      }
+      preRequest[action.name] = true;
+      preRequestConditional[action.name] = conditional;
+    }
+  }
+
+  function runnerDependencyAnalyzeFields(fields, state, meta, preRequest, caseResult, recordReference) {
+    for (const [field, raw] of Object.entries(fields)) {
+      for (const reference of inspectTemplateReferences({ [field]: raw }, state.environment, meta.dataset, state.vault, preRequest)) {
+        recordReference(reference.name, field);
+      }
+    }
+  }
+
+  function runnerDependencyApplyCapture(request, staticIssue, state, meta, caseResult) {
+    const captureState = runnerDependencyCaptureState(request, staticIssue, state.vault);
+    if (captureState?.issue) addDependencyIssue(caseResult.issues, captureState.issue);
+    if (!captureState?.capture) return;
+    caseResult.capture = captureState.capture;
+    const targetProducers = state.producers[captureState.capture.target];
+    const producer = targetProducers.get(captureState.capture.name) || { count: 0, latest: null, datasetOrdinals: new Set() };
+    producer.count += 1;
+    producer.latest = { caseOrdinal: meta.caseOrdinal, datasetOrdinal: meta.datasetOrdinal };
+    producer.datasetOrdinals.add(meta.datasetOrdinal);
+    targetProducers.set(captureState.capture.name, producer);
+  }
+
+  function runnerDependencyAnalyzeCase(state, source, index) {
+    const meta = runnerDependencyCaseMetadata(source, index);
+    const caseResult = runnerDependencyCaseResult(meta);
+    if (!runnerDependencyPlainObject(meta.request)) {
+      addDependencyIssue(caseResult.issues, 'unsupported_request');
+      addDependencyIssue(caseResult.issues, 'unsupported_reference');
+      state.complete = false;
+      return caseResult;
+    }
+    const staticIssue = runnerRequestStaticIssue(meta.request);
+    if (staticIssue) addDependencyIssue(caseResult.issues, staticIssue.code);
+    const { fields, actions } = runnerDependencyExtractCaseFields(meta.request, meta.source.authScopes, state, caseResult);
+    const preRequest = Object.create(null), preRequestConditional = Object.create(null);
+    const recordReference = (rawName, field) => runnerDependencyRecordReference(state, meta, field, rawName, preRequest, preRequestConditional, caseResult);
+    runnerDependencyAnalyzeActions(actions, state, meta, preRequest, preRequestConditional, caseResult, recordReference);
+    runnerDependencyAnalyzeFields(fields, state, meta, preRequest, caseResult, recordReference);
+    runnerDependencyApplyCapture(meta.request, staticIssue, state, meta, caseResult);
+    return caseResult;
+  }
+
+  function analyzeRunnerDependencies(input = {}) {
+    if (!runnerDependencyDatasetsValid(input)) return { analysisVersion: runnerDependencyAnalysisVersion, complete: false, issues: ['invalid_dataset'], cases: [] };
+    const state = runnerDependencyAnalysisState(input);
+    for (let index = 0; index < state.cases.length; index++) {
+      const caseResult = runnerDependencyAnalyzeCase(state, state.cases[index], index);
+      state.cases[index] = caseResult;
+      for (const issue of caseResult.issues) addDependencyIssue(state.issues, issue);
+    }
+    return { analysisVersion: runnerDependencyAnalysisVersion, complete: state.complete, issues: state.issues, cases: state.cases };
+  }
+
+  function prepareRunnerMultipartFields(fields, resolve) {
+    return fields.map(field => {
+      const name = resolve(field.name);
+      const value = field.type === 'text' ? resolve(field.value) : '';
+      return { ...field, name, value };
+    });
+  }
+
+  function prepareRunnerBody(saved, shape, resolve) {
+    if (shape.bodyModeError) throw new Error(shape.bodyModeError);
+    if (shape.multipartError) throw new Error(shape.multipartError);
     const bodyMode = shape.bodyMode;
-    const multipartFields = bodyMode === 'multipart' ? shape.multipartFields.map(field => ({ ...field, name: resolve(field.name), value: field.type === 'text' ? resolve(field.value) : '' })) : [];
-    if (shape.multipartFile) throw Error('O Runner não carrega arquivos salvos. Abra a request e selecione os arquivos novamente.');
-    if (shape.graphqlWithoutPost) throw Error('GraphQL usa POST no Vortix.');
+    const multipartFields = bodyMode === 'multipart' ? prepareRunnerMultipartFields(shape.multipartFields, resolve) : [];
+    if (shape.multipartFile) throw new Error('O Runner não carrega arquivos salvos. Abra a request e selecione os arquivos novamente.');
+    if (shape.graphqlWithoutPost) throw new Error('GraphQL usa POST no Vortix.');
     const graphqlQuery = bodyMode === 'graphql' ? String(saved?.graphqlQuery || '') : '';
     const graphqlVariables = bodyMode === 'graphql' ? String(saved?.graphqlVariables || '') : '';
     const graphqlOperationName = bodyMode === 'graphql' ? String(saved?.graphqlOperationName || '') : '';
     const body = bodyMode === 'graphql' ? buildGraphqlBody(graphqlQuery, graphqlVariables, graphqlOperationName, resolve) : resolve(saved?.body || '');
+    return { bodyMode, multipartFields, graphqlQuery, graphqlVariables, graphqlOperationName, body };
+  }
+
+  function prepareRunnerAuth(saved, authScopes, resolve) {
     const effectiveAuth = resolveInheritedAuth(saved, authScopes), authType = effectiveAuth.authType;
     const basicUsername = authType === 'basic' ? resolve(effectiveAuth.basicUsername || '') : '';
     const basicPassword = authType === 'basic' ? resolve(effectiveAuth.basicPassword || '') : '';
     const apiKeyName = authType === 'apiKey' ? resolve(effectiveAuth.apiKeyName || '') : '';
     const apiKeyLocation = authType === 'apiKey' ? effectiveAuth.apiKeyLocation : 'header';
     const apiKeyValue = authType === 'apiKey' ? resolve(effectiveAuth.apiKeyValue || '') : '';
-    if (authType === 'basic' && (!basicUsername || !basicPassword)) throw Error('Basic Auth requer usuario e senha.');
-    if (authType === 'apiKey' && (!apiKeyName || !apiKeyValue)) throw Error('API Key requer nome e valor.');
-
-
+    if (authType === 'basic' && (!basicUsername || !basicPassword)) throw new Error('Basic Auth requer usuario e senha.');
+    if (authType === 'apiKey' && (!apiKeyName || !apiKeyValue)) throw new Error('API Key requer nome e valor.');
     return {
-      baseUrl: resolve(saved?.baseUrl || ''),
-      route: resolve(saved?.route || ''),
-      method,
-      bodyMode,
-      multipartFields,
-      graphqlQuery,
-      graphqlVariables,
-      graphqlOperationName,
       authMode: effectiveAuth.authMode,
       authSource: effectiveAuth.authSource,
       authType,
-      bearerToken: authType === 'bearer' ? resolve(effectiveAuth.bearerToken || '') : '',
+      bearerTokenSource: effectiveAuth.bearerToken || '',
       basicUsername,
       basicPassword,
       apiKeyName,
       apiKeyLocation,
-      apiKeyValue,
+      apiKeyValue
+    };
+  }
+
+  function prepareRunnerCaptureFields(saved) {
+    return {
+      captureResponseVariable: !!saved?.captureResponseVariable,
+      responseVariableName: String(saved?.responseVariableName || 'token'),
+      responseValueSource: saved?.responseValueSource === 'text' ? 'text' : 'json',
+      responseJsonPath: String(saved?.responseJsonPath || 'access_token'),
+      responseSuccessOnly: saved?.responseSuccessOnly !== false,
+      responseCaptureTarget: saved?.responseCaptureTarget === 'vault' ? 'vault' : 'environment'
+    };
+  }
+
+  function prepareSavedRequest(saved, environment, dataset, allowWrites = false, authScopes = [], vaultSecrets = {}, preRequestOverrides = {}) {
+    const shape = runnerRequestShape(saved), method = shape.method;
+    const responseContract = sanitizeOpenApiResponseContract(saved?.responseContract);
+    if (shape.tokenRequest) throw new Error('Requests de credenciais manuais precisam ser enviadas pelo fluxo de token.');
+    if (!shape.methodSupported) throw new Error('Método não suportado na coleção: ' + method);
+    if (writeMethods.has(method) && !allowWrites) throw new Error('Confirme as chamadas de escrita antes de executar.');
+    const provenance = {};
+    const resolve = value => {
+      const result = resolveTemplateWithProvenance(value, environment, dataset, vaultSecrets, preRequestOverrides);
+      Object.assign(provenance, result.provenance);
+      return result.text;
+    };
+    const bodyFields = prepareRunnerBody(saved, shape, resolve);
+    const { bearerTokenSource, ...authFields } = prepareRunnerAuth(saved, authScopes, resolve);
+    const baseUrl = resolve(saved?.baseUrl || ''), route = resolve(saved?.route || '');
+    const bearerToken = authFields.authType === 'bearer' ? resolve(bearerTokenSource) : '';
+    return {
+      baseUrl,
+      route,
+      method,
+      ...bodyFields,
+      ...authFields,
+      bearerToken,
       headers: resolve(saved?.headers || ''),
-      body,
       allowInsecureHttp: saved?.allowInsecureHttp === true,
       confirmTestData: writeMethods.has(method) && allowWrites,
       testDataPhrase: writeMethods.has(method) && allowWrites ? 'TESTE' : '',
       confirmTokenRequest: false,
       tokenClientId: '',
       tokenClientSecret: '',
-      captureResponseVariable: !!saved?.captureResponseVariable,
-      responseVariableName: String(saved?.responseVariableName || 'token'),
-      responseValueSource: saved?.responseValueSource === 'text' ? 'text' : 'json',
-      responseJsonPath: String(saved?.responseJsonPath || 'access_token'),
-      responseSuccessOnly: saved?.responseSuccessOnly !== false,
-      responseCaptureTarget: saved?.responseCaptureTarget === 'vault' ? 'vault' : 'environment',
+      ...prepareRunnerCaptureFields(saved),
       responseTests: normalizeResponseTests(saved?.responseTests),
       ...(responseContract ? { responseContract } : {}),
       resolutionProvenance: provenance,
