@@ -2273,7 +2273,7 @@ function appendResponseTreeEntry(parent,label,value,pathParts,depth,state){
     appendResponseTreeChildren(entry,line,label,value,pathParts,depth,state);
   }else{const spacer=document.createElement('span');spacer.className='response-tree-spacer';spacer.setAttribute('aria-hidden','true');line.append(spacer);entry.append(line);}
   const key=document.createElement('span'),valueElement=document.createElement('span');key.className='response-tree-key';key.textContent=String(label);
-  valueElement.className='response-tree-value '+responseTreeValueClass(value,container);valueElement.textContent=preview.length>120?preview.slice(0,117)+'…':preview;if(preview.length>120)valueElement.title=preview;line.append(key,valueElement);
+  valueElement.className='response-tree-value '+responseTreeValueClass(value,container);valueElement.textContent=preview.length>120?preview.slice(0,117)+'…':preview;if(preview.length>120){valueElement.title=preview;}line.append(key,valueElement);
   if(pathParts.length){const path=RunnerLogic.formatJsonPath(pathParts),copy=document.createElement('button');copy.type='button';copy.className='copy-button copy-with-icon response-tree-copy';copy.id='response-path-copy-'+(++responsePathCopyId);copy.innerHTML=COPY_ICON_SVG+'<span class="visually-hidden">Copiar</span>';copy.dataset.copyJsonPath=path;copy.dataset.vortixAction='response.path.copy';copy.title='Copiar caminho JSON';copy.setAttribute('aria-label','Copiar caminho JSON');line.append(copy);}
   parent.append(entry);
 }
