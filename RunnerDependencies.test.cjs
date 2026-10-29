@@ -9,6 +9,25 @@ const runnerLogicPath = path.join(root, 'wwwroot', 'runner-logic.js');
 const appPath = path.join(root, 'wwwroot', 'app.js');
 const htmlPath = path.join(root, 'wwwroot', 'index.html');
 
+test('submit de dataset inválido atualiza a prévia mesmo cancelando o debounce', async () => {
+  const app = fs.readFileSync(appPath, 'utf8');
+  const start = app.indexOf('async function startRunnerFromForm(');
+  const end = app.indexOf('\nasync function rerunRunnerFailures(', start);
+  let refreshed = false, error = '';
+  const context = {
+    runnerBusy: false, runnerHistoryMutating: false,
+    clearRunnerError() {}, cancelRunnerDependencyPreviewTimer() {},
+    byId: () => ({ value: '[' }),
+    RunnerLogic: { parseDataSets: () => { throw new Error('dataset inválido'); } },
+    refreshRunnerDependencyPreview: () => { refreshed = true; },
+    showRunnerError: message => { error = message; }
+  };
+  const submit = vm.runInNewContext(`${app.slice(start, end)}; startRunnerFromForm`, context);
+  await submit({ preventDefault() {} });
+  assert.equal(refreshed, true);
+  assert.equal(error, 'dataset inválido');
+});
+
 test('captura de outro nome nunca vira dependência da referência', () => {
   const { analyzeRunnerDependencies } = runnerLogic();
   const result = analyzeRunnerDependencies({ cases: [
@@ -43,6 +62,8 @@ test('reexecução invalida revisão quando o contexto muda durante a confirmaç
     runnerBusy: false, runnerHistoryMutating: false,
     runnerFailedCases: [{ stepOrdinal: 2, datasetOrdinal: 1 }],
     runnerDependencyAnalysis: { cases: [] },
+    runnerExecutionDependencySnapshot: null,
+    cancelRunnerDependencyPreviewTimer() {},
     runnerWriteCases: () => [],
     analyzeRunnerDependencyCases: () => ({ cases: [], complete: true }),
     confirmRunnerDependencyReview: async () => {
@@ -558,4 +579,199 @@ test('renderização mínima mantém resumo genérico, detalhes locais e estado 
   assert.equal(text.includes('VALOR_CANARY'), false);
   api.renderRunnerDependencies({ analysisVersion: 1, complete: false, issues: ['invalid_dataset'], cases: [] });
   assert.equal(summary.textContent, 'Revise os conjuntos de dados');
+});
+
+test('snapshot de execução guarda apenas metadados mínimos e não muta a análise', () => {
+  const app = fs.readFileSync(appPath, 'utf8');
+  const start = app.indexOf('function createRunnerDependencyExecutionSnapshot(');
+  const end = app.indexOf('\nfunction refreshRunnerDependencyPreview(', start);
+  assert.ok(start >= 0 && end > start, 'snapshot helper should exist');
+  const api = vm.runInNewContext(`${app.slice(start, end)}; ({ createRunnerDependencyExecutionSnapshot })`, {});
+  const analysis = {
+    analysisVersion: 1, complete: true, issues: [], cases: [
+      { caseOrdinal: 1, stepOrdinal: 1, datasetOrdinal: 1, capture: { name: 'token', target: 'environment' }, references: [{ name: 'TOKEN_SENTINEL', initialSource: 'missing' }], issues: ['SENTINEL_ISSUE'] },
+      { caseOrdinal: 2, stepOrdinal: 2, datasetOrdinal: 1, capture: null, references: [], issues: [] }
+    ]
+  };
+  const snapshot = api.createRunnerDependencyExecutionSnapshot(analysis);
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot)), {
+    analysisVersion: 1,
+    cases: [
+      { caseOrdinal: 1, stepOrdinal: 1, datasetOrdinal: 1, capture: { name: 'token', target: 'environment' } },
+      { caseOrdinal: 2, stepOrdinal: 2, datasetOrdinal: 1, capture: null }
+    ]
+  });
+  assert.equal(Object.isFrozen(snapshot), true);
+  assert.equal(Object.isFrozen(snapshot.cases), true);
+  assert.equal(JSON.stringify(snapshot).includes('TOKEN_SENTINEL'), false);
+});
+
+test('reexecução usa snapshot original quando a prévia é substituída por lock/dataset', async () => {
+  const app = fs.readFileSync(appPath, 'utf8');
+  const start = app.indexOf('async function rerunRunnerFailures(');
+  const end = app.indexOf('\nfunction activeWorkspaceTab(', start);
+  const snapshot = {
+    analysisVersion: 1,
+    cases: [
+      { caseOrdinal: 1, stepOrdinal: 1, datasetOrdinal: 1, capture: { name: 'token', target: 'environment' } },
+      { caseOrdinal: 2, stepOrdinal: 2, datasetOrdinal: 1, capture: null }
+    ]
+  };
+  const calls = [];
+  const context = {
+    runnerBusy: false, runnerHistoryMutating: false,
+    runnerFailedCases: [{ stepOrdinal: 2, datasetOrdinal: 1 }],
+    runnerDependencyAnalysis: { cases: [], complete: true },
+    runnerExecutionDependencySnapshot: snapshot,
+    cancelRunnerDependencyPreviewTimer() {},
+    runnerWriteCases: () => [],
+    analyzeRunnerDependencyCases: (cases, options) => { calls.push({ cases, options }); return { cases: [{ issues: ['producer_omitted'] }], complete: true }; },
+    confirmRunnerDependencyReview: async () => true,
+    confirmRunnerWrites: async () => true,
+    confirmRunnerRemoteHttp: async () => true,
+    runRunnerCases: async () => {},
+    renderRunnerDependencies() {},
+    byId: () => ({ value: '0', checked: true }),
+    showRunnerError() {}
+  };
+  const rerun = vm.runInNewContext(`${app.slice(start, end)}; rerunRunnerFailures`, context);
+  await rerun();
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].options.previousCaptures.map(item => ({ ...item })), [{ name: 'token', target: 'environment', caseOrdinal: 1, datasetOrdinal: 1 }]);
+  assert.deepEqual(calls[0].options.includedPreviousOrdinals, [2]);
+});
+
+test('dois reruns consecutivos preservam ordem e produtor do snapshot original', async () => {
+  const app = fs.readFileSync(appPath, 'utf8');
+  const start = app.indexOf('async function rerunRunnerFailures(');
+  const end = app.indexOf('\nfunction activeWorkspaceTab(', start);
+  const snapshot = {
+    analysisVersion: 1,
+    cases: [
+      { caseOrdinal: 1, stepOrdinal: 1, datasetOrdinal: 1, capture: { name: 'token', target: 'environment' } },
+      { caseOrdinal: 2, stepOrdinal: 2, datasetOrdinal: 1, capture: null }
+    ]
+  };
+  const calls = [];
+  const context = {
+    runnerBusy: false, runnerHistoryMutating: false,
+    runnerFailedCases: [{ stepOrdinal: 2, datasetOrdinal: 1 }],
+    runnerDependencyAnalysis: { cases: [], complete: true },
+    runnerExecutionDependencySnapshot: snapshot,
+    cancelRunnerDependencyPreviewTimer() {},
+    runnerWriteCases: () => [],
+    analyzeRunnerDependencyCases: (cases, options) => { calls.push(options); return { cases: [], complete: true }; },
+    confirmRunnerDependencyReview: async () => true,
+    confirmRunnerWrites: async () => true,
+    confirmRunnerRemoteHttp: async () => true,
+    runRunnerCases: async () => {},
+    renderRunnerDependencies() {},
+    byId: () => ({ value: '0', checked: true }),
+    showRunnerError() {}
+  };
+  const rerun = vm.runInNewContext(`${app.slice(start, end)}; rerunRunnerFailures`, context);
+  await rerun();
+  context.runnerDependencyAnalysis = { cases: [{ capture: null }], complete: false };
+  context.runnerFailedCases = [{ stepOrdinal: 2, datasetOrdinal: 1 }];
+  await rerun();
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.map(call => call.previousCaptures[0].caseOrdinal), [1, 1]);
+  assert.deepEqual(calls.map(call => call.includedPreviousOrdinals), [[2], [2]]);
+});
+
+test('nova execução só grava snapshot depois dos guards aceitos', async () => {
+  const app = fs.readFileSync(appPath, 'utf8');
+  const start = app.indexOf('async function startRunnerFromForm(');
+  const end = app.indexOf('\nasync function rerunRunnerFailures(', start);
+  const preview = { cases: [{ caseOrdinal: 1, stepOrdinal: 1, datasetOrdinal: 1, capture: { name: 'token', target: 'environment' } }], complete: true };
+  const runStart = remoteAccepted => {
+    const state = { ran: false, snapshotAtRun: null, error: '' };
+    const nodes = new Map([
+      ['runner-datasets', { value: '' }],
+      ['runner-delay', { value: '0' }],
+      ['runner-stop-on-error', { checked: true }]
+    ]);
+    const context = {
+      state, runnerBusy: false, runnerHistoryMutating: false, runnerEntries: [{ request: {} }], RUNNER_DEPENDENCY_CASE_LIMIT: 500,
+      runnerDependencyAnalysis: preview, runnerExecutionDependencySnapshot: { original: true },
+      byId: id => nodes.get(id) || null,
+      clearRunnerError() {}, showRunnerError: message => { state.error = message; },
+      cancelRunnerDependencyPreviewTimer() {},
+      RunnerLogic: { parseDataSets: () => [{}], createRunnerCases: () => [{ stepOrdinal: 1, datasetOrdinal: 1 }] },
+      refreshRunnerDependencyPreview: () => preview,
+      runnerWriteCases: () => [],
+      confirmRunnerWrites: async () => true,
+      confirmRunnerRemoteHttp: async () => remoteAccepted,
+      createRunnerDependencyExecutionSnapshot: analysis => ({ from: analysis }),
+      runRunnerCases: async () => { state.ran = true; state.snapshotAtRun = context.runnerExecutionDependencySnapshot; }
+    };
+    const startRunner = vm.runInNewContext(`${app.slice(start, end)}; startRunnerFromForm`, context);
+    return { state, context, startRunner };
+  };
+
+  const cancelled = runStart(false);
+  await cancelled.startRunner({ preventDefault() {} });
+  assert.equal(cancelled.state.ran, false);
+  assert.deepEqual(cancelled.context.runnerExecutionDependencySnapshot, { original: true });
+
+  const accepted = runStart(true);
+  await accepted.startRunner({ preventDefault() {} });
+  assert.equal(accepted.state.ran, true);
+  assert.deepEqual(accepted.context.runnerExecutionDependencySnapshot, { from: preview });
+  assert.deepEqual(accepted.state.snapshotAtRun, { from: preview });
+});
+
+test('debounce de datasets usa timer único curto e cancela pendências', () => {
+  const app = fs.readFileSync(appPath, 'utf8');
+  const start = app.indexOf('function cancelRunnerDependencyPreviewTimer(');
+  const end = app.indexOf('\nfunction refreshRunnerDependencyPreview(', start);
+  assert.ok(start >= 0 && end > start, 'debounce helpers should exist');
+  let nextId = 1, renders = 0;
+  const timers = [], cleared = [];
+  const context = {
+    runnerDependencyPreviewTimer: 0,
+    byId: () => ({ open: true }), runnerEntries: [{}],
+    RUNNER_DEPENDENCY_DEBOUNCE_MS: 150,
+    setTimeout: (fn, ms) => { const id = nextId++; timers.push({ id, fn, ms }); return id; },
+    clearTimeout: id => cleared.push(id),
+    renderRunnerPlan: () => { renders++; }
+  };
+  const api = vm.runInNewContext(`${app.slice(start, end)}; ({ scheduleRunnerDependencyPreview, cancelRunnerDependencyPreviewTimer })`, context);
+  api.scheduleRunnerDependencyPreview();
+  const first = timers[0];
+  api.scheduleRunnerDependencyPreview();
+  assert.deepEqual(cleared, [first.id]);
+  assert.equal(timers.at(-1).ms, 150);
+  timers.at(-1).fn();
+  assert.equal(renders, 1);
+  api.scheduleRunnerDependencyPreview();
+  const pending = timers.at(-1).id;
+  api.cancelRunnerDependencyPreviewTimer();
+  assert.ok(cleared.includes(pending));
+});
+
+test('plano limita origens a 500 casos e reutiliza o parse dos datasets', () => {
+  const app = fs.readFileSync(appPath, 'utf8');
+  const start = app.indexOf('function renderRunnerPlan(');
+  const end = app.indexOf('\nasync function confirmRunnerDependencyReview(', start);
+  assert.ok(start >= 0 && end > start);
+  const node = () => ({ textContent: '', className: '', dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = [...items]; }, setAttribute() {} });
+  const list = node(), parsed = { datasets: Array.from({ length: 100 }, () => ({})) };
+  let inspected = 0, refreshArg = null;
+  const context = {
+    RUNNER_DEPENDENCY_CASE_LIMIT: 500,
+    byId: id => id === 'runner-plan-list' ? list : null,
+    document: { createElement: () => node() },
+    runnerDependencyDatasets: () => parsed,
+    refreshRunnerDependencyPreview: value => { refreshArg = value; },
+    inspectSavedRequestOriginsAcrossDatasets: (request, datasets) => { inspected += datasets.length; return { references: [], varying: false }; },
+    formatInspectorOrigins: () => ''
+  };
+  const render = vm.runInNewContext(`${app.slice(start, end)}; renderRunnerPlan`, context);
+  const entries = Array.from({ length: 6 }, (_, index) => ({ request: { method: 'GET', name: `R${index}`, route: `/${index}` }, path: `/${index}` }));
+  render(entries);
+  assert.ok(inspected <= 500, `inspection should be bounded, got ${inspected}`);
+  assert.equal(refreshArg, parsed);
+  assert.equal(list.children.length, entries.length + 1);
+  assert.match(list.children.at(-1).textContent, /parcial|500/i);
 });

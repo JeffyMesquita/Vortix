@@ -382,7 +382,7 @@ Integrada em `master` pelo PR #34, junto à correção do selo do PR #31 e à at
 - [x] Análise pura/efêmera com precedência existente, capturas condicionais, datasets e limites explícitos.
 - [x] Explicação com semântica nativa na sequência atual e revisão do subconjunto antes de reexecutar falhas; foco DOM conferido, teclado nativo via Portal não confirmado.
 - [x] Preservar guards, histórico, CLI, ponte readonly e ausência de valores na projeção.
-- [x] Testes comportamentais, revisão independente, build e smoke isolado com dados fictícios: 447 testes/446 aprovados/zero falhas/um skip; produtor não repetido na reexecução.
+- [x] Testes comportamentais, revisão independente, build e smoke isolado com dados fictícios: 454 testes/453 aprovados/zero falhas/um skip; produtor não repetido na reexecução.
 - [x] Documentar resultado e limites em evidência de validação antes da entrega.
 
 ## Regra de sequência

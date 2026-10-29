@@ -21,42 +21,52 @@ Na integração, Maestro reproduziu e corrigiu mais quatro casos com RED/GREEN:
 
 Hange conferiu esses quatro ajustes somente por leitura de código/testes, sem problema restante. A execução dos testes e smoke abaixo foi feita pelo Maestro. As revisões não são tratadas como execução automatizada ou auditoria completa.
 
-Na publicação, o SonarCloud do SHA `f35d277` terminou cancelado com 24 anotações, incluindo quatro funções acima do orçamento de complexidade. A correção foi delimitada: extração de análise por caso/ações/campos, preparo de body/Auth/captura e montagem de textos/DOM, mantendo ordem de validação, mensagens, Map por nome/destino e invalidação. Também usa `new Error`, Set/has e `<output>` nativo para o resumo, com display em bloco apenas quando visível. Suíte independente permaneceu em 447/446/0/1; no smoke adicional os dois GETs fictícios retornaram200 e o output manteve layout1280 sem overflow.
+Na publicação, o SonarCloud do SHA `f35d277` terminou cancelado com 24 anotações, incluindo quatro funções acima do orçamento de complexidade. A correção foi delimitada: extração de análise por caso/ações/campos, preparo de body/Auth/captura e montagem de textos/DOM, mantendo ordem de validação, mensagens, Map por nome/destino e invalidação. Também usa `new Error`, Set/has e `<output>` nativo para o resumo, com display em bloco apenas quando visível. Suíte independente permaneceu em 447/446/0/1; no smoke adicional os dois GETs fictícios retornaram 200 e o output manteve layout em 1280 px sem overflow.
 
 Recomendações de mover helpers privados para escopo externo não foram aplicadas: eles ficam na factory UMD, instanciada uma vez por carregamento, para preservar o encapsulamento e evitar novos globais no navegador. Nenhuma regra foi desativada ou suprimida. A conferência remota do SHA final permanece no PR, sem apresentar análise cancelada como aprovada.
 
 ## Evidência automatizada atual
 
-- `node --test` dos dez arquivos anteriores do CI mais `RunnerDependencies.test.cjs`: **447 testes, 446 aprovados, zero falhas, um skip**. Skip de symlink por EPERM no Windows. Log local: `artifacts/runner-deps-qa/final-tests.log`.
-- `RunnerDependencies.test.cjs`: **26/26**; cobertura de matching por nome/destino, seed, cofre, pré-request ordenada, Auth herdada, GraphQL/multipart, limites, sentinelas, ausência de mutação, datasets inválidos, reexecução/cancelamento, estado obsoleto e renderização mínima.
+- `node --test` dos dez arquivos anteriores do CI mais `RunnerDependencies.test.cjs`: **454 testes, 453 aprovados, zero falhas, um skip**. Skip de symlink por EPERM no Windows. Log local final: `artifacts/runner-deps-publication-2026-10-29/review-fix-final-tests.log`; o log anterior de 447 testes permanece preservado.
+- `RunnerDependencies.test.cjs`: **33/33**; cobertura de matching por nome/destino, seed, cofre, pré-request ordenada, Auth herdada, GraphQL/multipart, limites, sentinelas, ausência de mutação, datasets inválidos, reexecução/cancelamento, estado obsoleto, snapshot original, debounce e renderização mínima.
 - `node --check wwwroot/app.js` e `node --check wwwroot/runner-logic.js`: aprovados.
 - Build Release `--no-restore -o ./artifacts/runner-deps-qa/build`: aprovado, zero avisos/erros. Nenhuma dependência foi instalada/restaurada. Log local: `artifacts/runner-deps-qa/final-build.log`.
 - `git diff --check` e links documentais conferidos. CI atualizada para incluir o teste novo; os runs remotos da publicação são acompanhados no PR, separadamente desta evidência local.
 
 ## Smoke pelo Portal, com mock de loopback
 
-App em `127.0.0.1:63225`, terminal visível **Shikamaru — QA Runner**, SQLite separado `artifacts/runner-deps-qa/workspace.sqlite`. Mock Python padrão em `127.0.0.1:63226`, terminal visível **Bulma — Runtime QA**. Instância QA anterior na63224 preservada. Nenhum banco pessoal ou API real foi usado.
+Os cenários da tabela abaixo foram exercitados antes das últimas correções das revisões externas. Snapshot original, reexecuções encadeadas e debounce têm regressões automatizadas na suíte final. A tentativa de repetir o smoke nessa última revisão encontrou o Portal sem renderização, com janela minimizada; não apresentar essa tentativa como smoke concluído da revisão final.
 
-Coleção fictícia importada pela interface: GET `/produce` captura `orderId`; GET `/consume/{{orderId}}` devolve503 na primeira chamada e200 na segunda. Persistência de Auth desativada e conferida no snapshot antes dos envios; fixtures não contêm credenciais.
+App em `127.0.0.1:63225`, terminal visível **Shikamaru — QA Runner**, SQLite separado `artifacts/runner-deps-qa/workspace.sqlite`. Mock Python padrão em `127.0.0.1:63226`, terminal visível **Bulma — Runtime QA**. Instância QA anterior na porta 63224 preservada. Nenhum banco pessoal ou API real foi usado.
+
+Coleção fictícia importada pela interface: GET `/produce` captura `orderId`; GET `/consume/{{orderId}}` devolve 503 na primeira chamada e 200 na segunda. Persistência de Auth desativada e conferida no snapshot antes dos envios; fixtures não contêm credenciais.
 
 | Cenário | Evidência observada |
 |---|---|
 | Plano inicial | Relação do consumidor com o caso1, marcada condicional; abrir plano não chamou o mock. |
 | Datasets | Quatro casos para dois conjuntos; prioridade do dataset no primeiro e aviso de alternativa de conjunto anterior no último. |
 | JSON inválido | `Revise os conjuntos de dados`; iniciar não enviou chamadas. |
-| Primeira execução | Produtor200, consumidor503; contadores `/produce:1`, `/consume/mock-123:1`. |
-| Revisão e cancelamento | Modal indica produtor da rodada anterior fora do subconjunto; cancelar manteve contadores1/1. |
-| Reexecução aceita | Somente consumidor200; contadores finais `/produce:1`, `/consume/mock-123:2`. Nenhum produtor foi repetido. |
+| Primeira execução | Produtor 200, consumidor 503; contadores `/produce: 1`, `/consume/mock-123: 1`. |
+| Revisão e cancelamento | Modal indica produtor da rodada anterior fora do subconjunto; cancelar manteve contadores em 1/1. |
+| Reexecução aceita | Somente consumidor 200; contadores finais `/produce: 1`, `/consume/mock-123: 2`. Nenhum produtor foi repetido. |
 | Previsão durante envio | Resumo identificado como `Previsão anterior ao envio`. |
 | POST sem confirmação | Guard visível, checkbox desmarcado, TESTE vazio e Enviar desabilitado; nenhum POST enviado. |
-| Viewport1280 | Documento scrollWidth1280; diálogo scrollWidth/clientWidth758/758. Sem overflow horizontal no documento ou diálogo. |
+| Viewport 1280 | Documento scrollWidth de 1280 px; diálogo scrollWidth/clientWidth de 758 / 758 px. Sem overflow horizontal no documento ou diálogo. |
 
 Detalhes nativos abriram por clique e receberam foco DOM no summary. Chamadas de Enter/Space pelo Portal não produziram evento keydown observável nem alternaram o details nesta sessão; não declarar teclado nativo confirmado. Não foi adicionado handler para contornar comportamento da ferramenta. Não é auditoria completa de acessibilidade.
 
-Captura1440 com dados fictícios: [plano com datasets](../../images/runner-dependencies-plan.png). Outras capturas e contadores ficam em `artifacts/runner-deps-qa/`. A captura do modal de revisão falhou quando a janela deixou de renderizar; seu texto/controles e efeitos foram conferidos por DOM e contadores, não por imagem. Capturas não comprovam chamadas de API real.
+Captura em 1440 px com dados fictícios: [plano com datasets](../../images/runner-dependencies-plan.png). Outras capturas e contadores ficam em `artifacts/runner-deps-qa/`. A captura do modal de revisão falhou quando a janela deixou de renderizar; seu texto/controles e efeitos foram conferidos por DOM e contadores, não por imagem. Capturas não comprovam chamadas de API real.
 
 ## Limites e preservação
 
 Sem smoke mobile ou público, benchmark de tokens, alteração de transportes, instalação, auth/routing ou novo deploy. Não houve nova suíte PowerShell nesta entrega local; houve suíte JS com consumidores compartilhados e build. Interfaces de CLI/histórico/bridge foram preservadas por diff e regressões; o mapa não entra em backup/exportação.
 
-Nova logo do README preservada e documentada. Os sete untracked anteriores e o snapshot de recuperação permanecem no checkout, fora da seleção da feature. Nenhuma alteração foi copiada do worktree TEMP. Tentativa de Terra anterior falhou no bootstrap401 e não participou da implementação.
+Nova logo do README preservada e documentada. Os sete untracked anteriores e o snapshot de recuperação permanecem no checkout, fora da seleção da feature. Nenhuma alteração foi copiada do worktree TEMP. Tentativa de Terra anterior falhou no bootstrap 401 e não participou da implementação.
+
+## Ajustes das revisões externas do PR
+
+Separado snapshot imutável dos metadados da execução original da prévia editável. Ele guarda somente ordinais e metadados de captura, sem valores ou respostas, e só é atualizado depois de aceitos os guards de uma nova sequência. Editar datasets, bloquear o cofre, cancelar uma nova execução ou encadear retries não perde produtores da base original.
+
+A digitação usa debounce único de 150 ms, cancelado antes de abrir/iniciar/reexecutar; a análise de segurança pré-envio continua síncrona. O plano reutiliza o parse de datasets e limita a inspeção de origens a 500 casos, mantendo a lista e a validação do limite de execução. JSON inválido enviado imediatamente também atualiza o alerta da prévia. Os novos testes falharam antes das correções e passaram depois.
+
+Também corrigidos os avisos de condicionais sem chaves e spread redundante no fluxo de captura; mensagens e validações foram preservadas. Relatórios receberam espaçamento entre palavras, contagens, portas e códigos HTTP.

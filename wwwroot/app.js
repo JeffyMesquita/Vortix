@@ -24,7 +24,9 @@ const DEFAULT_FONT = 'fira-code', DEFAULT_UI_SCALE = 1.2, MIN_UI_SCALE = 0.8, MA
 let legacyDbPromise, toastId = 0, queryId = 0, collections = [], environments = [], environmentDraft = [], activeEnvironmentId = '', activeTheme = 'dracula', activeFont = DEFAULT_FONT, activeScale = DEFAULT_UI_SCALE, actionDialogQueue = Promise.resolve(), tokenModeRecoveryWarned = false;
 let activeSaved = null, selectedContainer = { collectionId:'', folderId:'' }, collapsed = new Set(), baseUrlAuto = true;
 let runnerEntries = [], runnerFailedCases = [], runnerBusy = false, runnerStopRequested = false;
-let runnerDependencyAnalysis = null, runnerDependencyStale = false;
+let runnerDependencyAnalysis = null, runnerDependencyStale = false, runnerExecutionDependencySnapshot = null;
+const RUNNER_DEPENDENCY_CASE_LIMIT = 500, RUNNER_DEPENDENCY_DEBOUNCE_MS = 150;
+let runnerDependencyPreviewTimer = 0;
 let runnerHistoryLoadTask = Promise.resolve(), runnerHistoryMutating = false;
 let quickOpenEntries = [], quickOpenActiveIndex = 0;
 let historySettings = RunnerLogic.normalizeHistorySettings(), historyComparisonIds = [];
@@ -1180,13 +1182,35 @@ function analyzeRunnerDependencyCases(cases,options={}){
   const presence=runnerDependencyPresence();
   return RunnerLogic.analyzeRunnerDependencies({cases,environment:presence.environment,vault:presence.vault,previousCaptures:options.previousCaptures,includedPreviousOrdinals:options.includedPreviousOrdinals,...(options.datasets?{datasets:options.datasets}:{})});
 }
-function refreshRunnerDependencyPreview(){
+function createRunnerDependencyExecutionSnapshot(analysis){
+  const cases=(analysis?.cases||[]).map(item=>Object.freeze({
+    caseOrdinal:item.caseOrdinal,
+    stepOrdinal:item.stepOrdinal,
+    datasetOrdinal:item.datasetOrdinal,
+    capture:item.capture?Object.freeze({name:item.capture.name,target:item.capture.target}):null
+  }));
+  return Object.freeze({analysisVersion:1,cases:Object.freeze(cases)});
+}
+function cancelRunnerDependencyPreviewTimer(){
+  if(!runnerDependencyPreviewTimer)return;
+  clearTimeout(runnerDependencyPreviewTimer);
+  runnerDependencyPreviewTimer=0;
+}
+function scheduleRunnerDependencyPreview(){
+  if(!byId('runner-dialog')?.open)return;
+  cancelRunnerDependencyPreviewTimer();
+  runnerDependencyPreviewTimer=setTimeout(()=>{
+    runnerDependencyPreviewTimer=0;
+    if(byId('runner-dialog')?.open)renderRunnerPlan(runnerEntries);
+  },RUNNER_DEPENDENCY_DEBOUNCE_MS);
+}
+function refreshRunnerDependencyPreview(parsed){
   if(runnerBusy){runnerDependencyStale=true;renderRunnerDependencies(runnerDependencyAnalysis);return runnerDependencyAnalysis;}
   if(!runnerEntries.length){runnerDependencyAnalysis=null;runnerDependencyStale=false;renderRunnerDependencies(null);return null;}
-  const parsed=runnerDependencyDatasets();
-  if(!parsed.datasets){runnerDependencyAnalysis={analysisVersion:1,complete:false,issues:['invalid_dataset'],cases:[]};runnerDependencyStale=false;renderRunnerDependencies(runnerDependencyAnalysis);return runnerDependencyAnalysis;}
-  const total=runnerEntries.length*parsed.datasets.length,cases=RunnerLogic.createRunnerCases(runnerEntries,parsed.datasets,500),analysis=analyzeRunnerDependencyCases(cases,{datasets:parsed.datasets});
-  if(total>500){analysis.complete=false;if(!analysis.issues.includes('case_limit'))analysis.issues.push('case_limit');}
+  const data=parsed||runnerDependencyDatasets();
+  if(!data.datasets){runnerDependencyAnalysis={analysisVersion:1,complete:false,issues:['invalid_dataset'],cases:[]};runnerDependencyStale=false;renderRunnerDependencies(runnerDependencyAnalysis);return runnerDependencyAnalysis;}
+  const total=runnerEntries.length*data.datasets.length,cases=RunnerLogic.createRunnerCases(runnerEntries,data.datasets,RUNNER_DEPENDENCY_CASE_LIMIT),analysis=analyzeRunnerDependencyCases(cases,{datasets:data.datasets});
+  if(total>RUNNER_DEPENDENCY_CASE_LIMIT){analysis.complete=false;if(!analysis.issues.includes('case_limit'))analysis.issues.push('case_limit');}
   runnerDependencyAnalysis=analysis;runnerDependencyStale=false;renderRunnerDependencies(analysis);return analysis;
 }
 function refreshRunnerDependencyPreviewIfOpen(){
@@ -1207,16 +1231,24 @@ function inspectSavedRequestOriginsAcrossDatasets(request,datasets,authScopes){
 function renderRunnerPlan(entries){
   const list=byId('runner-plan-list'),parsed=runnerDependencyDatasets();
   list.replaceChildren();
+  let inspectionBudget=RUNNER_DEPENDENCY_CASE_LIMIT;
   for(const entry of entries){
     const row=document.createElement('div');row.className='runner-plan-item';
     const badge=document.createElement('span');badge.className=`method-dot ${String(entry.request.method||'GET').toLowerCase()}`;badge.textContent=String(entry.request.method||'GET').toUpperCase();
     const copy=document.createElement('div');copy.className='runner-item-copy';
     const name=document.createElement('strong');name.textContent=entry.request.name||entry.request.route||'Request';copy.append(name);
     const path=document.createElement('small');path.textContent=entry.request.tokenRequest?'Credenciais exigem o fluxo Solicitar token.':entry.path;copy.append(path);
-    if(parsed.datasets){const inspection=inspectSavedRequestOriginsAcrossDatasets(entry.request,parsed.datasets,entry.authScopes);if(inspection.references.length){const originNote=document.createElement('small');originNote.className='runner-origin-note';originNote.textContent='Origens sem valores: '+formatInspectorOrigins(inspection.references)+(inspection.varying?' · origens variam entre conjuntos':'');copy.append(originNote);}}
+    if(parsed.datasets&&inspectionBudget>0){
+      const datasets=parsed.datasets.slice(0,inspectionBudget),inspection=inspectSavedRequestOriginsAcrossDatasets(entry.request,datasets,entry.authScopes);
+      inspectionBudget-=datasets.length;
+      if(inspection.references.length){const originNote=document.createElement('small');originNote.className='runner-origin-note';originNote.textContent='Origens sem valores: '+formatInspectorOrigins(inspection.references)+(inspection.varying?' · origens variam entre conjuntos':'');copy.append(originNote);}
+    }
     row.append(badge,copy);list.append(row);
   }
-  refreshRunnerDependencyPreview();
+  if(parsed.datasets&&entries.length*parsed.datasets.length>RUNNER_DEPENDENCY_CASE_LIMIT){
+    const note=document.createElement('p');note.className='runner-origin-note';note.setAttribute('role','note');note.textContent='Inspeção de origens parcial: limite de 500 casos. As requests continuam listadas; reduza o escopo ou os conjuntos para executar até 500 casos.';list.append(note);
+  }
+  refreshRunnerDependencyPreview(parsed);
 }
 async function confirmRunnerDependencyReview(cases,analysis){
   const count=Array.isArray(cases)?cases.length:0;
@@ -1375,6 +1407,7 @@ function fitRunnerDialog(){
   dialog.style.width=`${Math.max(240,Math.min(760,(width-40)/scale))}px`;
 }
 function openRunnerDialog(){
+  cancelRunnerDependencyPreviewTimer();
   const collection=findCollection(selectedContainer.collectionId),target=findFolder(collection,selectedContainer.folderId);
   if(!collection||!target){showToast('Seleção indisponível','Selecione uma coleção ou pasta válida.','error');return;}
   const folderPath=selectedContainer.folderId?findFolderPath(collection,selectedContainer.folderId):[];
@@ -1460,25 +1493,29 @@ async function runRunnerCases(cases,options,allowWrites){
   runnerBusy=false;updateRunnerOptionsDisabled(false);
 }
 async function startRunnerFromForm(event){
-  event.preventDefault();if(runnerBusy||runnerHistoryMutating)return;clearRunnerError();
+  event.preventDefault();if(runnerBusy||runnerHistoryMutating)return;clearRunnerError();cancelRunnerDependencyPreviewTimer();
   try{
     const datasets=RunnerLogic.parseDataSets(byId('runner-datasets').value),total=runnerEntries.length*datasets.length;
-    if(total>500)throw Error('A execução excede o limite de 500 requests. Reduza os conjuntos de dados ou selecione uma pasta menor.');
-    const delay=Number(byId('runner-delay').value);if(!Number.isInteger(delay)||delay<0||delay>5000)throw Error('O intervalo precisa ficar entre 0 e 5000 ms.');
-    const cases=RunnerLogic.createRunnerCases(runnerEntries,datasets),writes=runnerWriteCases(cases);
-    refreshRunnerDependencyPreview();
+    if(total>RUNNER_DEPENDENCY_CASE_LIMIT)throw new Error('A execução excede o limite de 500 requests. Reduza os conjuntos de dados ou selecione uma pasta menor.');
+    const delay=Number(byId('runner-delay').value);if(!Number.isInteger(delay)||delay<0||delay>5000)throw new Error('O intervalo precisa ficar entre 0 e 5000 ms.');
+    const cases=RunnerLogic.createRunnerCases(runnerEntries,datasets),writes=runnerWriteCases(cases),analysis=refreshRunnerDependencyPreview({datasets});
+    const assertPreviewCurrent=()=>{if(runnerDependencyAnalysis!==analysis)throw new Error('O contexto do Runner mudou. Revise a execução novamente.');};
     if(writes.length&&!(await confirmRunnerWrites(cases)))return;
+    assertPreviewCurrent();
     if(!(await confirmRunnerRemoteHttp(cases)))return;
+    assertPreviewCurrent();
+    runnerExecutionDependencySnapshot=createRunnerDependencyExecutionSnapshot(analysis);
     await runRunnerCases(cases,{delay,stopOnError:byId('runner-stop-on-error').checked},writes.length>0);
-  }catch(error){showRunnerError(error.message||'Revise as opções do Runner.');}
+  }catch(error){refreshRunnerDependencyPreview();showRunnerError(error.message||'Revise as opções do Runner.');}
 }
 async function rerunRunnerFailures(){
   if(runnerBusy||runnerHistoryMutating||!runnerFailedCases.length)return;
-  const cases=[...runnerFailedCases],writes=runnerWriteCases(cases),previous=runnerDependencyAnalysis;
-  const assertReviewCurrent=()=>{if(runnerDependencyAnalysis!==previous)throw new Error('O contexto do Runner mudou. Revise a reexecução novamente.');};
+  cancelRunnerDependencyPreviewTimer();
+  const cases=[...runnerFailedCases],writes=runnerWriteCases(cases),preview=runnerDependencyAnalysis,snapshot=runnerExecutionDependencySnapshot;
+  const assertReviewCurrent=()=>{if(runnerDependencyAnalysis!==preview)throw new Error('O contexto do Runner mudou. Revise a reexecução novamente.');};
   try{
-    const previousCaptures=previous?previous.cases.filter(item=>item.capture).map(item=>({name:item.capture.name,target:item.capture.target,caseOrdinal:item.caseOrdinal,datasetOrdinal:item.datasetOrdinal})):[];
-    const includedPreviousOrdinals=previous?previous.cases.filter(item=>cases.some(selected=>selected.stepOrdinal===item.stepOrdinal&&selected.datasetOrdinal===item.datasetOrdinal)).map(item=>item.caseOrdinal):[];
+    const previousCaptures=snapshot?snapshot.cases.filter(item=>item.capture).map(item=>({name:item.capture.name,target:item.capture.target,caseOrdinal:item.caseOrdinal,datasetOrdinal:item.datasetOrdinal})):[];
+    const includedPreviousOrdinals=snapshot?snapshot.cases.filter(item=>cases.some(selected=>selected.stepOrdinal===item.stepOrdinal&&selected.datasetOrdinal===item.datasetOrdinal)).map(item=>item.caseOrdinal):[];
     const analysis=analyzeRunnerDependencyCases(cases,{previousCaptures,includedPreviousOrdinals});
     if(!(await confirmRunnerDependencyReview(cases,analysis)))return;
     assertReviewCurrent();
@@ -3201,15 +3238,24 @@ function updateResponseCaptureUi(){
 }
 function validateResponseCaptureForm(){
   if(!byId('capture-response-variable').checked)return;
-  const name=byId('response-variable-name').value.trim();if(!RunnerLogic.isValidCaptureVariableName(name))throw new Error('Informe um nome de variável válido (até 80 caracteres).');
-  if(byId('response-value-source').value==='json'){const path=byId('response-json-path').value.trim();if(!path)throw new Error('Informe o caminho do campo JSON, por exemplo access_token.');parseJsonPath(path);}
-  if(byId('response-capture-target').value==='vault')assertVaultCaptureAvailable({environmentId:activeEnvironmentId||'default'});
+  const name=byId('response-variable-name').value.trim();
+  if(!RunnerLogic.isValidCaptureVariableName(name)){throw new Error('Informe um nome de variável válido (até 80 caracteres).');}
+  if(byId('response-value-source').value==='json'){
+    const path=byId('response-json-path').value.trim();
+    if(!path){throw new Error('Informe o caminho do campo JSON, por exemplo access_token.');}
+    parseJsonPath(path);
+  }
+  if(byId('response-capture-target').value==='vault'){assertVaultCaptureAvailable({environmentId:activeEnvironmentId||'default'});}
 }
 function showResponseVariableResult(title,kind='success'){const section=byId('response-variable-result');section.hidden=false;section.dataset.kind=kind;byId('response-variable-result-title').textContent=title;}
 async function saveEnvironmentVariable(name,value,environmentId=activeEnvironmentId){
-  if(!RunnerLogic.isValidCaptureVariableName(name))throw new Error('Nome da variável inválido.');
-  const serialized=typeof value==='string'?value:JSON.stringify(value);if(serialized===undefined||serialized.length>100000)throw new Error('O valor está vazio ou excede 100 KB.');
-  const current=environments.find(environment=>environment.id===environmentId);if(!current)throw new Error('Ambiente de captura indisponível.');const updated={...current,variables:{...(current.variables||{})}};Object.defineProperty(updated.variables,name,{value:serialized,writable:true,enumerable:true,configurable:true});
+  if(!RunnerLogic.isValidCaptureVariableName(name)){throw new Error('Nome da variável inválido.');}
+  const serialized=typeof value==='string'?value:JSON.stringify(value);
+  if(serialized===undefined||serialized.length>100000){throw new Error('O valor está vazio ou excede 100 KB.');}
+  const current=environments.find(environment=>environment.id===environmentId);
+  if(!current){throw new Error('Ambiente de captura indisponível.');}
+  const updated={...current,variables:{...current.variables}};
+  Object.defineProperty(updated.variables,name,{value:serialized,writable:true,enumerable:true,configurable:true});
   await dbWrite('environments',updated);environments=environments.map(environment=>environment.id===updated.id?updated:environment);renderEnvironmentSelect();return updated;
 }
 async function captureResponseVariable(request,result,quiet=false){
@@ -3530,7 +3576,7 @@ function addEventListeners(){
     const change=()=>{if(['method','route','body','base-url','headers'].includes(id)){byId('confirm-test-data').checked=false;clearRequestBodyContractResult();}if(id==='base-url')baseUrlAuto=false;updateGuard();updateTokenButton();if(id==='body'){renderBodyHighlight();updateJsonTools();}};byId(id).addEventListener('input',change);byId(id).addEventListener('change',change);
   }
   body.addEventListener('scroll',renderBodyHighlight);byId('body-mode').addEventListener('change',clearRequestBodyContractResult);byId('token-client-id').addEventListener('input',updateTokenButton);byId('token-client-secret').addEventListener('input',updateTokenButton);
-  byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('auth-inheritance-mode').addEventListener('change',()=>{const authMode=authModeFromForm();applyAuthFields(authMode==='custom'?{authMode,authType:'none'}:{authMode});syncActiveWorkspaceTab(true);});byId('save-auth-default').onclick=()=>void saveAuthDefault();byId('body-mode').addEventListener('change',updateBodyModeUi);byId('multipart-add-text').onclick=()=>addMultipartField('text');byId('multipart-add-file').onclick=()=>addMultipartField('file');byId('graphql-load-schema').onclick=()=>void loadGraphqlSchema();byId('graphql-schema-type').addEventListener('change',renderGraphqlSchemaFields);const graphqlQueryField=byId('graphql-query');graphqlQueryField.addEventListener('input',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keyup',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('click',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keydown',handleGraphqlAutocompleteKeydown);byId('format-graphql-variables').onclick=formatGraphqlVariables;for(const id of ['graphql-query','graphql-variables','graphql-operation-name']){byId(id).addEventListener('input',()=>{byId('confirm-test-data').checked=false;updateGuard();});byId(id).addEventListener('change',()=>{byId('confirm-test-data').checked=false;updateGuard();});}byId('clear-cookie-jar').onclick=clearCookieJar;byId('inspect-references').onclick=refreshRequestInspector;byId('request-inspector').addEventListener('toggle',()=>{if(byId('request-inspector').open)refreshRequestInspector();});byId('runner-datasets').addEventListener('input',()=>{if(byId('runner-dialog').open)renderRunnerPlan(runnerEntries);});
+  byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('auth-inheritance-mode').addEventListener('change',()=>{const authMode=authModeFromForm();applyAuthFields(authMode==='custom'?{authMode,authType:'none'}:{authMode});syncActiveWorkspaceTab(true);});byId('save-auth-default').onclick=()=>void saveAuthDefault();byId('body-mode').addEventListener('change',updateBodyModeUi);byId('multipart-add-text').onclick=()=>addMultipartField('text');byId('multipart-add-file').onclick=()=>addMultipartField('file');byId('graphql-load-schema').onclick=()=>void loadGraphqlSchema();byId('graphql-schema-type').addEventListener('change',renderGraphqlSchemaFields);const graphqlQueryField=byId('graphql-query');graphqlQueryField.addEventListener('input',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keyup',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('click',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keydown',handleGraphqlAutocompleteKeydown);byId('format-graphql-variables').onclick=formatGraphqlVariables;for(const id of ['graphql-query','graphql-variables','graphql-operation-name']){byId(id).addEventListener('input',()=>{byId('confirm-test-data').checked=false;updateGuard();});byId(id).addEventListener('change',()=>{byId('confirm-test-data').checked=false;updateGuard();});}byId('clear-cookie-jar').onclick=clearCookieJar;byId('inspect-references').onclick=refreshRequestInspector;byId('request-inspector').addEventListener('toggle',()=>{if(byId('request-inspector').open)refreshRequestInspector();});byId('runner-datasets').addEventListener('input',()=>scheduleRunnerDependencyPreview());
   for(const id of ['token-route','token-client-id-field','token-client-secret-field','token-credential-mode']){byId(id).addEventListener('input',updateTokenButton);byId(id).addEventListener('change',()=>void persistTokenRequestConfig());}
     for(const id of ['oauth2-token-url','oauth2-client-id','oauth2-scope'])byId(id).addEventListener('input',updateOAuth2TokenButton);
   byId('refresh-agent-safe-state').onclick=refreshAgentSafeState;for(const id of ['token-helper','oauth2-helper','oauth-pkce-helper'])byId(id).addEventListener('toggle',updateAdvancedToolsIndicator);

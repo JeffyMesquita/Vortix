@@ -104,7 +104,9 @@ Nomes configurados podem aparecer apenas no detalhe local, usando `textContent`;
 
 Datasets inválidos exibem “Revise os conjuntos de dados” em vez de analisar silenciosamente `{}`. Não alterar as validações/erros já exigidos para iniciar uma rodada.
 
-Recalcular ao abrir, editar datasets, trocar ambiente/cofre enquanto o diálogo estiver aberto, antes da confirmação inicial e antes de reexecutar falhas. O resultado descreve a revisão atual; durante a execução fica identificado como previsão anterior, sem evoluir para resultado confirmado. Nenhum temporizador ou leitura contínua do storage.
+Recalcular ao abrir, editar datasets, trocar ambiente/cofre enquanto o diálogo estiver aberto, antes da confirmação inicial e antes de reexecutar falhas. A digitação pode usar debounce de 150 ms com agendamento único por interação; cancelar agendamento anterior e pendências ao abrir/iniciar/reexecutar. Atualizações pré-envio e guards permanecem síncronos. O resultado descreve a revisão atual; durante a execução fica identificado como previsão anterior, sem evoluir para resultado confirmado. Não usar polling, intervalos recorrentes ou leitura contínua do storage.
+
+Metadados da sequência efetivamente iniciada ficam em snapshot imutável separado da prévia. Atualizar essa base somente depois de aceitos os guards de uma nova execução; cancelamento não a substitui. Editar datasets/cofre ou reexecutar um subconjunto não pode apagar produtores da sequência original nem renumerá-los na base de reexecuções encadeadas. A prévia mutável continua servindo à detecção de mudanças durante confirmações.
 
 Na reexecução, apresentar uma revisão explícita do subconjunto e dos avisos antes dos guards existentes. Cancelar essa revisão não executa nada. Os guards de escrita, HTTP e TESTE continuam sendo exigidos para os mesmos casos e não recebem autorização da análise.
 
