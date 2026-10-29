@@ -98,15 +98,17 @@ test('theme selector, application registry and complete desktop palettes stay al
   const selector = html.match(/<select id="theme-select"[^>]*>([\s\S]*?)<\/select>/)[1];
   const options = [...selector.matchAll(/<option value="([^"]+)"/g)].map(match => match[1]);
   assert.deepEqual(options, names);
-  for (const name of ['paper', 'graphite', 'tide']) {
+  for (const name of ['paper', 'graphite', 'tide', 'aurora', 'areia']) {
     assert.ok(names.includes(name));
     const palette = css.match(new RegExp(`:root\\[data-theme="${name}"\\]\\s*\\{([^}]+)`))?.[1];
     assert.ok(palette, `${name} CSS palette should exist`);
     for (const token of ['bg', 'sidebar', 'surface', 'panel', 'raised', 'hover', 'border', 'text', 'muted', 'accent', 'accent-strong', 'input', 'code', 'json-key', 'json-string', 'json-number', 'json-literal', 'danger', 'warning', 'success', 'on-accent']) {
       assert.match(palette, new RegExp(`--${token}:\\s*#[0-9a-f]{6}\\b`), `${name}: ${token}`);
     }
-    assert.match(palette, new RegExp(`color-scheme: ${name === 'paper' ? 'light' : 'dark'}`));
+    assert.match(palette, new RegExp(`color-scheme: ${['paper', 'areia'].includes(name) ? 'light' : 'dark'}`));
   }
+  const aliases = css.match(/:root:is\(\[data-theme="paper"\][^{]+\{/)?.[0] || '';
+  for (const name of ['aurora', 'areia']) assert.ok(aliases.includes(`[data-theme="${name}"]`), `${name} should share the desktop alias rules`);
 });
 
 test('new themes persist and restore through existing settings; unknown IDs cannot overwrite them', async () => {
@@ -124,7 +126,7 @@ test('new themes persist and restore through existing settings; unknown IDs cann
     DEFAULT_FONT: 'fira-code', DEFAULT_UI_SCALE: 1.2, MIN_UI_SCALE: 0.8, MAX_UI_SCALE: 1.5
   };
   const api = vm.runInNewContext(`${declaration}; let activeTheme='dracula', collections=[], environments=[], selectedContainer={}, activeEnvironmentId='', activeFont='', activeScale=1.2, historySettings={}; ${handlers}\n${initialize}\n({saveTheme, restore:async()=>{await initializeDb();applyTheme(activeTheme);}})`, context);
-  for (const name of ['paper', 'graphite', 'tide']) {
+  for (const name of ['paper', 'graphite', 'tide', 'aurora', 'areia']) {
     await api.saveTheme(name);
     assert.equal(saved.get('activeTheme').value, name);
     assert.equal(document.documentElement.dataset.theme, name);
@@ -135,7 +137,7 @@ test('new themes persist and restore through existing settings; unknown IDs cann
     assert.equal(select.value, name);
   }
   await api.saveTheme('unknown-theme');
-  assert.equal(saved.get('activeTheme').value, 'tide');
+  assert.equal(saved.get('activeTheme').value, 'areia');
   saved.set('activeTheme', { key: 'activeTheme', value: 'unknown-theme' });
   await api.restore();
   assert.equal(document.documentElement.dataset.theme, 'dracula');
@@ -332,9 +334,12 @@ function safeContextCopyHandler(app, dependencies) {
   const resolveEnd = app.indexOf('\nfunction updateAiFriendlyStatus(', resolveStart);
   const copyStart = app.indexOf('async function copyAiSafeContext(');
   const copyEnd = app.indexOf('\nasync function copyMaestriAgentPrompt(', copyStart);
+  const helperStart = app.indexOf('async function copyToClipboard(');
+  const helperEnd = app.indexOf('\nasync function copyOutput(', helperStart);
   assert.ok(resolveStart >= 0 && resolveEnd > resolveStart, 'AI readiness resolver should exist');
   assert.ok(copyStart >= 0 && copyEnd > copyStart, 'safe context copy handler should exist');
-  return vm.runInNewContext(`${app.slice(resolveStart, resolveEnd)}\n${app.slice(copyStart, copyEnd)}; copyAiSafeContext`, dependencies);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart, 'clipboard helper should exist');
+  return vm.runInNewContext(`${app.slice(helperStart, helperEnd)}\n${app.slice(resolveStart, resolveEnd)}\n${app.slice(copyStart, copyEnd)}; copyAiSafeContext`, dependencies);
 }
 
 function fullscreenControlHandlers(app, dependencies) {
@@ -540,11 +545,14 @@ test('Maestri prompt button copies the prompt shown in the help dialog', async (
   const app = await fs.readFile(path.join(root, 'wwwroot', 'app.js'), 'utf8');
   const start = app.indexOf('async function copyMaestriAgentPrompt(');
   const end = app.indexOf('\nfunction vaultCaptureError(', start);
+  const helperStart = app.indexOf('async function copyToClipboard(');
+  const helperEnd = app.indexOf('\nasync function copyOutput(', helperStart);
   assert.ok(start >= 0 && end > start, 'Maestri prompt copy handler should exist');
+  assert.ok(helperStart >= 0 && helperEnd > helperStart, 'clipboard helper should exist');
   const prompt = { textContent: '  PROMPT_DO_VORTIX_PARA_MAESTRI  ' };
   let copied = '';
   const messages = [];
-  const copy = vm.runInNewContext(`${app.slice(start, end)}; copyMaestriAgentPrompt`, {
+  const copy = vm.runInNewContext(`${app.slice(helperStart, helperEnd)}\n${app.slice(start, end)}; copyMaestriAgentPrompt`, {
     byId: id => id === 'maestri-agent-prompt' ? prompt : null,
     navigator: { clipboard: { writeText: async value => { copied = value; } } },
     showToast: (...args) => messages.push(args)
@@ -552,17 +560,21 @@ test('Maestri prompt button copies the prompt shown in the help dialog', async (
 
   await copy();
   assert.equal(copied, 'PROMPT_DO_VORTIX_PARA_MAESTRI');
-  assert.equal(messages[0][2], 'success');
+  assert.equal(messages[0][2], 'info');
+  assert.match(messages[0][1], /Copiado para a área de transferência/);
 });
 
 test('Maestri prompt copy reports a blocked clipboard without exposing prompt text', async () => {
   const app = await fs.readFile(path.join(root, 'wwwroot', 'app.js'), 'utf8');
   const start = app.indexOf('async function copyMaestriAgentPrompt(');
   const end = app.indexOf('\nfunction vaultCaptureError(', start);
+  const helperStart = app.indexOf('async function copyToClipboard(');
+  const helperEnd = app.indexOf('\nasync function copyOutput(', helperStart);
   assert.ok(start >= 0 && end > start, 'Maestri prompt copy handler should exist');
+  assert.ok(helperStart >= 0 && helperEnd > helperStart, 'clipboard helper should exist');
   const secretPrompt = 'PRIVATE_PROMPT_SENTINEL';
   const messages = [];
-  const copy = vm.runInNewContext(`${app.slice(start, end)}; copyMaestriAgentPrompt`, {
+  const copy = vm.runInNewContext(`${app.slice(helperStart, helperEnd)}\n${app.slice(start, end)}; copyMaestriAgentPrompt`, {
     byId: id => id === 'maestri-agent-prompt' ? { textContent: secretPrompt } : null,
     navigator: { clipboard: { writeText: async () => { throw Error('clipboard denied'); } } },
     showToast: (...args) => messages.push(args)
@@ -678,7 +690,12 @@ test('sharing metadata is unique, consistent and absolute HTTPS', async () => {
   assertAbsoluteHttps(twitterImage, 'twitter:image', host);
   assert.equal(attribute(singleMeta(head, 'name', 'twitter:image:alt', 'twitter:image:alt'), 'content'), ogAlt);
 
-  assert.ok(html.includes('<link rel="icon" type="image/svg+xml" href="/vortix-mark.svg">'), 'favicon should remain');
+  assert.ok(html.includes('<link rel="icon" type="image/svg+xml" href="/vortix-favicon.svg">'), 'new favicon should be referenced');
+  assert.ok(html.includes('<img src="/vortix-symbol.svg" alt="">'), 'new brand symbol should be referenced');
+  const [symbol, favicon] = await Promise.all(['vortix-symbol.svg', 'vortix-favicon.svg']
+    .map(file => fs.readFile(path.join(root, 'wwwroot', file), 'utf8')));
+  assert.match(symbol, /^<svg[\s\S]*<\/svg>\s*$/, 'brand symbol should be an SVG');
+  assert.match(favicon, /^<svg[\s\S]*<\/svg>\s*$/, 'favicon should be an SVG');
   assert.ok(html.includes('<meta name="vortix-agent-contract" content="2">'), 'bridge contract should remain');
   assert.equal(metaTags(head, 'name', 'keywords').length, 0, 'no keyword stuffing');
   assert.equal(head.includes('application/ld+json'), false, 'no invented schema');
@@ -723,4 +740,69 @@ test('the referenced Open Graph image is present, JPEG, within budget and matche
   assert.deepEqual(size, { width: 1717, height: 916 }, 'OG image should keep the 1717x916 artwork size');
   assert.equal(attribute(singleMeta(head, 'property', 'og:image:width', 'og:image:width'), 'content'), String(size.width));
   assert.equal(attribute(singleMeta(head, 'property', 'og:image:height', 'og:image:height'), 'content'), String(size.height));
+});
+
+test('clipboard helper waits for success, emits only static info, and propagates rejection', async () => {
+  const app = await fs.readFile(path.join(root, 'wwwroot', 'app.js'), 'utf8');
+  const start = app.indexOf('async function copyToClipboard(');
+  const end = app.indexOf('\nasync function copyOutput(', start);
+  assert.ok(start >= 0 && end > start, 'clipboard helper should exist');
+  const source = `${app.slice(start, end)}; copyToClipboard`;
+  let release;
+  const messages = [];
+  const copy = vm.runInNewContext(source, {
+    navigator: { clipboard: { writeText: value => new Promise(resolve => { release = () => resolve(value); }) } },
+    showToast: (...args) => messages.push(args)
+  });
+  const pending = copy('SECRET_COPY_PAYLOAD');
+  await Promise.resolve();
+  assert.equal(messages.length, 0, 'no toast before the clipboard resolves');
+  release();
+  await pending;
+  assert.equal(messages[0][2], 'info');
+  assert.match(messages[0][1], /Copiado para a área de transferência/);
+  assert.equal(JSON.stringify(messages).includes('SECRET_COPY_PAYLOAD'), false);
+
+  const denied = [];
+  const reject = vm.runInNewContext(source, {
+    navigator: { clipboard: { writeText: async () => { throw Error('clipboard denied'); } } },
+    showToast: (...args) => denied.push(args)
+  });
+  await assert.rejects(() => reject('token'), /clipboard denied/);
+  assert.equal(denied.length, 0, 'rejection must not produce a success toast');
+});
+
+test('copy actions share an accessible icon, contextual labels and stable action markers', async () => {
+  const [html, css, app] = await Promise.all(['index.html', 'style.css', 'app.js']
+    .map(file => fs.readFile(path.join(root, 'wwwroot', file), 'utf8')));
+  const actions = new Map([
+    ['oauth-pkce-redirect-copy', 'auth.pkce.redirect.copy'],
+    ['copy-insomnia-script', 'request.capture-example.copy'],
+    ['copy-body', 'response.copy-body'],
+    ['copy-headers', 'response.copy-headers'],
+    ['copy-ai-safe-context', 'agent.context.copy'],
+    ['copy-maestri-agent-prompt', 'agent.prompt.copy'],
+    ['copy-curl-command', 'request.command.copy']
+  ]);
+  for (const [id, action] of actions) {
+    const button = html.match(new RegExp(`<button\\b[^>]*\\bid="${id}"[^>]*>[\\s\\S]*?<\\/button>`))?.[0];
+    assert.ok(button, `copy action #${id} should exist`);
+    assert.equal(attribute(button, 'data-vortix-action'), action);
+    assert.match(button, /<svg[^>]*class="copy-icon"[^>]*aria-hidden="true"/);
+    assert.match(attribute(button, 'aria-label') || '', /^Copiar\b/);
+    assert.match(attribute(button, 'title') || '', /^Copiar\b/);
+    assert.match(button, /<span(?: id="[^"]+")? class="visually-hidden">/);
+  }
+  assert.match(html, /id="copy-curl-label" class="visually-hidden">Copiar cURL</);
+  assert.match(html, /data-vortix-action="request.body.format"/);
+  assert.match(html, /data-vortix-action="request.body.minify"/);
+  assert.match(css, /\.copy-with-icon \{[^}]*width: 30px[^}]*height: 30px[^}]*padding: 0/);
+  assert.match(css, /\.copy-icon \{[^}]*width: 14px/);
+  const curlPreview = app.slice(app.indexOf('function updateCurlExportPreview('), app.indexOf('\nasync function openCurlExportDialog(', app.indexOf('function updateCurlExportPreview(')));
+  assert.match(curlPreview, /copyLabel\.textContent='Copiar '\+formatName/);
+  assert.doesNotMatch(curlPreview, /copy\.textContent='Copiar '/);
+  assert.match(app, /dataset\.vortixAction='response\.path\.copy'/);
+  assert.match(app, /copy\.id='response-path-copy-'\+\(\+\+responsePathCopyId\)/);
+  assert.match(app, /copy\.title='Copiar caminho JSON'/);
+  assert.match(app, /copy\.innerHTML=COPY_ICON_SVG\+'<span class="visually-hidden">Copiar<\/span>'/);
 });

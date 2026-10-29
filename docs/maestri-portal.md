@@ -27,6 +27,27 @@ window.vortixAgent.snapshot() // estado resumido e seguro da tela atual
 
 Estados dos controles não comprovam consentimento ou autorização. Em particular, nenhum estado do bridge substitui a autorização explícita e as confirmações exigidas antes de enviar uma escrita.
 
+`snapshot().request.paramsCount` conta parâmetros com nome preenchido, alinhado ao contador da aba Params. A linha inicial vazia não conta; nomes e valores continuam omitidos. Uma linha com valor e sem nome permanece inválida ao preparar/enviar a request.
+
+### Cópia e ferramentas de JSON
+
+As ações de copiar são botões com ícone, `title` e nome acessível contextual. Descubra o controle com `describe()` e opere seu botão visível pelo Portal; a ponte permanece somente de leitura e não oferece um executor de clipboard. Os handlers da interface aguardam o clipboard e só então mostram o toast de informação, sem colocar o conteúdo copiado na mensagem.
+
+| Ação | Controle |
+|---|---|
+| `response.copy-body` | `copy-body` |
+| `response.copy-headers` | `copy-headers` |
+| `response.path.copy` | `response-path-copy-N`, na árvore JSON |
+| `request.command.copy` | `copy-curl-command`, para cURL/HTTPie |
+| `auth.pkce.redirect.copy` | `oauth-pkce-redirect-copy` |
+| `request.capture-example.copy` | `copy-insomnia-script`, exemplo de captura |
+| `agent.context.copy` | `copy-ai-safe-context` |
+| `agent.prompt.copy` | `copy-maestri-agent-prompt` |
+
+Os IDs dos caminhos JSON são opacos e válidos para a árvore renderizada naquele momento; refaça a descoberta após mudar a visualização. Não derivam de chaves ou valores da resposta. Na árvore, o ícone aparece ao passar o ponteiro ou focar sua linha; use hover/foco antes do clique e abra os nós necessários. Abra os painéis necessários e respeite controles desabilitados. A exportação de comandos continua exigindo a confirmação existente antes de incluir dados sensíveis; descobrir ou copiar uma ação não autoriza enviar requests.
+
+`request.body.format` (`format-json`) e `request.body.minify` (`minify-json`) expõem os handlers existentes de identar/compactar JSON de entrada. Eles só ficam disponíveis no modo JSON e não enviam requests.
+
 A região `collections` cobre a seção inteira de Coleções: toolbar de busca, importação, exportação, Runner e criação, além da árvore. `describe({ region: 'collections', includeState: true })` apenas descreve esses controles; não os executa.
 
 O campo `request.send-status` (`#request-send-status`) exibe a mesma mensagem de orientação para a pessoa e para o agente, sem valores da requisição. Ele indica o que precisa ser revisto e não autoriza o envio; consentimento explícito e o guard continuam obrigatórios.

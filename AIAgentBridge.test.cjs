@@ -59,7 +59,9 @@ function createDocument() {
     ['response-headers', element({ id: 'response-headers', textContent: values.response })],
     ['response-body', element({ id: 'response-body', textContent: values.response })]
   ]);
-  elements.get('query-params').children = [{}, {}];
+  elements.get('query-params').children = ['page', 'sort'].map(name => ({
+    querySelector(selector) { return selector === '[data-query-name]' ? { value: name } : null; }
+  }));
   elements.get('environment-select').options = [{}, {}, {}];
 
   const actions = [
@@ -827,4 +829,25 @@ test('safe-state button renders JSON and reports a missing bridge without side e
   assert.equal(output.textContent, JSON.stringify(snapshot, null, 2));
   assert.equal(output.hidden, false);
   assert.deepEqual(messages, []);
+});
+
+
+test('snapshot counts configured parameter names without exposing names or values', async () => {
+  const doc = createDocument();
+  const row = (name, value = '') => ({
+    querySelector(selector) {
+      return selector === '[data-query-name]' ? { value: name }
+        : selector === '[data-query-value]' ? { value } : null;
+    }
+  });
+  const params = doc.elements.get('query-params');
+  params.children = [row('  '), row('PARAM_NAME_SENTINEL', 'PARAM_VALUE_SENTINEL'), row('', 'ORPHAN_VALUE_SENTINEL')];
+  const { api } = await loadBridge(doc.document);
+  const snapshot = api.snapshot();
+  assert.equal(snapshot.request.paramsCount, 1);
+  assert.doesNotMatch(JSON.stringify(snapshot), /PARAM_NAME_SENTINEL|PARAM_VALUE_SENTINEL|ORPHAN_VALUE_SENTINEL/);
+  params.children = [row('')];
+  assert.equal(api.snapshot().request.paramsCount, 0, 'the quiet initial row is not a configured parameter');
+  params.children = [];
+  assert.equal(api.snapshot().request.paramsCount, 0);
 });

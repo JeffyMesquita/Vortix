@@ -34,7 +34,13 @@ test('request editor exposes safe cURL and HTTPie generation and copy controls',
   assert.match(app, /confirmWithDialog\(\{[\s\S]*?includeSensitive/);
   const copyStart = app.indexOf('async function copyCurlCommand('), copyEnd = app.indexOf('\nfunction openImportDialog', copyStart);
   assert.ok(copyStart >= 0 && copyEnd > copyStart);
-  assert.match(app.slice(copyStart, copyEnd), /navigator\.clipboard\.writeText\(command\)/);
+  assert.match(app.slice(copyStart, copyEnd), /await copyToClipboard\(command\)/);
+  assert.doesNotMatch(app.slice(copyStart, copyEnd), /navigator\.clipboard\.writeText/);
+  const helperStart = app.indexOf('async function copyToClipboard('), helperEnd = app.indexOf('\nasync function copyOutput(', helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart);
+  const helper = app.slice(helperStart, helperEnd);
+  assert.match(helper, /await navigator\.clipboard\.writeText\(text\)/);
+  assert.match(helper, /showToast\('Copiado','Copiado para a área de transferência\.','info'\)/);
 });
 
 test('README documents cURL export safety and shell formats', async () => {

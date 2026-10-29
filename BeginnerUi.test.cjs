@@ -119,17 +119,14 @@ test('settings group every subject in native details and keep storage internals 
   assert.doesNotMatch(settings[1], /dbRead|dbWrite|WebCrypto PBKDF2-SHA-256/, 'consumer copy should not expose storage function names');
 });
 
-test('request editor tabs stay complete and mark automation as secondary', async () => {
+test('request editor keeps all six tab-to-panel relationships', async () => {
   const html = await readHtml();
   const tabs = [...html.matchAll(/<button\b(?=[^>]*\bdata-editor-tab="([^"]+)")([^>]*)>/g)];
   const panels = [...html.matchAll(/<(?:div|section)\b(?=[^>]*\bdata-editor-panel="([^"]+)")([^>]*)>/g)];
+  assert.deepEqual(tabs.map(([, name]) => name), ['params', 'headers', 'body', 'auth', 'scripts', 'tests']);
   assert.equal(panels.length, tabs.length);
   for (const [, name, attributes] of tabs) {
     assert.ok(attributes.includes(`aria-controls="editor-panel-${name}"`), `${name} tab keeps its panel`);
-    if (name === 'scripts' || name === 'tests') {
-      assert.match(attributes, /editor-tab-secondary/);
-      assert.match(attributes, /title="[^"]*[Aa]utoma/);
-    }
   }
 });
 
@@ -308,4 +305,84 @@ test('advanced indicator announces active options and tests without reading valu
   context.activeResponseContract = null;
   assert.equal(updateAdvancedToolsIndicator(), '');
   assert.equal(indicator.hidden, true);
+});
+
+function fakeParamElement(tag = 'div') {
+  const element = {
+    tagName: tag.toUpperCase(), children: [], dataset: {}, style: {},
+    className: '', textContent: '', htmlFor: '', id: '', type: '', value: '',
+    placeholder: '', autocomplete: '', spellcheck: false,
+    append(...nodes) { for (const node of nodes) { node.parentElement = element; element.children.push(node); } },
+    replaceChildren(...nodes) { element.children = []; element.append(...nodes); },
+    remove() {
+      if (!element.parentElement) return;
+      const parent = element.parentElement;
+      parent.children = parent.children.filter(child => child !== element);
+      element.parentElement = null;
+    },
+    setAttribute(name, value) { element[name] = value; },
+    querySelector(selector) {
+      const find = node => {
+        if (selector === '[data-query-name]' && Object.prototype.hasOwnProperty.call(node.dataset, 'queryName')) return node;
+        if (selector === '[data-query-value]' && Object.prototype.hasOwnProperty.call(node.dataset, 'queryValue')) return node;
+        for (const child of node.children || []) { const found = find(child); if (found) return found; }
+        return null;
+      };
+      return find(element);
+    },
+    focus() { element.focused = true; }
+  };
+  return element;
+}
+
+function allDescendants(element, result = []) {
+  for (const child of element.children || []) { result.push(child); allDescendants(child, result); }
+  return result;
+}
+
+test('parameters keep one quiet initial row, ignore empty rows and never steal focus', async () => {
+  const app = await fs.readFile(appPath, 'utf8');
+  const start = app.indexOf('function createQueryParamRow(');
+  const end = app.indexOf('function oauth2TokenConfigFromForm(', start);
+  assert.ok(start >= 0 && end > start, 'parameter helpers should be present');
+  const queryParams = fakeParamElement('div');
+  const count = fakeParamElement('span');
+  const confirm = { checked: true };
+  const document = { createElement: tag => fakeParamElement(tag) };
+  const byId = id => id === 'params-count' ? count : id === 'confirm-test-data' ? confirm : null;
+  const context = {
+    queryParams, document, byId, route: { value: '/v1/usuarios' }, encodeURIComponent,
+    isSensitiveName: () => false, applyEnvironment: value => value, updateGuard: () => {}
+  };
+  const api = vm.runInNewContext(`let queryId=0;${app.slice(start, end)};({ createQueryParamRow, renderQueryParams, ensureQueryParamRow, updateParamsCount, buildRequestRoute })`, context);
+
+  api.ensureQueryParamRow();
+  assert.equal(queryParams.children.length, 1, 'initial empty row should exist once');
+  const initialInputs = allDescendants(queryParams).filter(node => node.tagName === 'INPUT');
+  assert.deepEqual(initialInputs.map(input => input.placeholder), ['Ex.: page', 'Ex.: 1']);
+  assert.ok(initialInputs.every(input => !input.focused), 'initial row must not take focus');
+  assert.equal(count.textContent, '0');
+
+  queryParams.children[0].children[2].onclick();
+  assert.equal(queryParams.children.length, 0, 'removing the last row must not recreate it');
+  assert.equal(count.textContent, '0');
+
+  const empty = api.createQueryParamRow();
+  const filled = api.createQueryParamRow('page', '1');
+  queryParams.append(empty, filled);
+  api.updateParamsCount();
+  assert.equal(count.textContent, '1', 'fully empty rows stay out of the count');
+  assert.equal(api.buildRequestRoute(), '/v1/usuarios?page=1', 'fully empty rows stay out of the route');
+
+  const keyless = api.createQueryParamRow('', 'orphan');
+  queryParams.append(keyless);
+  assert.throws(() => api.buildRequestRoute(), /Informe a chave de cada parâmetro preenchido/, 'a value without a name must keep failing closed');
+  keyless.remove();
+
+  queryParams.replaceChildren();
+  api.renderQueryParams([]);
+  api.ensureQueryParamRow();
+  const restored = allDescendants(queryParams).filter(node => node.tagName === 'INPUT');
+  assert.equal(queryParams.children.length, 1, 'restore keeps one empty row');
+  assert.ok(restored.every(input => !input.focused), 'restore must not steal focus');
 });
