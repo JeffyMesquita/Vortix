@@ -627,8 +627,6 @@ var graphqlIntrospectionEndpoint = app.MapPost("/api/graphql/introspection", asy
         EnvironmentId = request.EnvironmentId,
         BodyMode = "graphql",
         Body = graphqlIntrospectionBody,
-        ConfirmTestData = true,
-        TestDataPhrase = "TESTE",
         AllowInsecureHttp = request.AllowInsecureHttp
     };
     return await HandleRequest(context, introspectionCall, httpClient, localDataStore, cookieJarLocks, port);
@@ -794,12 +792,6 @@ static async Task<IResult> HandleRequest(HttpContext context, ApiCall call, Http
         }
     } else if (IsWriteMethod(method))
     {
-        if (!call.ConfirmTestData ||
-            !string.Equals(call.TestDataPhrase?.Trim(), "TESTE", StringComparison.Ordinal))
-        {
-            return Error(StatusCodes.Status400BadRequest, "Confirme os dados de teste e digite TESTE antes de enviar.");
-        }
-
         var contentTypeLine = (call.Headers ?? string.Empty).Split('\n')
             .Select(line => line.Trim().TrimEnd('\r'))
             .FirstOrDefault(line => line.StartsWith("Content-Type:", StringComparison.OrdinalIgnoreCase));
@@ -1817,8 +1809,6 @@ sealed class ApiCall
     public string BodyMode { get; init; } = "json";
     public string Body { get; init; } = string.Empty;
     public List<MultipartField>? MultipartFields { get; init; } = [];
-    public bool ConfirmTestData { get; init; }
-    public string TestDataPhrase { get; init; } = string.Empty;
     public bool ConfirmTokenRequest { get; init; }
     public string TokenClientId { get; init; } = string.Empty;
     public string TokenClientSecret { get; init; } = string.Empty;

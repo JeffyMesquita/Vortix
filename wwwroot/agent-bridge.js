@@ -129,7 +129,7 @@
         authType: valueOf('auth-type'),
         authConfigured: authConfigured(),
         authPersistenceEnabled: byId('save-token-history')?.checked === true,
-        requiresWriteConfirmation: ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
+        requiresWriteConfirmation: false
       },
       response: {
         statusCode: responseStatusCode(),

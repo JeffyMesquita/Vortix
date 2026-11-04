@@ -278,13 +278,10 @@ test('prepare and approve are side-effect free; execution uses one prepared call
   assert.equal(page.context.calls, 1);
 });
 
-test('write review requires TESTE and checkbox before contextual approval', async () => {
+test('write review allows contextual approval without a test-data declaration', async () => {
   const page = harness('POST');
   page.field('prepare').onclick();
-  assert.equal(page.field('approve').disabled, true);
-  page.field('confirm').checked = true;
-  page.field('phrase').value = 'TESTE';
-  page.tick();
+  assert.equal(page.field('approve').disabled, false);
   await page.field('approve').onclick();
   assert.equal(page.field('execute').disabled, false);
   assert.equal(page.context.calls, 0);

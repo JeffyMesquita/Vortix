@@ -42,30 +42,13 @@ async function readHtml() {
   return fs.readFile(indexPath, 'utf8');
 }
 
-test('beginner flow orders base URL, editor, guarded send action and advanced tools', async () => {
+test('request toolbar places send beside the address before editor tabs', async () => {
   const html = await readHtml();
-  assert.ok(
-    indexOf(html, 'id="base-url"') < indexOf(html, 'id="method"'),
-    'URL base should be filled before method and route'
-  );
-  assert.ok(
-    indexOf(html, 'id="request-editor-tabs"') < indexOf(html, 'id="write-guard"'),
-    'editor tabs should precede the guarded send action'
-  );
-  assert.ok(
-    indexOf(html, 'id="write-guard"') < indexOf(html, 'id="request-send-status"') &&
-      indexOf(html, 'id="request-send-status"') < indexOf(html, 'id="send-request"'),
-    'write guard, status and send button should share one action area'
-  );
-  assert.ok(
-    indexOf(html, 'id="send-request"') < indexOf(html, 'id="structured-card"'),
-    'reviewed execution should follow the send action'
-  );
-  assert.match(
-    html,
-    /<button class="button primary send-button" id="send-request"[^>]*aria-describedby="request-send-status"/,
-    'send button must keep its described status'
-  );
+  assert.ok(indexOf(html, 'id="base-url"') < indexOf(html, 'id="method"'));
+  assert.ok(indexOf(html, 'id="route"') < indexOf(html, 'id="send-request"'));
+  assert.ok(indexOf(html, 'id="send-request"') < indexOf(html, 'id="request-editor-tabs"'));
+  assert.doesNotMatch(html, /id="(?:write-guard|test-data-phrase|confirm-test-data)"/);
+  assert.match(html, /<button class="button primary send-button" id="send-request"[^>]*aria-describedby="request-send-status"/);
 });
 
 test('advanced tools disclose cURL, HTTP and references without nesting reviewed execution', async () => {
@@ -94,18 +77,69 @@ test('response prioritizes body and keeps headers secondary', async () => {
   assert.match(html, /id="response-tests-output"[^>]*hidden/);
 });
 
-test('collection tools use a textual disclosure while search stays visible', async () => {
+test('collections sidebar keeps its title, search, and one primary action before closed secondary actions', async () => {
   const html = await readHtml();
   const collections = sectionBlock(html, 'collections-section');
-  const disclosure = /<details\b[^>]*class="[^"]*collection-tools-more[^"]*"[^>]*>[\s\S]*?<summary>([\s\S]*?)<\/summary>/.exec(collections);
-  assert.ok(disclosure, 'collection tools disclosure should exist');
-  assert.match(disclosure[1], /Ferramentas/);
-  const disclosureStart = disclosure.index;
-  for (const id of ['import-collection', 'export-collection', 'run-collection', 'add-collection-heading']) {
-    assert.ok(collections.indexOf(`id="${id}"`) > disclosureStart, `#${id} should live inside the tools disclosure`);
+  const headingActions = /<div\b[^>]*class="collection-heading-actions"[^>]*>([\s\S]*?)<\/div>/.exec(collections);
+  assert.match(collections, /<h2 id="collections-heading">Coleções<\/h2>/, 'section keeps its title');
+  assert.ok(headingActions, 'search and primary action stay in the heading row');
+
+  const search = /<button\b(?=[^>]*\bid="quick-open-button")[^>]*>/.exec(headingActions[1]);
+  assert.ok(search, 'collection search stays visible beside the title');
+  assert.match(search[0], /data-vortix-action="collection\.search"/);
+
+  const primaryActions = [...headingActions[1].matchAll(/<button\b(?=[^>]*\bdata-vortix-action="collection\.new")[^>]*>/g)];
+  assert.equal(primaryActions.length, 1, 'heading has exactly one collection.new action');
+  assert.match(primaryActions[0][0], /\bid="add-collection"/);
+  assert.match(primaryActions[0][0], /aria-label="Nova coleção"/);
+
+  const disclosure = /<details\b(?=[^>]*\bid="collection-tools-more")([^>]*)>([\s\S]*?)<\/details>/.exec(collections);
+  assert.ok(disclosure, 'secondary actions disclosure should exist');
+  assert.doesNotMatch(disclosure[1], /(?:^|\s)open(?:\s|=|$)/i, 'secondary actions start closed');
+  assert.match(disclosure[2], /<summary\b[^>]*aria-label="Mais ações"[^>]*>/);
+  for (const [id, action] of [
+    ['import-collection', 'collection.import'],
+    ['export-collection', 'collection.export'],
+    ['run-collection', 'runner.open']
+  ]) {
+    const button = new RegExp('<button\\b(?=[^>]*\\bid="' + id + '")[^>]*>[\\s\\S]*?<\\/button>').exec(disclosure[2]);
+    assert.ok(button, '#' + id + ' stays in the secondary menu');
+    assert.ok(button[0].includes('data-vortix-action="' + action + '"'), '#' + id + ' keeps its action');
   }
-  assert.ok(collections.indexOf('id="quick-open-button"') < disclosureStart, 'search stays visible outside the disclosure');
+  assert.match(disclosure[2], /<span>Executar seleção<\/span>/, 'Runner remains scoped to the selection');
+  assert.doesNotMatch(disclosure[2], /data-vortix-action="collection\.new"/, 'secondary menu does not duplicate the primary action');
+  assert.ok(collections.indexOf('id="collections-tree"') > disclosure.index, 'tree follows the heading actions');
   assert.match(collections, /id="collections-empty-create"/);
+});
+
+test('collection actions disclosure closes on Escape and restores focus to its summary', async () => {
+  const app = await fs.readFile(appPath, 'utf8');
+  const start = app.indexOf("byId('collection-tools-more').addEventListener('keydown',event=>{");
+  const endMarker = '\n  });';
+  const end = app.indexOf(endMarker, start);
+  assert.ok(start >= 0 && end > start, 'collection actions Escape handler should be present');
+
+  let keydown = null, focused = 0, registeredEvent = '';
+  const summary = { focus() { focused += 1; } };
+  const disclosure = {
+    open: true,
+    addEventListener(type, handler) { registeredEvent = type; keydown = handler; },
+    querySelector(selector) { assert.equal(selector, 'summary'); return summary; }
+  };
+  vm.runInNewContext(app.slice(start, end + endMarker.length), {
+    byId: id => id === 'collection-tools-more' ? disclosure : null
+  });
+  assert.equal(registeredEvent, 'keydown');
+  assert.equal(typeof keydown, 'function');
+
+  let prevented = false;
+  keydown({
+    key: 'Escape', currentTarget: disclosure,
+    preventDefault() { prevented = true; }
+  });
+  assert.equal(prevented, true, 'Escape is consumed while the menu is open');
+  assert.equal(disclosure.open, false, 'Escape closes the menu');
+  assert.equal(focused, 1, 'focus returns to the disclosure summary');
 });
 
 test('settings group every subject in native details and keep storage internals out of main copy', async () => {
@@ -344,7 +378,10 @@ test('parameters keep one quiet initial row, ignore empty rows and never steal f
   const app = await fs.readFile(appPath, 'utf8');
   const start = app.indexOf('function createQueryParamRow(');
   const end = app.indexOf('function oauth2TokenConfigFromForm(', start);
+  const targetStart = app.indexOf('function withRequestCorrectionTarget(');
+  const targetEnd = app.indexOf('\nfunction isRequestCorrectionTargetAvailable(', targetStart);
   assert.ok(start >= 0 && end > start, 'parameter helpers should be present');
+  assert.ok(targetStart >= 0 && targetEnd > targetStart, 'request correction target helper should be present');
   const queryParams = fakeParamElement('div');
   const count = fakeParamElement('span');
   const confirm = { checked: true };
@@ -354,7 +391,7 @@ test('parameters keep one quiet initial row, ignore empty rows and never steal f
     queryParams, document, byId, route: { value: '/v1/usuarios' }, encodeURIComponent,
     isSensitiveName: () => false, applyEnvironment: value => value, updateGuard: () => {}
   };
-  const api = vm.runInNewContext(`let queryId=0;${app.slice(start, end)};({ createQueryParamRow, renderQueryParams, ensureQueryParamRow, updateParamsCount, buildRequestRoute })`, context);
+  const api = vm.runInNewContext(`const requestCorrectionTargets=new WeakMap();${app.slice(targetStart, targetEnd)};let queryId=0;${app.slice(start, end)};({ createQueryParamRow, renderQueryParams, ensureQueryParamRow, updateParamsCount, buildRequestRoute })`, context);
 
   api.ensureQueryParamRow();
   assert.equal(queryParams.children.length, 1, 'initial empty row should exist once');

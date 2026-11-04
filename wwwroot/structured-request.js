@@ -49,8 +49,6 @@
       call.folderId = sources.origin.folderId;
       call.preRequestSecretValues = preRequest.vaultSecrets;
       call.saveBearerToken = false;
-      call.confirmTestData = false;
-      call.testDataPhrase = '';
       const historyRequest = { ...call, ...saved, environmentId: call.environmentId, collectionId: call.collectionId, folderId: call.folderId, saveBearerToken: false };
       return {
         request: { method: call.method, call, historyRequest, secrets, origin: sources.origin, historySettings: sources.historySettings, sourceStamp: JSON.stringify(sources) },

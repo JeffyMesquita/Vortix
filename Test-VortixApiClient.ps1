@@ -19,7 +19,7 @@ foreach ($requiredText in @(
     'data-editor-tab="scripts"', 'response-json-path', 'insomnia.environment.set', 'save-token-environment',
     'id="add-response-test"', 'id="response-tests-list"', 'id="response-tests-output"',
     'data-editor-tab="tests"', 'id="settings-dialog"', 'id="settings-environments"',
-    'id="run-collection"', 'id="runner-dialog"', 'id="runner-datasets"', 'id="runner-write-phrase"',
+    'id="run-collection"', 'id="runner-dialog"', 'id="runner-datasets"', 'id="runner-confirm-writes"',
     'id="response-view-modes"', 'data-response-view="tree"', 'id="response-search"', 'id="response-tree"',
     'id="response-example-save-hint"', 'id="save-response-example"', 'id="response-example-save-form"', 'id="response-example-name"', 'id="response-examples-panel"', 'id="response-examples-list"',
     'Insomnia JSON (v4)', 'Postman Collection v2.1', 'id="export-workspace"', 'id="restore-workspace"', 'id="restore-workspace-file"', 'id="protect-existing-secrets"'

@@ -296,8 +296,8 @@ test('write calls only receive the test guard after explicit runner approval', (
   const request = { method: 'POST', baseUrl: '{{baseUrl}}', route: '/groups', body: '{"id":{{id}}}' };
   assert.throws(() => prepareSavedRequest(request, { baseUrl: 'http://localhost' }, { id: 1 }, false), /confirm/i);
   const prepared = prepareSavedRequest(request, { baseUrl: 'http://localhost' }, { id: 1 }, true);
-  assert.equal(prepared.confirmTestData, true);
-  assert.equal(prepared.testDataPhrase, 'TESTE');
+  assert.equal(Object.hasOwn(prepared, 'confirmTestData'), false);
+  assert.equal(Object.hasOwn(prepared, 'testDataPhrase'), false);
   assert.equal(prepared.body, '{"id":1}');
 });
 
@@ -306,7 +306,7 @@ test('only requests explicitly marked as credential prompts stay out of the Runn
   assert.throws(() => prepareSavedRequest({ method: 'POST', tokenRequest: true }, {}, {}, true), /credenciais/i);
   const savedTokenCall = prepareSavedRequest({ method: 'POST', route: '/oauth/token' }, {}, {}, true);
   assert.equal(savedTokenCall.route, '/oauth/token');
-  assert.equal(savedTokenCall.confirmTestData, true);
+  assert.equal(Object.hasOwn(savedTokenCall, 'confirmTestData'), false);
 });
 
 test('token helper configuration has no default route and accepts persisted API-specific names', () => {
@@ -362,7 +362,7 @@ test('workspace exposes the Runner and its dataset/write safety controls', () =>
   assert.match(html, /id="run-collection"/);
   assert.match(html, /id="runner-dialog"/);
   assert.match(html, /id="runner-datasets"/);
-  assert.match(html, /id="runner-write-phrase"/);
+  assert.doesNotMatch(html, /id="runner-write-phrase"/);
   assert.match(html, /id="runner-stop-on-error"/);
 });
 
@@ -372,10 +372,13 @@ test('sidebar collection actions use vector icons and the tree overflow menu has
   const start = html.indexOf('<div class="collection-tools">'), end = html.indexOf('</div>', start);
   const toolbar = html.slice(start, end);
   assert.ok(start >= 0 && end > start);
-  for (const id of ['import-collection', 'export-collection', 'run-collection', 'add-collection-heading']) {
+  for (const id of ['import-collection', 'export-collection', 'run-collection']) {
     const button = toolbar.match(new RegExp(`<button[^>]*id="${id}"[^>]*>[\\s\\S]*?<\\/button>`))?.[0] || '';
     assert.match(button, /<svg[^>]*aria-hidden="true"/, `${id} should use a decorative SVG icon`);
   }
+  const addCollection = html.match(/<button[^>]*id="add-collection"[^>]*>[\s\S]*?<\/button>/)?.[0] || '';
+  assert.match(addCollection, /<svg[^>]*aria-hidden="true"/, 'add-collection should use a decorative SVG icon');
+  assert.match(addCollection, /data-vortix-action="collection\.new"/);
   assert.doesNotMatch(toolbar, /[⇩⇧▶＋]/);
   const rowStart = app.indexOf('function makeContainerRow('), rowEnd = app.indexOf('\nfunction appendSavedRequest', rowStart);
   assert.ok(rowStart >= 0 && rowEnd > rowStart);
