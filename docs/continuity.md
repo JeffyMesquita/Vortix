@@ -1,5 +1,13 @@
 # Fichário de continuidade do Vortix
 
+## Cliente de APIs de uso geral — 04/11/2026
+
+O envio manual permite todos os métodos suportados sem frase `TESTE`, declaração de dados descartáveis ou confirmação adicional por método. A execução revisada mantém aprovação contextual e uso único. O Runner visual mantém autorização de escritas por rodada; na CLI basta `--allow-writes`, e a opção `--confirm-test-data` foi removida.
+
+A barra de envio fica acima do editor e da resposta. A sidebar prioriza a árvore, com busca, uma ação principal Nova coleção e Mais ações para Importar, Exportar e Executar seleção. A correção guiada **Ir ao campo** preserva rascunho e foco explícito; uma orientação antiga de rota vazia é descartada ao restaurar uma rota preenchida.
+
+Código, testes e documentação foram preparados juntos para publicação pelo PR autorizado em 04/11. Consulte as [evidências e limites](superpowers/validation/2026-11-04-global-api-client.md). Os registros datados abaixo preservam o histórico das rodadas anteriores; seus estados operacionais não comprovam o estado atual do runtime.
+
 **Rodada atual — dependências do Runner, 29/10/2026:** entrega no [PR #39](https://github.com/JeffyMesquita/Vortix/pull/39), conforme [SDD](superpowers/specs/2026-10-29-runner-dependencies-design.md) e [plano](superpowers/plans/2026-10-29-runner-dependencies.md). Commit de implementação `53fc96844e5aa23eb8bb6b215193f6233b4bf272`, branch `feat/runner-dependencies`, base `0816037`; estado vivo, SHA final, merge e checks ficam no PR. [Evidência local e limites](superpowers/validation/2026-10-29-runner-dependencies.md): 454 testes/453 aprovados/zero falhas/um skip, build sem avisos/erros, revisão independente e smoke com mock (produtor 1 / consumidor 2, cancelamento sem envio). Código e correções finais concluídos; QA em Shikamaru, porta 63225 (banco isolado) e Bulma, porta 63226 (mock), instância 63224 preservada. Teclado nativo Enter/Space não confirmado pelo Portal; foco, cliques e geometria conferidos. README usa nova logo e sete untracked anteriores preservados. Sem API real, mobile/público ou troca de conta; Terra falhou no bootstrap 401 e não executou. Os registros abaixo são históricos.
 
 **Publicação em revisão — 29/10/2026:** [PR #38 — editor, cópias e temas](https://github.com/JeffyMesquita/Vortix/pull/38), branch `feat/editor-copy-themes`, base `master`. Pacote de 21 arquivos, incluindo três capturas fictícias, commit inicial `1a5d977b261607385276bfe82d74aa674539b77f`. Suíte JS repetida: 420 testes, 419 aprovados, zero falhas e um skip; sintaxe JS e diff-check passaram. Hange revisou somente leitura o commit inicial, sem bloqueadores concretos. Merge autorizado pelo usuário, condicionado aos checks e à conferência do SHA final. Estado vivo e resultado do merge/CI ficam no PR; o registro de preparação abaixo é histórico.
@@ -43,7 +51,7 @@ Na consulta desta atualização: nenhum PR ou issue aberto. Isso é um retrato d
 1. Selecionar request salva e ambiente explícito; salvar edições pendentes.
 2. Preparar sem HTTP, histórico, obtenção de token ou alteração do formulário.
 3. Revisar destino, método e efeitos locais; aprovar na interface, inclusive GET.
-4. Escritas também exigem confirmação de dados descartáveis e `TESTE`.
+4. Escritas usam a mesma revisão contextual; a frase e a declaração de dados descartáveis foram removidas.
 5. Executar uma vez; consultar HTTP, entrega, testes, captura e persistência separadamente.
 
 Alterações invalidam aprovação; preparação expira cinco minutos após sua criação. Query, fragmento e credenciais na URL base são bloqueados antes de aprovar. HTTP remoto exige `allowInsecureHttp` na request salva, sem remover proteções de rede.

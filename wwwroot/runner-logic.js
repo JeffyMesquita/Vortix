@@ -289,7 +289,7 @@
     return {
       baseUrl: endpoint.origin, route: endpoint.pathname + endpoint.search, method: 'POST',
       bodyMode: 'urlencoded', body: body.toString(), headers: 'Accept: application/json',
-      authType, basicUsername, basicPassword, confirmTestData: false, testDataPhrase: '',
+      authType, basicUsername, basicPassword,
       confirmTokenRequest: true, tokenFlow: 'oauth2-client-credentials', tokenRequest: true,
       tokenClientId: '', tokenClientSecret: '', tokenCredentialMode: 'body',
       tokenClientIdField: 'client_id', tokenClientSecretField: 'client_secret',
@@ -3905,8 +3905,6 @@
       bearerToken,
       headers: resolve(saved?.headers || ''),
       allowInsecureHttp: saved?.allowInsecureHttp === true,
-      confirmTestData: writeMethods.has(method) && allowWrites,
-      testDataPhrase: writeMethods.has(method) && allowWrites ? 'TESTE' : '',
       confirmTokenRequest: false,
       tokenClientId: '',
       tokenClientSecret: '',

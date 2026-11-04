@@ -32,7 +32,7 @@ try {
     if (-not $ready) { throw 'Temporary API did not become ready.' }
     $headers = @{ 'X-Api-Studio' = '1'; Origin = $baseUrl }
     $fakeToken = 'graphql-introspection-test-token'
-    $payload = @{ baseUrl = $mockBaseUrl; route = '/graphql'; method = 'DELETE'; headers = 'Accept: application/json'; authType = 'bearer'; bearerToken = $fakeToken; bodyMode = 'json'; body = 'mutation { deleteEverything }'; confirmTestData = $false; testDataPhrase = ''; allowInsecureHttp = $false; environmentId = 'introspection-test' } | ConvertTo-Json -Compress
+    $payload = @{ baseUrl = $mockBaseUrl; route = '/graphql'; method = 'DELETE'; headers = 'Accept: application/json'; authType = 'bearer'; bearerToken = $fakeToken; bodyMode = 'json'; body = 'mutation { deleteEverything }'; allowInsecureHttp = $false; environmentId = 'introspection-test' } | ConvertTo-Json -Compress
     $result = Invoke-RestMethod -Uri ($baseUrl + '/api/graphql/introspection') -Method Post -Headers $headers -ContentType 'application/json' -Body $payload -TimeoutSec 10
     if ($result.status -ne 200) { throw ('Introspection proxy expected HTTP 200, got ' + $result.status) }
     $schema = $result.body | ConvertFrom-Json

@@ -364,7 +364,7 @@ test('Runner CLI keeps dataset variables above CI mappings and CI mappings above
   assert.doesNotMatch(junit + result.stdout + result.stderr, /CAPTURED_TOKEN_CANARY|EXPORTED_TOKEN_CANARY|CI_TOKEN_CANARY|DATASET_TOKEN_CANARY/);
 });
 
-test('Runner CLI blocks writes before proxy calls unless both explicit test-write flags are supplied', async t => {
+test('Runner CLI blocks writes before proxy calls unless explicit write authorization is supplied', async t => {
   const directory = await createTempDirectory(t);
   const proxy = await startProxy(t);
   const collection = await writeCollection(directory, {
@@ -377,11 +377,11 @@ test('Runner CLI blocks writes before proxy calls unless both explicit test-writ
   assert.equal(proxy.calls.length, 0);
   assert.match(blocked.stderr, /gravações|escrita/i);
 
-  const allowed = await runCli(cliArgs(proxy.origin, collection, report, ['--allow-writes', '--confirm-test-data', 'TESTE']));
+  const allowed = await runCli(cliArgs(proxy.origin, collection, report, ['--allow-writes']));
   assert.equal(allowed.code, 0, allowed.stderr);
   assert.equal(proxy.calls.length, 1);
-  assert.equal(proxy.calls[0].confirmTestData, true);
-  assert.equal(proxy.calls[0].testDataPhrase, 'TESTE');
+  assert.equal(Object.hasOwn(proxy.calls[0], 'confirmTestData'), false);
+  assert.equal(Object.hasOwn(proxy.calls[0], 'testDataPhrase'), false);
 });
 
 test('Runner CLI rejects non-loopback proxies before making network requests', async t => {

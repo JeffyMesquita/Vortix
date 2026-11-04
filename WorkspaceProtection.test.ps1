@@ -269,7 +269,7 @@ try {
     if ((Get-PlaintextScan $secrets $scanPath) -ne 'CLEAR') { throw 'A cookie value remains in SQLite plaintext.' }
 
 
-    $bodyMockServer = Start-BodyCaptureServer 7
+    $bodyMockServer = Start-BodyCaptureServer 10
     $bodyMockBaseUrl = 'http://127.0.0.1:' + $bodyMockServer.Port
     $bodyCases = @(
         [pscustomobject]@{ mode = 'json'; body = '{"ok":true}'; contentType = 'application/json'; headers = '' },
@@ -277,11 +277,15 @@ try {
         [pscustomobject]@{ mode = 'xml'; body = '<note>ok</note>'; contentType = 'application/xml'; headers = '' },
         [pscustomobject]@{ mode = 'urlencoded'; body = 'name=Ana&tag=one&tag=two'; contentType = 'application/x-www-form-urlencoded'; headers = '' },
         [pscustomobject]@{ mode = 'graphql'; body = '{"query":"query Example { ping }","variables":{"id":7},"operationName":"Example"}'; contentType = 'application/json'; headers = '' },
-        [pscustomobject]@{ mode = 'text'; body = '{"override":true}'; contentType = 'application/vnd.example+json'; headers = 'Content-Type: application/vnd.example+json' }
+        [pscustomobject]@{ mode = 'text'; body = '{"override":true}'; contentType = 'application/vnd.example+json'; headers = 'Content-Type: application/vnd.example+json' },
+        [pscustomobject]@{ mode = 'json'; method = 'PUT'; body = '{"updated":true}'; contentType = 'application/json'; headers = '' },
+        [pscustomobject]@{ mode = 'json'; method = 'PATCH'; body = '{"patched":true}'; contentType = 'application/json'; headers = '' },
+        [pscustomobject]@{ mode = 'json'; method = 'DELETE'; body = '{}'; contentType = 'application/json'; headers = '' }
     )
     for ($bodyIndex = 0; $bodyIndex -lt $bodyCases.Count; $bodyIndex++) {
         $bodyCase = $bodyCases[$bodyIndex]
-        $bodyCall = @{ baseUrl = $bodyMockBaseUrl; route = '/body'; method = 'POST'; bodyMode = $bodyCase.mode; body = $bodyCase.body; headers = $bodyCase.headers; confirmTestData = $true; testDataPhrase = 'TESTE'; environmentId = 'body-mode-test' } | ConvertTo-Json -Compress
+        $bodyMethod = if ($bodyCase.method) { $bodyCase.method } else { 'POST' }
+        $bodyCall = @{ baseUrl = $bodyMockBaseUrl; route = '/body'; method = $bodyMethod; bodyMode = $bodyCase.mode; body = $bodyCase.body; headers = $bodyCase.headers; environmentId = 'body-mode-test' } | ConvertTo-Json -Compress
         $bodyResult = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $bodyCall -TimeoutSec 5
         if ($bodyResult.status -ne 200) { throw ('Body mode request failed: ' + $bodyCase.mode) }
         $bodyCapture = Get-Content -Raw (Join-Path $temporaryRoot ('body-request-' + $bodyIndex + '.txt'))
@@ -304,14 +308,15 @@ try {
             @{ name = 'empty'; type = 'text'; value = '' },
             @{ name = 'file'; type = 'file'; fileName = 'sample.bin'; contentType = 'application/octet-stream'; fileBase64 = $fileBase64 }
         )
-        confirmTestData = $true; testDataPhrase = 'TESTE'; environmentId = 'multipart-test'
+        environmentId = 'multipart-test'
     } | ConvertTo-Json -Compress -Depth 8
     $multipartResult = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $multipartCall -TimeoutSec 5
     if ($multipartResult.status -ne 200) { throw 'Multipart request did not reach the local capture server.' }
-    $multipartHeaders = Get-Content -Raw (Join-Path $temporaryRoot 'body-request-6.headers.txt')
+    $multipartCaptureName = 'body-request-' + $bodyCases.Count
+    $multipartHeaders = Get-Content -Raw (Join-Path $temporaryRoot ($multipartCaptureName + '.headers.txt'))
     if ($multipartHeaders -notmatch '(?im)^Content-Type:\s*multipart/form-data;\s*boundary=') { throw 'Multipart Content-Type did not include an automatic boundary.' }
-    $multipartBytes = [System.IO.File]::ReadAllBytes((Join-Path $temporaryRoot 'body-request-6.bin'))
-    if ((Get-Item -LiteralPath (Join-Path $temporaryRoot 'body-request-6.bin')).Length -eq 0) {
+    $multipartBytes = [System.IO.File]::ReadAllBytes((Join-Path $temporaryRoot ($multipartCaptureName + '.bin')))
+    if ((Get-Item -LiteralPath (Join-Path $temporaryRoot ($multipartCaptureName + '.bin'))).Length -eq 0) {
         $transferEncoding = [regex]::Match($multipartHeaders, '(?im)^Transfer-Encoding:\s*([^\r\n]+)').Groups[1].Value
         $contentLength = [regex]::Match($multipartHeaders, '(?im)^Content-Length:\s*(\d+)').Groups[1].Value
         throw ('Multipart body capture was empty; Transfer-Encoding=' + $transferEncoding + '; Content-Length=' + $contentLength)
@@ -323,7 +328,7 @@ try {
     $fileHex = [System.BitConverter]::ToString($fileBytes) -replace '-', ''
     $requestHex = [System.BitConverter]::ToString($multipartBytes) -replace '-', ''
     if (-not $requestHex.Contains($fileHex)) { throw 'Multipart binary file bytes were changed.' }
-    $manualContentTypeCall = @{ baseUrl = $bodyMockBaseUrl; route = '/multipart'; method = 'POST'; bodyMode = 'multipart'; headers = 'Content-Type: multipart/form-data'; confirmTestData = $true; testDataPhrase = 'TESTE' } | ConvertTo-Json -Compress
+    $manualContentTypeCall = @{ baseUrl = $bodyMockBaseUrl; route = '/multipart'; method = 'POST'; bodyMode = 'multipart'; headers = 'Content-Type: multipart/form-data' } | ConvertTo-Json -Compress
     $manualContentTypeStatus = 0
     try { $null = Invoke-RestMethod -Uri ($baseUrl + '/api/request') -Method Post -Headers $headers -ContentType 'application/json' -Body $manualContentTypeCall -TimeoutSec 5; throw 'Manual multipart Content-Type was accepted.' } catch { if ($_.Exception.Response) { $manualContentTypeStatus = [int]$_.Exception.Response.StatusCode } else { throw } }
     if ($manualContentTypeStatus -ne 400) { throw ('Manual multipart Content-Type expected HTTP 400, got ' + $manualContentTypeStatus) }

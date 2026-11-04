@@ -21,10 +21,7 @@ flowchart TD
     Valid -- Não --> Blocked[Mostrar impedimento sem HTTP]
     Blocked --> Saved
     Valid -- Sim --> Review[Revisar método, rota salva, destino e efeitos]
-    Review --> Write{Operação de escrita?}
-    Write -- Sim --> Guard[Confirmar dados descartáveis e digitar TESTE]
-    Write -- Não --> Approve[Aprovar preparação no diálogo]
-    Guard --> Approve
+    Review --> Approve[Aprovar preparação no diálogo]
     Approve --> Ready[Aprovada, ainda sem HTTP]
     Ready --> Execute[Executar preparação uma vez]
     Ready -- Edição ou cinco minutos --> Invalidated[Exigir nova preparação e aprovação]
@@ -50,7 +47,7 @@ Requests de token e multipart com arquivos efêmeros continuam no fluxo manual. 
 
 Confira método, ambiente, origem de destino e a rota exibida na request salva. O cartão omite caminho/query do resumo de destino para não expor valores sensíveis. Também informa quantidade de testes, retenção de body e captura para ambiente ou cofre.
 
-GET, HEAD e OPTIONS também precisam de aprovação neste fluxo: o método sozinho não garante ausência de efeitos. POST, PUT, PATCH e DELETE exigem a caixa de dados descartáveis, `TESTE` e o diálogo contextual.
+GET, HEAD e OPTIONS também precisam de aprovação neste fluxo: o método sozinho não garante ausência de efeitos. POST, PUT, PATCH e DELETE usam a mesma aprovação pelo diálogo contextual, sem frase ou declaração de dados descartáveis.
 
 **Aprovar não envia.** A preparação expira cinco minutos após sua criação, não cinco minutos após aprovar. Edições relevantes invalidam a preparação e sua aprovação; não reutilize a autorização anterior. Cancelar antes de executar não inicia chamada.
 

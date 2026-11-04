@@ -235,7 +235,7 @@ Referências: [exportar um ambiente no Postman](https://learning.postman.com/doc
 - [x] Executar somente pelo proxy Vortix em loopback; limpar o Cookie jar temporário após a rodada.
 - [x] Mapear variáveis secretas a partir do ambiente do processo sem aceitar valores nos argumentos ou registrá-los.
 - [x] Preservar datasets, captura de variáveis em memória, testes de resposta e limite total de 500 requests.
-- [x] Bloquear métodos de escrita por padrão; exigir `--allow-writes` e confirmação `TESTE`.
+- [x] Runner CLI: bloquear escritas por padrão; autorizar com `--allow-writes`, sem frase de teste.
 - [x] Gerar JUnit genérico sem URLs, headers, bodies, dados de teste ou valores de variáveis; definir códigos de saída.
 - [x] Cobrir sucesso, falha HTTP/assertion, captura, precedência CI, segredo, escrita bloqueada, redirects, colisões JUnit e cancelamento.
 - [x] Documentar pré-requisitos Node/.NET, configuração de CI, limites e exemplo no README.
@@ -354,7 +354,7 @@ Referências: [exportar um ambiente no Postman](https://learning.postman.com/doc
 Integrada em `master` pelo PR #34, junto à correção do selo do PR #31 e à atualização de CI do PR #33. Estado e limites atuais no [fichário de continuidade](docs/continuity.md); o diagnóstico compacto foi implementado e integrado no checkout principal, com validação concluída no escopo da seção 23, ainda sem commit ou publicação. A [descoberta SDD](docs/superpowers/specs/2026-10-27-next-features-discovery.md) preserva as alternativas futuras.
 
 - [x] Preparar request salva por IDs explícitos, sem HTTP, histórico ou alteração do formulário.
-- [x] Aprovação visual por preparação, inclusive GET; escrita com confirmação de dados descartáveis e `TESTE`; expiração em cinco minutos e invalidação por alterações.
+- [x] Aprovação visual por preparação, inclusive GET; escrita com a mesma revisão contextual; expiração em cinco minutos e invalidação por alterações.
 - [x] Executar uma única vez por preparação; consultar resumo em memória, sem payloads/credenciais e sem replay automático.
 - [x] Separar entrega, status HTTP de destino, status do proxy, testes parciais, captura e persistência; preservar evidência de resposta após falha local.
 - [x] Reutilizar proxy e helpers de testes/histórico/captura; manter bridge v2 somente leitura e encapsular dados da aplicação.
@@ -384,6 +384,15 @@ Integrada em `master` pelo PR #34, junto à correção do selo do PR #31 e à at
 - [x] Preservar guards, histórico, CLI, ponte readonly e ausência de valores na projeção.
 - [x] Testes comportamentais, revisão independente, build e smoke isolado com dados fictícios: 454 testes/453 aprovados/zero falhas/um skip; produtor não repetido na reexecução.
 - [x] Documentar resultado e limites em evidência de validação antes da entrega.
+
+### Cliente de APIs de uso geral e workspace — 04/11/2026
+
+- [x] Remover frase e declaração de dados descartáveis do envio manual, execução revisada e proxy.
+- [x] Manter aprovação contextual na execução revisada e autorização de escritas em lote no Runner; CLI usa `--allow-writes`, sem `--confirm-test-data`.
+- [x] Posicionar endereço e envio acima dos painéis de editor e resposta, com layout responsivo.
+- [x] Priorizar a árvore de coleções: busca, uma ação principal Nova coleção e Mais ações recolhido com Importar, Exportar e Executar seleção.
+- [x] Preservar a correção guiada **Ir ao campo**, sem efeitos de envio ao navegar, e remover orientação de rota vazia ao restaurar rascunho preenchido.
+- [x] Manter os testes de correção guiada na CI e documentar a migração da CLI e os limites de verificação visual.
 
 ## Regra de sequência
 

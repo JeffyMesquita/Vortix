@@ -219,6 +219,8 @@ Para testar o importador, cole esse comando em **Importar cURL** e confira os ca
 
 ### 3. Envie, confira e reutilize
 
+Quando uma validação local identificar o campo que precisa de correção, a faixa junto de **Enviar** mostra **Ir ao campo**. A ação abre a seção correspondente e coloca o foco no campo, preservando o rascunho. Navegar até o campo não envia a request.
+
 Clique **Enviar**. Uma resposta fictícia pode ter este formato:
 
 ~~~json
@@ -232,14 +234,22 @@ Clique **Enviar**. Uma resposta fictícia pode ter este formato:
 
 Confira status e body; abra **Ver cabeçalhos da resposta** quando precisar dos metadados. Na aba **Testes**, você pode exigir status <code>200</code> ou verificar um campo da resposta, como <code>data[0].id</code>. GET costuma consultar dados, mas confira o contrato do endpoint: o Vortix não consegue garantir que uma API não altere estado. Salve a request na coleção para abrir de novo ou executar pelo [Runner de coleção](#runner-de-coleção). Se ainda não houver coleção, **Salvar** oferece criá-la explicitamente; cancelar mantém o rascunho.
 
-Para enviar JSON, texto, XML ou form URL-encoded, escolha o formato na aba **Body**. O Vortix define o Content-Type padrão; um header Content-Type informado manualmente o sobrescreve. POST, PUT, PATCH e DELETE pedem confirmação de gravação; use dados descartáveis e confira a URL antes de confirmar.
+Para enviar JSON, texto, XML ou form URL-encoded, escolha o formato na aba **Body**. O Vortix define o Content-Type padrão; um header Content-Type informado manualmente o sobrescreve. POST, PUT, PATCH e DELETE usam o mesmo botão **Enviar**, sem frase ou declaração de dados descartáveis. Confira método, ambiente e destino antes de enviar.
+
+### Organize o workspace
+
+A barra com URL base, método, rota e **Enviar** fica acima do editor e da resposta. No desktop, os dois painéis têm a mesma largura; em telas menores, o conteúdo segue em uma coluna.
+
+Na sidebar **Coleções**, use a busca para localizar uma request e **＋ Nova coleção** para criar uma coleção. O botão **Mais ações** (`…`) abre **Importar**, **Exportar** e **Executar seleção**. Essas ações ficam recolhidas inicialmente; a árvore aparece logo abaixo do cabeçalho. **Executar seleção** abre o Runner da coleção ou pasta selecionada.
+
+Os itens preservam o nome completo no nome acessível, mesmo quando o texto visual termina em reticências. Expandir/recolher informa o alvo e seu estado. Com **Mais ações** aberto, `Escape` fecha o grupo e devolve o foco ao gatilho. Criar uma coleção ou abrir um diálogo não envia requests.
 
 
 ## Compartilhamento e metadados públicos
 
 A página inclui título, descrição, canonical, Open Graph e Twitter Card no HTML inicial. A prévia usa `wwwroot/social/vortix-og-v2.jpg`, derivada leve da arte original, com orçamento de até 200 KiB verificado nos testes; `robots.txt` e `sitemap.xml` apontam para a origem pública oficial. Nenhum valor do workspace ou da request entra nesses metadados.
 
-Ao hospedar uma cópia com outro domínio, ajuste as URLs absolutas do head de `wwwroot/index.html`, `wwwroot/robots.txt` e `wwwroot/sitemap.xml` junto de `ApiStudio__PublicOrigin` e dos domínios em `render.yaml`. Depois de publicar, confira HTTP 200 e `image/png` no asset; a atualização da prévia em aplicativos de mensagem depende da nova leitura/cache de cada plataforma.
+Ao hospedar uma cópia com outro domínio, ajuste as URLs absolutas do head de `wwwroot/index.html`, `wwwroot/robots.txt` e `wwwroot/sitemap.xml` junto de `ApiStudio__PublicOrigin` e dos domínios em `render.yaml`. Depois de publicar, confira HTTP 200 e `image/jpeg` no asset; a atualização da prévia em aplicativos de mensagem depende da nova leitura/cache de cada plataforma.
 
 Veja [validação de SEO e prévia social](docs/superpowers/validation/2026-10-28-seo-social-preview.md).
 
@@ -263,7 +273,7 @@ Na lateral, **Ferramentas da coleção** reúne importação, exportação e Run
 
 Em **Configurações → Aparência**, há 11 temas: Dracula, Monokai, One Dark, Nord, Solarized Dark, GitHub Dark, Papel, Grafite, Maré, Aurora e Areia. **Aurora** combina uma superfície escura com destaque verde-água; **Areia** usa uma superfície clara e quente. A escolha é salva no workspace sem alterar fonte ou escala. Os temas incluem cores de sintaxe JSON, estados e foco por teclado.
 
-O endereço fica em destaque, os dados mantêm as seis abas e a faixa de envio reúne ação e confirmações. A ajuda estática abre em popovers com botão **Fechar**; status, erros e consentimentos permanecem no fluxo. Params começa com uma linha vazia sem roubar o foco: essa linha não conta como parâmetro nem entra na URL. Preencher apenas o valor, sem nome, continua gerando erro.
+A barra de endereço e envio fica acima dos painéis; os dados mantêm as seis abas e a faixa de orientação oferece **Ir ao campo** quando há uma correção identificada. A ajuda estática abre em popovers com botão **Fechar**; status, erros e consentimentos específicos permanecem no fluxo. Params começa com uma linha vazia sem roubar o foco: essa linha não conta como parâmetro nem entra na URL. Preencher apenas o valor, sem nome, continua gerando erro.
 
 As ações **Copiar** usam o ícone de dois retângulos, com nome acessível e título contextual. A confirmação **Copiado para a área de transferência** aparece como toast de informação somente após a cópia funcionar. Falhas continuam mostrando erro, sem confirmação falsa. A ponte IA descobre essas ações pelo contrato DOM, usando os mesmos handlers da interface.
 
@@ -282,7 +292,7 @@ Para retomar o desenvolvimento, consulte o [fichário de continuidade](docs/cont
 No editor, abra **Execução revisada** para preparar uma request salva sem chamar a API. Salve alterações pendentes e confira o ambiente ativo antes de começar.
 
 1. **Preparar salva:** resolve variáveis e ações locais uma vez; mostra destino, ambiente, quantidade de testes e efeitos de captura/histórico.
-2. **Revisar e aprovar:** exige confirmação contextual inclusive para GET. Escritas também exigem a caixa de dados descartáveis e `TESTE`. Aprovar ainda não envia.
+2. **Revisar e aprovar:** exige confirmação contextual inclusive para GET, sem frase ou declaração de dados descartáveis. Aprovar ainda não envia.
 3. **Executar preparação:** consome a aprovação uma única vez e mostra HTTP, contagens de testes, captura e persistência. Uma validação parcial continua identificada como parcial.
 
 A preparação expira em cinco minutos. Alterações relevantes invalidam a aprovação; prepare novamente. Auth não é persistida neste fluxo, sem mudar a preferência global do envio manual. Histórico, retenção de body e capturas seguem os efeitos revisados. Requests de token e multipart com arquivos efêmeros precisam do envio manual.
@@ -426,9 +436,9 @@ A request continua agnóstica: informe o endpoint GraphQL da API que você estiv
 
 ### Métodos e proteção de gravação
 
-Todos os métodos suportados estão disponíveis no seletor. POST, PUT, PATCH e DELETE exigem digitar <code>TESTE</code>, marcar a confirmação e aceitar a confirmação final do navegador. No Runner, gravações também exigem a frase e confirmações correspondentes.
+Todos os métodos suportados estão disponíveis no seletor. **Enviar** executa a request configurada, incluindo POST, PUT, PATCH e DELETE, sem frase ou confirmação adicional por método. Avisos específicos de HTTP sem TLS e API Key na query continuam ativos. O Runner exige autorização explícita para escritas em lote.
 
-Essa proteção é uma confirmação manual. O Vortix não consegue determinar se os dados ou o ambiente de destino são descartáveis. GET, HEAD e OPTIONS não aceitam body.
+O Vortix aceita os ambientes configurados pelo usuário, incluindo desenvolvimento, homologação e produção. A execução revisada mantém sua aprovação contextual por preparação; o Runner mantém autorização própria para escritas em lote. GET, HEAD e OPTIONS não aceitam body.
 
 ## Autenticação
 
@@ -888,7 +898,7 @@ Defina `VORTIX_TOKEN` como secret no ambiente do job. `--map-var` recebe somente
 
 O dataset é um array JSON de até 100 KB com até 100 objetos; cada execução aceita até 500 combinações de request e dataset. O arquivo JUnit precisa terminar em `.xml`, não pode apontar para arquivos de entrada ou do Runner e usa nomes genéricos de etapa, sem URLs, headers, bodies, dados de teste ou valores de variáveis. Código de saída `0` indica sucesso; `1`, falha HTTP ou de teste; `2`, erro de entrada/configuração; `130`, interrupção por Ctrl+C ou SIGTERM.
 
-POST, PUT, PATCH e DELETE ficam bloqueados por padrão. Autorize gravações descartáveis somente com `--allow-writes --confirm-test-data TESTE`. HTTP fora de loopback exige `--allow-insecure-http` e que a própria request também tenha a permissão salva. Cookie jar usa um ambiente temporário por rodada e é removido ao terminar, inclusive quando Ctrl+C ou SIGTERM interrompem uma request. Redirecionamentos emitidos pelo proxy local não são seguidos.
+No Runner CLI, POST, PUT, PATCH e DELETE ficam bloqueados por padrão. Autorize escritas com `--allow-writes`; a antiga opção `--confirm-test-data` foi removida. HTTP fora de loopback exige `--allow-insecure-http` e que a própria request também tenha a permissão salva. Cookie jar usa um ambiente temporário por rodada e é removido ao terminar, inclusive quando Ctrl+C ou SIGTERM interrompem uma request. Redirecionamentos emitidos pelo proxy local não são seguidos.
 
 O MVP aceita apenas Vortix JSON v2; executa as ações pré-request nativas, mas não JavaScript arbitrário nem requests multipart com arquivos salvos. Use `node tools/vortix-runner.cjs --help` para ver opções.
 
@@ -1048,7 +1058,7 @@ As variáveis valem para o processo iniciado nesse terminal.
 ~~~powershell
 dotnet restore ./VortixApiClient.csproj
 dotnet build ./VortixApiClient.csproj -c Release
-node --test ./RunnerLogic.test.cjs ./VortixRunner.test.cjs ./AIFriendlyUi.test.cjs ./AIAgentBridge.test.cjs ./StructuredExecution.test.cjs ./StructuredRequest.test.cjs ./StructuredUi.test.cjs ./StructuredIntegration.test.cjs
+node --test ./RunnerLogic.test.cjs ./VortixRunner.test.cjs ./AIFriendlyUi.test.cjs ./AIAgentBridge.test.cjs ./StructuredExecution.test.cjs ./StructuredRequest.test.cjs ./StructuredUi.test.cjs ./StructuredIntegration.test.cjs ./AgentDiagnostics.test.cjs ./BeginnerUi.test.cjs ./RunnerDependencies.test.cjs ./GuidedRequestCorrection.test.cjs
 powershell -NoProfile -ExecutionPolicy Bypass -File ./HostingMode.test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File ./WorkspaceProtection.test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File ./AuthorizationCodePkce.test.ps1
@@ -1094,6 +1104,7 @@ Pull requests passam pela validação automática de build e testes em Windows. 
 | <code>GraphqlSchemaCaptureServer.test.ps1</code> | Mock GraphQL loopback para o teste integrado. |
 | <code>RunnerLogic.test.cjs</code> | Testes de lógica JavaScript. |
 | <code>AIFriendlyUi.test.cjs</code> | Contrato DOM, abas acessíveis e guia para agentes do Maestri Portal. |
+| <code>GuidedRequestCorrection.test.cjs</code> | Correção guiada de rota, Params e captura, preservação de rascunho e ausência de envio ao navegar. |
 | <code>AIAgentBridge.test.cjs</code> | Testa o snapshot seguro do bridge DOM do Vortix, incluindo ausência de valores sensíveis. |
 | <code>WorkspaceProtection.test.ps1</code> | Teste integrado de persistência e proteção em banco temporário. |
 | <code>AuthorizationCodePkce.test.ps1</code> | Teste local de callback, state, PKCE, cancelamento e expiração. |
@@ -1111,7 +1122,7 @@ Confira URL base, rota, método, Params, headers e autenticação. Para HTTP for
 
 ### O envio de gravação é bloqueado
 
-POST, PUT, PATCH e DELETE exigem digitar exatamente <code>TESTE</code>, marcar a confirmação e aceitar a confirmação final. O Runner aplica as próprias confirmações de gravação.
+POST, PUT, PATCH e DELETE podem operar nos ambientes configurados, inclusive produção. Confira método, destino e dados antes de **Enviar**. O Runner exige autorização própria para escritas em lote; o proxy mantém validação de destino, origem e isolamento de sessões.
 
 ### Dados protegidos não abrem após mover a instalação
 

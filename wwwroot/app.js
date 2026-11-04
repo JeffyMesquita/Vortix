@@ -1,7 +1,7 @@
 (() => {
 const byId = id => document.getElementById(id);
 const method = byId('method'), route = byId('route'), body = byId('body');
-const sendButton = byId('send-request'), writeGuard = byId('write-guard'), queryParams = byId('query-params');
+const sendButton = byId('send-request'), queryParams = byId('query-params');
 const tokenRequestButton = byId('request-token'), oauth2TokenButton = byId('oauth2-request-token'), oauthPkceStartButton = byId('oauth-pkce-start'), toastRegion = byId('toast-region');
 const DB_NAME = 'ApiPublicacaoTester', DB_VERSION = 2, LEGACY_HISTORY_KEY = 'apiTester.savedRequests.v1';
 const STORAGE_MIGRATION_KEY = 'apiStudio.sqliteMigration.v1';
@@ -40,6 +40,8 @@ let tokenRequestConfig = RunnerLogic.normalizeTokenRequestConfig(), oauth2TokenC
 let oauthPkceConfig = RunnerLogic.normalizeOAuthPkceConfig(), oauthPkceBusy = false, oauthPkceCancelRequested = false, oauthPkcePopup = null, oauthPkcePreviewTimer = 0;
 let hostedMode = false;
 let requestSendInProgress = false;
+let requestCorrection = null;
+const requestCorrectionTargets = new WeakMap();
 let structuredExecutionHandle = null, structuredDiagnosticContextRevision = 0, structuredDiagnosticContextInvalidated = false;
 let secretVault = null, secretVaultValues = null, secretVaultEnvelope = null, secretVaultNames = [], secretVaultBusy = false, secretVaultEnvironmentId = '', secretVaultUnavailable = null, secretVaultLoading = false;
 let lastResolutionProvenance = {};
@@ -427,11 +429,11 @@ function createMultipartFieldRow(source={}){
   valueBox.append(value,file,fileName);
   const remove=document.createElement('button');remove.type='button';remove.className='button secondary';remove.textContent='×';remove.setAttribute('aria-label','Remover campo multipart');
   const update=()=>{const isFile=type.value==='file';value.hidden=isFile;file.hidden=!isFile;fileName.hidden=!isFile;const selected=file.files?.[0];fileName.textContent=selected?selected.name:(row.dataset.savedFileName?row.dataset.savedFileName+' · selecione novamente':'Escolha um arquivo');const secret=isSensitiveName(name.value.trim());value.type=secret?'password':'text';value.autocomplete=secret?'new-password':'off';};
-  type.onchange=()=>{row.dataset.savedFileName='';update();byId('confirm-test-data').checked=false;updateGuard();};
-  name.oninput=()=>{update();byId('confirm-test-data').checked=false;updateGuard();};
-  value.oninput=()=>{byId('confirm-test-data').checked=false;updateGuard();};
-  file.onchange=()=>{row.dataset.savedFileName=file.files?.[0]?.name||'';row.dataset.savedContentType=file.files?.[0]?.type||'';update();byId('confirm-test-data').checked=false;updateGuard();};
-  remove.onclick=()=>{row.remove();byId('confirm-test-data').checked=false;updateGuard();};
+  type.onchange=()=>{row.dataset.savedFileName='';update();updateGuard();};
+  name.oninput=()=>{update();updateGuard();};
+  value.oninput=()=>{updateGuard();};
+  file.onchange=()=>{row.dataset.savedFileName=file.files?.[0]?.name||'';row.dataset.savedContentType=file.files?.[0]?.type||'';update();updateGuard();};
+  remove.onclick=()=>{row.remove();updateGuard();};
   row.append(name,type,valueBox,remove);update();return row;
 }
 function renderMultipartFields(fields){
@@ -620,18 +622,18 @@ function createQueryParamRow(name='',value='') {
   const vi=document.createElement('input');vi.id=vl.htmlFor;vi.type=isSensitiveName(name)?'password':'text';vi.autocomplete=isSensitiveName(name)?'new-password':'off';vi.spellcheck=false;vi.value=value;vi.dataset.queryValue='';vi.placeholder='Ex.: 1';vi.setAttribute('aria-label','Valor');
   const vf=document.createElement('div');vf.append(vl,vi);
   const remove=document.createElement('button');remove.className='button secondary';remove.type='button';remove.textContent='×';remove.setAttribute('aria-label',`Remover parâmetro ${n}`);
-  remove.onclick=()=>{row.remove();byId('confirm-test-data').checked=false;updateGuard();updateParamsCount();};
-  ni.oninput=()=>{const secret=isSensitiveName(ni.value.trim());vi.type=secret?'password':'text';vi.autocomplete=secret?'new-password':'off';byId('confirm-test-data').checked=false;updateGuard();updateParamsCount();};
-  vi.oninput=()=>{byId('confirm-test-data').checked=false;updateGuard();updateParamsCount();};row.append(nf,vf,remove);return row;
+  remove.onclick=()=>{row.remove();updateGuard();updateParamsCount();};
+  ni.oninput=()=>{const secret=isSensitiveName(ni.value.trim());vi.type=secret?'password':'text';vi.autocomplete=secret?'new-password':'off';updateGuard();updateParamsCount();};
+  vi.oninput=()=>{updateGuard();updateParamsCount();};row.append(nf,vf,remove);return row;
 }
 function renderQueryParams(entries){queryParams.replaceChildren();for(const [k,v]of entries)queryParams.append(createQueryParamRow(k,v));updateParamsCount();}
 function ensureQueryParamRow(){if(!queryParams.children.length){queryParams.append(createQueryParamRow());updateParamsCount();}}
 function addQueryParamRow(k='',v=''){const row=createQueryParamRow(k,v);queryParams.append(row);row.querySelector('[data-query-name]').focus();updateParamsCount();}
 function updateParamsCount(){byId('params-count').textContent=String([...queryParams.children].filter(r=>r.querySelector('[data-query-name]').value.trim()).length);}
 function buildRequestRoute(resolveValues=false,allowEmpty=false,preRequestOverrides={}){
-  let path=route.value.trim();if(!path&&allowEmpty)return'';if(!path.startsWith('/')||path.startsWith('//')||path.includes('?')||path.includes('#')||path.includes('\\')||path.includes('://'))throw Error('Informe um caminho iniciado por /. Use Params para a query.');
+  let path=route.value.trim();if(!path&&allowEmpty)return'';if(!path.startsWith('/')||path.startsWith('//')||path.includes('?')||path.includes('#')||path.includes('\\')||path.includes('://'))withRequestCorrectionTarget(route,()=>{throw Error('Informe um caminho iniciado por /. Use Params para a query.');});
   if(resolveValues)path=applyEnvironment(path,preRequestOverrides);
-  const pairs=[];for(const row of queryParams.children){let k=row.querySelector('[data-query-name]').value.trim(),v=row.querySelector('[data-query-value]').value;if(!k&&!v)continue;if(!k)throw Error('Informe a chave de cada parâmetro preenchido.');if(resolveValues){k=applyEnvironment(k,preRequestOverrides);v=applyEnvironment(v,preRequestOverrides);}pairs.push(`${encodeParam(k)}=${encodeParam(v)}`);}
+  const pairs=[];for(const row of queryParams.children){let k=row.querySelector('[data-query-name]').value.trim(),v=row.querySelector('[data-query-value]').value;if(!k&&!v)continue;if(!k)withRequestCorrectionTarget(row.querySelector('[data-query-name]'),()=>{throw Error('Informe a chave de cada parâmetro preenchido.');});if(resolveValues){k=applyEnvironment(k,preRequestOverrides);v=applyEnvironment(v,preRequestOverrides);}pairs.push(`${encodeParam(k)}=${encodeParam(v)}`);}
   return path+(pairs.length?'?'+pairs.join('&'):'');
 }
 function encodeParam(value){const templates=[];const text=String(value).replace(/\{\{\s*([^{}]+?)\s*\}\}/g,match=>{const marker=`APITESTTEMPLATE${templates.length}X`;templates.push(match);return marker;});return encodeURIComponent(text).replace(/APITESTTEMPLATE(\d+)X/g,(_,index)=>templates[Number(index)]||'');}
@@ -974,6 +976,7 @@ async function saveHistory(request,options={}){
   }catch(error){if(!options.quiet)showToast('Histórico indisponível',error.message||'A chamada terminou, mas o registro não pôde ser salvo.','warning');return null;}
 }
 function applyHistoryEntry(entry,notify=true){
+  clearRequestCorrection();
   selectedContainer={collectionId:'',folderId:''};let environmentChanged=false;
   if(entry.environmentId&&environments.some(item=>item.id===entry.environmentId)){
     if(activeEnvironmentId!==entry.environmentId){releaseSecretVaultMemory();environmentChanged=true;}
@@ -992,7 +995,7 @@ function applyHistoryEntry(entry,notify=true){
   byId('token-credential-mode').value=entry.tokenCredentialMode==='query'?'query':'body';if(entry.tokenRequest){byId('token-route').value=parts.route;byId('token-client-id-field').value=entry.tokenClientIdField||'client_id';byId('token-client-secret-field').value=entry.tokenClientSecretField||'client_secret';tokenRequestConfig=RunnerLogic.normalizeTokenRequestConfig({route:parts.route,clientIdField:byId('token-client-id-field').value,clientSecretField:byId('token-client-secret-field').value,credentialMode:byId('token-credential-mode').value});}byId('token-helper').open=!!entry.tokenRequest&&!isOAuth2;updateTokenButton();
 byId('token-helper').open=!!entry.tokenRequest&&!isOAuth2;byId('oauth2-helper').open=isOAuth2;
 if(isOAuth2){byId('oauth2-token-url').value=entry.oauthTokenUrl||((entry.baseUrl||'')+(entry.route||''));byId('oauth2-client-id').value=entry.oauthClientId||'';byId('oauth2-client-secret').value='';byId('oauth2-scope').value=entry.oauthScope||'';byId('oauth2-client-auth-method').value=entry.oauthClientAuthMethod==='client_secret_post'?'client_secret_post':'client_secret_basic';byId('oauth2-allow-insecure-http').checked=entry.allowInsecureHttp===true;}
-updateOAuth2TokenButton();void renderOAuth2TokenStatus();clearWriteConfirmation();updateGuard();updateCopyButtons();renderBodyHighlight();updateJsonTools();
+updateOAuth2TokenButton();void renderOAuth2TokenStatus();updateGuard();updateCopyButtons();renderBodyHighlight();updateJsonTools();
    renderPreRequestActions(entry.preRequestActions||[]);byId('pre-request-actions-enabled').checked=entry.preRequestActionsEnabled!==false;byId('pre-request-literal-consent').checked=entry.preRequestActionsLiteralConsent===true;updatePreRequestActionsUi();byId('capture-response-variable').checked=!!entry.captureResponseVariable;byId('response-variable-name').value=entry.responseVariableName||'token';byId('response-value-source').value=entry.responseValueSource==='text'?'text':'json';byId('response-json-path').value=entry.responseJsonPath||'access_token';byId('response-success-only').checked=entry.responseSuccessOnly!==false;byId('response-capture-target').value=entry.responseCaptureTarget==='vault'?'vault':'environment';byId('response-variable-result').hidden=true;updateResponseCaptureUi();setResponseTests(entry.responseTests||[]);setActiveResponseContract(entry.responseContract||null);
   activeSaved=null;byId('request-title').textContent='Histórico · '+(entry.route||'request');setEditorTab('params');
   if(notify)showToast('Requisição carregada',hasAuthCredentials(entry)?authTypeLabel(entry)+' recuperada; credenciais podem expirar.':'Params, headers e body recuperados. Credenciais foram omitidas ou precisam ser informadas.','info');
@@ -1255,7 +1258,7 @@ async function confirmRunnerDependencyReview(cases,analysis){
   if(!count)return false;
   const refs=(analysis?.cases||[]).reduce((total,item)=>total+(item.references?.length||0),0),omitted=(analysis?.cases||[]).some(item=>item.issues?.includes('producer_omitted'));
   const detail=[`${count} caso(s) selecionado(s) para reexecução.`,omitted?'Há produtor da rodada anterior fora deste subconjunto; uma captura antiga pode ser reutilizada.':'Nenhum produtor anterior identificado fora do subconjunto.',analysis?.complete===false?'Análise parcial; confira os dados antes de executar.':'',refs?`${refs} referência(s) no subconjunto.`:''].filter(Boolean).join(' ');
-  return confirmWithDialog({eyebrow:'REEXECUÇÃO DE FALHAS',title:`Reexecutar ${count} falha(s)?`,description:`${count} caso(s) selecionado(s).`,detail,warning:'A revisão não repete produtores nem capturas automaticamente. Os guards de escrita, HTTP e TESTE continuam obrigatórios; confirmações antigas não autorizam este novo contexto.',confirmLabel:'Continuar para os guards',danger:false});
+  return confirmWithDialog({eyebrow:'REEXECUÇÃO DE FALHAS',title:`Reexecutar ${count} falha(s)?`,description:`${count} caso(s) selecionado(s).`,detail,warning:'A revisão não repete produtores nem capturas automaticamente. Os controles de escrita e HTTP continuam obrigatórios; confirmações antigas não autorizam este novo contexto.',confirmLabel:'Continuar para os guards',danger:false});
 }
 function renderRunnerCases(cases){
   const list=byId('runner-results');list.replaceChildren();
@@ -1417,15 +1420,15 @@ function openRunnerDialog(){
   const targetPath=[collection.name,...(folderPath||[])].join(' / '),writes=runnerEntries.filter(entry=>!entry.request.tokenRequest&&writeMethods.has(String(entry.request.method||'GET').toUpperCase())).length;
   byId('runner-target-title').textContent=targetPath;byId('runner-plan-count').textContent=`${runnerEntries.length} requests · ${writes} ${writes===1?'gravação':'gravações'}`;
   byId('runner-write-guard').hidden=!writes;byId('runner-write-description').textContent=writes?`${writes===1?'1 chamada':`${writes} chamadas`} POST, PUT, PATCH ou DELETE podem alterar dados.`:'';
-  byId('runner-confirm-writes').checked=false;byId('runner-write-phrase').value='';byId('runner-datasets').value='';byId('runner-delay').value='0';byId('runner-stop-on-error').checked=true;
+  byId('runner-confirm-writes').checked=false;byId('runner-datasets').value='';byId('runner-delay').value='0';byId('runner-stop-on-error').checked=true;
   renderRunnerPlan(runnerEntries);byId('runner-results').replaceChildren();byId('runner-progress').hidden=true;byId('runner-progress').value=0;byId('runner-progress-label').textContent='';byId('runner-summary').hidden=true;byId('rerun-failed').hidden=true;byId('stop-runner').hidden=true;clearRunnerError();byId('start-runner').disabled=false;byId('runner-options').disabled=false;
   byId('runner-history-count').textContent='Carregando…';byId('clear-runner-history').disabled=true;byId('runner-history-list').replaceChildren();
   fitRunnerDialog();byId('runner-dialog').showModal();runnerHistoryLoadTask=loadRunnerHistory();
 }
 async function confirmRunnerWrites(cases){
   const writes=runnerWriteCases(cases);if(!writes.length)return true;
-  if(!byId('runner-confirm-writes').checked||byId('runner-write-phrase').value.trim()!=='TESTE'){
-    showRunnerError('Confirme que os dados são de teste e digite TESTE antes de executar gravações.');byId('runner-write-phrase').focus();return false;
+  if(!byId('runner-confirm-writes').checked){
+    showRunnerError('Autorize as chamadas de escrita desta execução antes de continuar.');byId('runner-confirm-writes').focus();return false;
   }
   const destinations=[];
   const generatedDestinations=writes.some(item=>preRequestActionsAffectRequestUrl(item.request));
@@ -1434,7 +1437,7 @@ async function confirmRunnerWrites(cases){
     catch{destinations.push(`${String(item.request.method).toUpperCase()} · ${item.path}`);}
   }
   if(writes.length>destinations.length)destinations.push(`… e mais ${writes.length-destinations.length} gravações`);
-  return confirmWithDialog({eyebrow:'RUNNER DE TESTE',title:`Executar ${writes.length} gravações?`,description:`A sequência inclui ${writes.length} POST, PUT, PATCH ou DELETE.`,detail:destinations.join('\n'),warning:'A confirmação vale para todas as gravações desta execução. Confira ambiente, URLs e dados descartáveis.'+(generatedDestinations?' Valores de pré-request aparecem como placeholders e podem mudar na execução.':''),confirmLabel:'Executar gravações',danger:true});
+  return confirmWithDialog({eyebrow:'RUNNER DE TESTE',title:`Executar ${writes.length} gravações?`,description:`A sequência inclui ${writes.length} POST, PUT, PATCH ou DELETE.`,detail:destinations.join('\n'),warning:'A confirmação vale para todas as gravações desta execução. Confira ambiente, URLs e dados enviados.'+(generatedDestinations?' Valores de pré-request aparecem como placeholders e podem mudar na execução.':''),confirmLabel:'Executar gravações',danger:true});
 }
 function requestRunnerStop(){if(!runnerBusy)return;runnerStopRequested=true;byId('stop-runner').disabled=true;byId('stop-runner').textContent='Parando…';byId('runner-progress-label').textContent='A request atual terminará antes de parar.';}
 function updateRunnerOptionsDisabled(disabled){const locked=disabled||runnerBusy||runnerHistoryMutating;byId('runner-options').disabled=locked;byId('start-runner').disabled=locked;byId('cancel-runner').disabled=locked;byId('close-runner').disabled=locked;byId('rerun-failed').disabled=locked;byId('runner-history-list').querySelectorAll('[data-runner-history-delete]').forEach(button=>{button.disabled=locked;});byId('clear-runner-history').disabled=locked||!byId('runner-history-list').querySelector('.runner-history-item');}
@@ -1589,9 +1592,10 @@ function syncActiveWorkspaceTab(markDirty=false){
 }
 function clearWorkspaceResponse(){clearCurrentResponseExample();showResponse('Aguardando','idle','','');byId('response-variable-result').hidden=true;renderResponseTestResults([]);}
 function applyWorkspaceDraft(draft){
+  clearRequestCorrection();
   method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(draft.method)?draft.method:'GET';byId('base-url').value=draft.baseUrl||'';baseUrlAuto=!!draft.baseUrlAuto;byId('allow-insecure-http').checked=draft.allowInsecureHttp===true;route.value=String(draft.route??'');renderQueryParams(Array.isArray(draft.params)?draft.params:[]);ensureQueryParamRow();byId('headers').value=draft.headers||'';body.value=draft.body||'';applyBodyMode(draft.bodyMode);renderMultipartFields(draft.multipartFields||[]);renderGraphqlFields(draft);selectedContainer={collectionId:draft.collectionId||'',folderId:draft.folderId||''};byId('save-token-history').checked=draft.saveBearerToken!==false;applyAuthFields(draft);byId('token-client-id').value=draft.tokenClientId||'';byId('token-client-secret').value='';byId('token-helper').open=!!draft.tokenHelperOpen;
   renderPreRequestActions(draft.preRequestActions||[]);byId('pre-request-actions-enabled').checked=draft.preRequestActionsEnabled!==false;byId('pre-request-literal-consent').checked=draft.preRequestActionsLiteralConsent===true;updatePreRequestActionsUi();byId('capture-response-variable').checked=!!draft.captureResponseVariable;byId('response-variable-name').value=draft.responseVariableName||'token';byId('response-value-source').value=draft.responseValueSource==='text'?'text':'json';byId('response-json-path').value=draft.responseJsonPath||'access_token';byId('response-success-only').checked=draft.responseSuccessOnly!==false;byId('response-capture-target').value=draft.responseCaptureTarget==='vault'?'vault':'environment';byId('response-variable-result').hidden=true;restoreResponseTestDraft(draft.responseTests);
-  setActiveResponseContract(draft.responseContract||null);clearCurrentResponseExample();activeSaved=draft.activeSaved||null;byId('request-title').textContent=draft.title||'Nova requisição';clearWriteConfirmation();updateGuard();updateTokenButton();updateCopyButtons();updateResponseCaptureUi();renderBodyHighlight();updateJsonTools();renderCollectionTree();setEditorTab(draft.editorSection||'params');
+  setActiveResponseContract(draft.responseContract||null);clearCurrentResponseExample();activeSaved=draft.activeSaved||null;byId('request-title').textContent=draft.title||'Nova requisição';updateGuard();updateTokenButton();updateCopyButtons();updateResponseCaptureUi();renderBodyHighlight();updateJsonTools();renderCollectionTree();setEditorTab(draft.editorSection||'params');
 }
 function applyWorkspaceTab(tab){
   workspaceTabsLoading=true;
@@ -1607,7 +1611,7 @@ function applyWorkspaceTab(tab){
 }
 function activateWorkspaceTab(id){
   if(id!==activeWorkspaceTabId)invalidateStructuredDiagnosticContext(false);
-  const target=workspaceTabs.find(tab=>tab.id===id);if(!target||id===activeWorkspaceTabId)return;const keepFocus=byId('workspace-tabs').contains(document.activeElement);syncActiveWorkspaceTab();activeWorkspaceTabId=id;applyWorkspaceTab(target);clearWorkspaceResponse();renderWorkspaceTabs();scheduleWorkspaceTabsPersist();
+  const target=workspaceTabs.find(tab=>tab.id===id);if(!target||id===activeWorkspaceTabId)return;clearRequestCorrection();const keepFocus=byId('workspace-tabs').contains(document.activeElement);syncActiveWorkspaceTab();activeWorkspaceTabId=id;applyWorkspaceTab(target);clearWorkspaceResponse();renderWorkspaceTabs();scheduleWorkspaceTabsPersist();
   if(keepFocus){const selected=[...byId('workspace-tabs').querySelectorAll('[role="tab"]')].find(tab=>tab.dataset.workspaceTabId===id);selected?.focus();}
 }
 function createWorkspaceTabFromCurrent(title){
@@ -1618,9 +1622,10 @@ function createWorkspaceTabFromCurrent(title){
 }
 function nextWorkspaceDraftTitle(){let index=1,title='Nova requisição';while(workspaceTabs.some(tab=>tab.title===title)){index++;title=`Nova requisição ${index}`;}return title;}
 function resetEditorForNewWorkspaceTab(title){
+  clearRequestCorrection();
   method.value='GET';byId('base-url').value=Object.hasOwn(getEnvironment().variables||{},'baseUrl')?'{{baseUrl}}':'';baseUrlAuto=true;route.value='';byId('allow-insecure-http').checked=false;byId('headers').value='Accept: application/json';body.value='';applyBodyMode('json');byId('save-token-history').checked=true;selectedContainer={collectionId:collections[0]?.id||'',folderId:''};applyAuthFields({authMode:'inherit'});
   byId('token-client-id').value='';byId('token-client-secret').value='';byId('token-helper').open=false;renderPreRequestActions([]);byId('pre-request-actions-enabled').checked=true;byId('pre-request-literal-consent').checked=false;byId('capture-response-variable').checked=false;byId('response-variable-name').value='token';byId('response-value-source').value='json';byId('response-json-path').value='access_token';byId('response-success-only').checked=true;setResponseTests([]);setActiveResponseContract(null);updateResponseCaptureUi();
-  activeSaved=null;byId('request-title').textContent=title;renderQueryParams([]);ensureQueryParamRow();clearWriteConfirmation();updateGuard();renderBodyHighlight();updateJsonTools();setEditorTab('params');
+  activeSaved=null;byId('request-title').textContent=title;renderQueryParams([]);ensureQueryParamRow();updateGuard();renderBodyHighlight();updateJsonTools();setEditorTab('params');
 }
 function createNewWorkspaceTab(notify=true){
   invalidateStructuredDiagnosticContext(false);
@@ -1657,9 +1662,9 @@ function markActiveWorkspaceTabSaved(saved){
 }
 function makeContainerRow(item,collectionId,folderId,kind,count){
   const row=document.createElement('div');row.className=kind==='collection'?'collection-row':'folder-row';
-  const expand=document.createElement('button');expand.className='tree-tool tree-expand';expand.type='button';expand.textContent=collapsed.has(item.id)?'›':'⌄';expand.setAttribute('aria-label',collapsed.has(item.id)?'Expandir':'Recolher');
+  const isExpanded=!collapsed.has(item.id),expand=document.createElement('button');expand.className='tree-tool tree-expand';expand.type='button';expand.textContent=isExpanded?'⌄':'›';expand.setAttribute('aria-label',`${isExpanded?'Recolher':'Expandir'} ${item.name}`);expand.setAttribute('aria-expanded',String(isExpanded));
   expand.onclick=()=>{collapsed.has(item.id)?collapsed.delete(item.id):collapsed.add(item.id);renderCollectionTree();};
-  const select=document.createElement('button');select.className='tree-select'+(selectedContainer.collectionId===collectionId&&selectedContainer.folderId===folderId?' selected':'');select.type='button';select.title=item.name;
+  const select=document.createElement('button');select.className='tree-select'+(selectedContainer.collectionId===collectionId&&selectedContainer.folderId===folderId?' selected':'');select.type='button';select.title=item.name;select.setAttribute('aria-label',count?`${item.name}, ${count} itens`:item.name);
   const icon=document.createElement('span');icon.className='tree-icon';icon.append(createSidebarIcon(kind==='collection'?'collection':'folder'));
   const name=document.createElement('span');name.className='tree-name';name.textContent=item.name;select.append(icon,name);
   if(count){const badge=document.createElement('span');badge.className='tree-count';badge.textContent=String(count);select.append(badge);}
@@ -1674,9 +1679,9 @@ function createSidebarIcon(name){
   for(const d of paths[name]||[]){const path=document.createElementNS(namespace,'path');path.setAttribute('d',d);svg.append(path);}return svg;
 }
 function appendSavedRequest(parent,request,collectionId,folderId){
-  const row=document.createElement('div');row.className='saved-request-row';const select=document.createElement('button');select.className='tree-select';select.type='button';select.title=request.name;
-  const m=document.createElement('span');m.className=`method-dot ${String(request.method||'GET').toLowerCase()}`;m.textContent=request.method||'GET';
-  const label=document.createElement('span');label.className='tree-name';label.textContent=request.name||request.route||'Request';select.append(m,label);select.onclick=()=>openCollectionRequestInTab(request,collectionId,folderId);
+  const labelText=request.name||request.route||'Request',method=request.method||'GET',row=document.createElement('div');row.className='saved-request-row';const select=document.createElement('button');select.className='tree-select';select.type='button';select.title=labelText;select.setAttribute('aria-label',`${method} ${labelText}`);
+  const m=document.createElement('span');m.className=`method-dot ${String(method).toLowerCase()}`;m.textContent=method;
+  const label=document.createElement('span');label.className='tree-name';label.textContent=labelText;label.title=labelText;select.append(m,label);select.onclick=()=>openCollectionRequestInTab(request,collectionId,folderId);
   const remove=document.createElement('button');remove.className='tree-tool';remove.type='button';remove.textContent='×';remove.title='Excluir requisição salva';remove.setAttribute('aria-label','Excluir '+request.name);remove.onclick=()=>deleteCollectionRequest(collectionId,folderId,request.id);
   row.append(select,remove);parent.append(row);
 }
@@ -2350,28 +2355,52 @@ async function saveCollectionRequest(event){
   }catch(error){showToast('Falha ao salvar',error.message||'Não foi possível salvar a request na coleção.','error');}
 }
 function loadCollectionRequest(request,collectionId,folderId,notify=true){
+  clearRequestCorrection();
   clearCurrentResponseExample();
   byId('base-url').value=request.baseUrl||'{{baseUrl}}';baseUrlAuto=request.baseUrl==='{{baseUrl}}';byId('allow-insecure-http').checked=request.allowInsecureHttp===true;method.value=['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method)?request.method:'GET';
   const split=splitRoute(request.route||'');route.value=split.route;renderQueryParams(split.params);ensureQueryParamRow();byId('headers').value=request.headers||'';body.value=request.body||'';applyBodyMode(request.bodyMode);renderMultipartFields(request.multipartFields||[]);renderGraphqlFields(request);selectedContainer={collectionId,folderId};applyAuthFields(request);
   byId('token-client-id').value=request.tokenRequest?request.tokenClientId||'':'';byId('token-client-secret').value='';byId('token-credential-mode').value=request.tokenCredentialMode==='query'?'query':'body';byId('token-helper').open=!!request.tokenRequest;
   if(request.tokenRequest){byId('token-route').value=split.route;byId('token-client-id-field').value=request.tokenClientIdField||'client_id';byId('token-client-secret-field').value=request.tokenClientSecretField||'client_secret';tokenRequestConfig=RunnerLogic.normalizeTokenRequestConfig({route:split.route,clientIdField:byId('token-client-id-field').value,clientSecretField:byId('token-client-secret-field').value,credentialMode:byId('token-credential-mode').value});}
    renderPreRequestActions(request.preRequestActions||[]);byId('pre-request-actions-enabled').checked=request.preRequestActionsEnabled!==false;byId('pre-request-literal-consent').checked=request.preRequestActionsLiteralConsent===true;updatePreRequestActionsUi();byId('capture-response-variable').checked=!!request.captureResponseVariable;byId('response-variable-name').value=request.responseVariableName||'token';byId('response-value-source').value=request.responseValueSource==='text'?'text':'json';byId('response-json-path').value=request.responseJsonPath||'access_token';byId('response-success-only').checked=request.responseSuccessOnly!==false;byId('response-capture-target').value=request.responseCaptureTarget==='vault'?'vault':'environment';byId('response-variable-result').hidden=true;updateResponseCaptureUi();setResponseTests(request.responseTests||[]);setActiveResponseContract(request.responseContract||null);
-  updateTokenButton();clearWriteConfirmation();updateGuard();updateCopyButtons();renderBodyHighlight();updateJsonTools();activeSaved={id:request.id,name:request.name,collectionId,folderId};
+  updateTokenButton();updateGuard();updateCopyButtons();renderBodyHighlight();updateJsonTools();activeSaved={id:request.id,name:request.name,collectionId,folderId};
   byId('request-title').textContent=request.name||'Requisição salva';setEditorTab('params');renderCollectionTree();
   if(notify)showToast('Requisição carregada',hasAuthCredentials(request)?authTypeLabel(request)+' recuperada do banco local; pode expirar.':'Params, headers e body recuperados da coleção.','success',3500);
 }
-function clearWriteConfirmation(){byId('confirm-test-data').checked=false;byId('test-data-phrase').value='';}
-function writeConfirmationValid(){return byId('confirm-test-data').checked&&byId('test-data-phrase').value.trim()==='TESTE';}
+function clearRequestCorrection(){requestCorrection=null;const action=byId('request-correction-go');if(action)action.hidden=true;updateGuard();}
+function setRequestCorrection(message,target=null){requestCorrection={message:String(message||''),target,workspaceTabId:activeWorkspaceTabId,environmentId:activeEnvironmentId};}
+function withRequestCorrectionTarget(target,validate){try{return validate();}catch(error){if(error&&(typeof error==='object'||typeof error==='function'))requestCorrectionTargets.set(error,target);throw error;}}
+function isRequestCorrectionTargetAvailable(target){return!!target&&target.isConnected&&!target.disabled&&!!(document.querySelector('.editor-column')?.contains(target)||document.querySelector('.endpoint-surface')?.contains(target));}
+function clearRequestCorrectionForEdit(target){
+  const correctionTarget=requestCorrection?.target;if(!correctionTarget||!target)return;
+  const targetRow=target.closest?.('.query-param-row'),correctionRow=correctionTarget.closest?.('.query-param-row');
+  const captureFields=new Set(['capture-response-variable','response-value-source','response-variable-name','response-json-path','response-capture-target']);
+  if(target===correctionTarget||(targetRow&&targetRow===correctionRow)||(captureFields.has(target.id)&&captureFields.has(correctionTarget.id)))clearRequestCorrection();
+}
+function focusRequestCorrection(){
+  const target=requestCorrection?.target;
+  if(!target||requestCorrection.workspaceTabId!==activeWorkspaceTabId||requestCorrection.environmentId!==activeEnvironmentId||!isRequestCorrectionTargetAvailable(target)||document.querySelector('dialog[open]')){clearRequestCorrection();return;}
+  const panel=target.closest('[data-editor-panel]');if(panel?.hidden)setEditorTab(panel.dataset.editorPanel,false);
+  const disclosures=[];for(let disclosure=target.closest('details');disclosure;disclosure=disclosure.parentElement?.closest('details'))disclosures.push(disclosure);
+  for(const disclosure of disclosures.reverse())disclosure.open=true;
+  if(document.querySelector('dialog[open]')||!isRequestCorrectionTargetAvailable(target)||target.closest('[hidden]')){clearRequestCorrection();return;}
+  target.focus();
+}
 function updateGuard(){
-  const isWrite=writeMethods.has(method.value);method.className=`method-select method-${method.value.toLowerCase()}`;
-  writeGuard.hidden=!isWrite;
+  method.className=`method-select method-${method.value.toLowerCase()}`;
   let disabled=false,message='Revise ambiente e dados antes de enviar.';
+  if(requestCorrection?.target===route&&route.value.trim()&&requestCorrection.message==='Informe uma rota para enviar a requisição.')requestCorrection=null;
+  if(requestCorrection&&(requestCorrection.workspaceTabId!==activeWorkspaceTabId||requestCorrection.environmentId!==activeEnvironmentId||!isRequestCorrectionTargetAvailable(requestCorrection.target)))requestCorrection=null;
+  let correctionTarget=null;
   if(requestSendInProgress){disabled=true;message='Envio em andamento. Aguarde a resposta.';}
-  else if(!route.value.trim()){disabled=true;message='Informe uma rota para enviar a requisição.';}
-  else if(isWrite&&!writeConfirmationValid()){disabled=true;message='Confirme que os dados são de teste e digite TESTE.';}
+  else if(!route.value.trim()){
+    disabled=true;message='Informe uma rota para enviar a requisição.';correctionTarget=route;
+    if(requestCorrection?.target!==route)setRequestCorrection(message,route);
+  }
+  else if(requestCorrection?.target){message=requestCorrection.message;correctionTarget=requestCorrection.target;}
   sendButton.disabled=disabled;
   const status=byId('request-send-status');
   if(status&&status.textContent!==message)status.textContent=message;
+  const correctionGo=byId('request-correction-go');if(correctionGo)correctionGo.hidden=!correctionTarget||!!document.querySelector('dialog[open]')||!isRequestCorrectionTargetAvailable(correctionTarget);
   refreshRequestInspector();updateAdvancedToolsIndicator();
 }
 function updateAdvancedToolsIndicator(){
@@ -2509,9 +2538,9 @@ function apiStatusToast(status,reason){
   const label=`${status} ${reason}`.trim();if(status>=200&&status<300){showToast('Sucesso',`API respondeu ${label}.`,'success');return;}if(status>=300&&status<400){showToast('Redirecionamento',`API respondeu ${label}. Confira a URL base e use HTTPS.`,'warning');return;}
   const guide=status===401?'Confira o token Bearer.':status===403?'Confira as permissões do token.':status===404?'Confira a rota e a URL base.':status===429?'Aguarde antes de tentar novamente.':status>=500?'Falha no servidor da API; tente novamente mais tarde.':'Confira os campos e o JSON da requisição.';showToast('Erro da API',`${label}. ${guide}`,'error');
 }
-function setEditorTab(name){
+function setEditorTab(name,persist=true){
   document.querySelectorAll('[data-editor-tab]').forEach(button=>{const active=button.dataset.editorTab===name;button.classList.toggle('active',active);button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;});
-  document.querySelectorAll('[data-editor-panel]').forEach(panel=>panel.hidden=panel.dataset.editorPanel!==name);if(name==='body')renderBodyHighlight();if(name==='scripts')updateInsomniaScriptPreview();syncActiveWorkspaceTab(false);
+  document.querySelectorAll('[data-editor-panel]').forEach(panel=>panel.hidden=panel.dataset.editorPanel!==name);if(name==='body')renderBodyHighlight();if(name==='scripts')updateInsomniaScriptPreview();if(persist)syncActiveWorkspaceTab(false);else{const tab=activeWorkspaceTab();if(tab)tab.editorSection=name;}
 }
 function handleEditorTabKeydown(event){
   if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
@@ -2847,6 +2876,7 @@ function renderEnvironmentSelect(){
   invalidateStructuredDiagnosticContext();
   if(!environments.some(x=>x.id===id))return;
   if(id===activeEnvironmentId)return;
+  clearRequestCorrection();
   releaseSecretVaultMemory();
   activeEnvironmentId=id;clearGraphqlSchema('Ambiente alterado; carregue o schema GraphQL novamente.');clearRequestBodyContractResult();
   await dbWrite('settings',{key:'activeEnvironmentId',value:id});renderEnvironmentSelect();await loadSecretVaultForActiveEnvironment();
@@ -3239,11 +3269,11 @@ function updateResponseCaptureUi(){
 function validateResponseCaptureForm(){
   if(!byId('capture-response-variable').checked)return;
   const name=byId('response-variable-name').value.trim();
-  if(!RunnerLogic.isValidCaptureVariableName(name)){throw new Error('Informe um nome de variável válido (até 80 caracteres).');}
+  if(!RunnerLogic.isValidCaptureVariableName(name))withRequestCorrectionTarget(byId('response-variable-name'),()=>{throw new Error('Informe um nome de variável válido (até 80 caracteres).');});
   if(byId('response-value-source').value==='json'){
-    const path=byId('response-json-path').value.trim();
-    if(!path){throw new Error('Informe o caminho do campo JSON, por exemplo access_token.');}
-    parseJsonPath(path);
+    const pathField=byId('response-json-path'),path=pathField.value.trim();
+    if(!path)withRequestCorrectionTarget(pathField,()=>{throw new Error('Informe o caminho do campo JSON, por exemplo access_token.');});
+    withRequestCorrectionTarget(pathField,()=>parseJsonPath(path));
   }
   if(byId('response-capture-target').value==='vault'){assertVaultCaptureAvailable({environmentId:activeEnvironmentId||'default'});}
 }
@@ -3304,7 +3334,6 @@ async function runStructuredRequest(prepared){
   requestSendInProgress=true;updateGuard();
   const isCurrent=()=>activeWorkspaceTab()?.id===prepared.origin.tabId&&activeSaved?.id===prepared.origin.requestId&&!activeWorkspaceTab()?.dirty;
   try{
-    call.confirmTestData=writeMethods.has(call.method);call.testDataPhrase=call.confirmTestData?'TESTE':'';
     const input={collectionId:prepared.origin.collectionId,folderId:prepared.origin.folderId||null,requestId:prepared.origin.requestId,environmentId:call.environmentId};
     if(JSON.stringify(getStructuredSources(input))!==prepared.sourceStamp)return{...facts,outcome:'local_error',durationMs:performance.now()-started};
     const historyEntry=await saveHistory(prepared.historyRequest,{quiet:true});
@@ -3398,12 +3427,13 @@ function requestFromForm(selectedMethod,requestRoute,resolveValues=true,preReque
   const preRequestVariables=preRequestExecution?.variables||{},resolve=value=>resolveValues?applyEnvironment(value,preRequestVariables):value,authMode=authModeFromForm(),auth={...authFieldsFromForm(resolve,true),authMode},bodyMode=byId('body-mode').value,graphql=getGraphqlFieldsFromForm();
   const requestBody=bodyMode==='graphql'?RunnerLogic.buildGraphqlBody(graphql.graphqlQuery,graphql.graphqlVariables,graphql.graphqlOperationName,resolve):resolve(body.value);
   return{baseUrl:resolve(byId('base-url').value.trim()),route:resolve(requestRoute),method:selectedMethod,...auth,collectionId:selectedContainer.collectionId,folderId:selectedContainer.folderId,environmentId:activeEnvironmentId||'default',bodyMode,headers:resolve(byId('headers').value),body:requestBody,multipartFields:readMultipartFieldEntries(resolve).map(entry=>entry.field),graphqlQuery:graphql.graphqlQuery,graphqlVariables:graphql.graphqlVariables,graphqlOperationName:graphql.graphqlOperationName,
-    allowInsecureHttp:byId('allow-insecure-http').checked,confirmTestData:byId('confirm-test-data').checked,testDataPhrase:byId('test-data-phrase').value,confirmTokenRequest:false,
+    allowInsecureHttp:byId('allow-insecure-http').checked,confirmTokenRequest:false,
     saveBearerToken:byId('save-token-history').checked,
      preRequestActions:getPreRequestActionsFromForm(),preRequestActionsEnabled:byId('pre-request-actions-enabled').checked,preRequestActionsLiteralConsent:byId('pre-request-literal-consent').checked,preRequestSecretValues:preRequestExecution?.vaultSecrets||{},preRequestProvenance:preRequestExecution?.provenance||{},captureResponseVariable:byId('capture-response-variable').checked,responseVariableName:byId('response-variable-name').value.trim(),responseValueSource:byId('response-value-source').value,responseJsonPath:byId('response-json-path').value.trim(),responseSuccessOnly:byId('response-success-only').checked,responseCaptureTarget:byId('response-capture-target').value==='vault'?'vault':'environment',responseTests:getResponseTestsFromForm(),...(activeResponseContract?{responseContract:activeResponseContract}:{}),resolutionProvenance:{...lastResolutionProvenance,...(preRequestExecution?.provenance||{})}};
 }
 async function sendCurrentRequest(){
   if(requestSendInProgress)return;
+  clearRequestCorrection();
   clearCurrentResponseExample();
   lastResolutionProvenance={};
   const selectedMethod=method.value;let request;
@@ -3411,7 +3441,6 @@ async function sendCurrentRequest(){
     validateResponseCaptureForm();refreshRequestInspector();
     const preRequestActions=getPreRequestActionsFromForm(),preRequestExecution=byId('pre-request-actions-enabled').checked?RunnerLogic.runPreRequestActions(preRequestActions,getEnvironment().variables||{},{},vaultResolutionInput()):{variables:{},provenance:{},vaultSecrets:{}};
     const rawRoute=buildRequestRoute(),resolvedRoute=buildRequestRoute(true,false,preRequestExecution.variables);
-    if(writeMethods.has(selectedMethod)&&!writeConfirmationValid())throw Error('Digite TESTE e confirme que URL e dados são exclusivos de teste.');
     const historyRequest=requestFromForm(selectedMethod,rawRoute,false);
     request=requestFromForm(selectedMethod,rawRoute,true,preRequestExecution);
     if(request.bodyMode==='graphql'&&selectedMethod!=='POST')throw Error('GraphQL usa POST no Vortix.');
@@ -3421,12 +3450,7 @@ async function sendCurrentRequest(){
     const destination=redactVaultValues(sanitizeBase(request.baseUrl).value.replace(/\/+$/,'')+sanitizeRoute(resolvedRoute).value);
     const insecureWarning=insecureOrigin?remoteHttpWarning(insecureOrigin):'';
     const queryKeyWarning=request.authType==='apiKey'&&request.apiKeyLocation==='query'?'A API Key será enviada na query string, onde pode ficar registrada em logs e históricos da API. Prefira header.':'';
-    if(writeMethods.has(selectedMethod)){
-      const warning=['Confirme que o ambiente e os dados são descartáveis e exclusivos para teste.',insecureWarning,queryKeyWarning].filter(Boolean).join(' ');
-      if(!(await confirmWithDialog({eyebrow:'ALTERAÇÃO DE DADOS',title:'Confirmar envio '+selectedMethod+'?',description:destination,warning,confirmLabel:'Enviar '+selectedMethod,danger:true}))){
-        showToast('Envio cancelado','Nenhuma requisição foi enviada.','info');return;
-      }
-    }else if((insecureOrigin||queryKeyWarning)&&!(await confirmWithDialog({eyebrow:queryKeyWarning?'API KEY NA QUERY':'HTTP SEM TLS',title:queryKeyWarning?'Enviar request com API Key na query?':'Enviar request sem HTTPS?',description:destination,warning:[insecureWarning,queryKeyWarning].filter(Boolean).join(' '),confirmLabel:'Enviar request',danger:true}))){
+    if((insecureOrigin||queryKeyWarning)&&!(await confirmWithDialog({eyebrow:queryKeyWarning?'API KEY NA QUERY':'HTTP SEM TLS',title:queryKeyWarning?'Enviar request com API Key na query?':'Enviar request sem HTTPS?',description:destination,warning:[insecureWarning,queryKeyWarning].filter(Boolean).join(' '),confirmLabel:'Enviar request',danger:true}))){
       showToast('Envio cancelado','Nenhuma requisição foi enviada.','info');return;
     }
     const exampleTarget=activeSaved&&!activeWorkspaceTab()?.dirty?{...activeSaved}:null;
@@ -3439,9 +3463,9 @@ async function sendCurrentRequest(){
       updateResponseExamplesUi();
     }
     finally{
-      if(writeMethods.has(selectedMethod))clearWriteConfirmation();byId('request-note').textContent=writeMethods.has(selectedMethod)?'Confirmação consumida. Confirme novamente para outra gravação.':'A resposta é temporária; reutilize a request pela coleção ou histórico.';updateGuard();
+      byId('request-note').textContent='A resposta é temporária; reutilize a request pela coleção ou histórico.';updateGuard();
     }
-  }catch(error){showResponse('Requisição inválida','bad','',error.message||'Revise os campos.');showToast('Revise a requisição',error.message||'Confira URL, rota, ambiente e campos.','error');}
+  }catch(error){showResponse('Requisição inválida','bad','',error.message||'Revise os campos.');showToast('Revise a requisição',error.message||'Confira URL, rota, ambiente e campos.','error');const target=error&&(typeof error==='object'||typeof error==='function')?requestCorrectionTargets.get(error):null;if(target)setRequestCorrection(error.message||'Revise o campo indicado.',target);updateGuard();}
 }
 async function requestOAuthClientCredentialsToken(){
   const secretField=byId('oauth2-client-secret');let request=null,responseDuration=0;
@@ -3497,7 +3521,7 @@ async function requestTokenFromHelper(){
     const config=tokenRequestConfig,routeConfig=RunnerLogic.normalizeTokenRequestConfig({...config,route:applyEnvironment(config.route)});
     if(!routeConfig.route)throw Error('Configure a rota do endpoint de token.');
     const mode=config.credentialMode,baseUrl=applyEnvironment(byId('base-url').value.trim());
-    request={baseUrl,route:routeConfig.route,method:'POST',...authFieldsFromForm(applyEnvironment,true),environmentId:activeEnvironmentId||'default',bodyMode:'json',headers:'Accept: application/json',body:'',confirmTestData:false,testDataPhrase:'',confirmTokenRequest:true,tokenClientId:applyEnvironment(clientId),tokenClientSecret:applyEnvironment(secret),tokenClientIdField:config.clientIdField,tokenClientSecretField:config.clientSecretField,tokenCredentialMode:mode,allowInsecureHttp:byId('allow-insecure-http').checked,saveBearerToken:byId('save-token-history').checked};
+    request={baseUrl,route:routeConfig.route,method:'POST',...authFieldsFromForm(applyEnvironment,true),environmentId:activeEnvironmentId||'default',bodyMode:'json',headers:'Accept: application/json',body:'',confirmTokenRequest:true,tokenClientId:applyEnvironment(clientId),tokenClientSecret:applyEnvironment(secret),tokenClientIdField:config.clientIdField,tokenClientSecretField:config.clientSecretField,tokenCredentialMode:mode,allowInsecureHttp:byId('allow-insecure-http').checked,saveBearerToken:byId('save-token-history').checked};
     request.resolutionProvenance={...lastResolutionProvenance};
     const responseVaultSecrets=RunnerLogic.secretValuesUsedByProvenance(request.resolutionProvenance,secretVaultValues||{});
     const target=new URL(request.baseUrl);
@@ -3525,6 +3549,8 @@ async function requestTokenFromHelper(){
   }catch(error){showToast('Não foi possível solicitar token',error.message||'Confira ambiente e URL base.','error');byId('token-client-id').value='';byId('token-client-secret').value='';updateTokenButton();}
 }
 function addEventListeners(){
+  byId('request-correction-go').onclick=focusRequestCorrection;
+  const correctionEditor=document.querySelector('.editor-column');correctionEditor.addEventListener('input',event=>clearRequestCorrectionForEdit(event.target),true);correctionEditor.addEventListener('change',event=>clearRequestCorrectionForEdit(event.target),true);
   const quickOpenDialog = byId('quick-open-dialog'), quickOpenQuery = byId('quick-open-query');
   byId('ai-friendly-trigger').onclick=openAiFriendlyHelp;byId('close-ai-help').onclick=()=>byId('ai-help-dialog').close();byId('close-ai-help-done').onclick=()=>byId('ai-help-dialog').close();byId('copy-ai-safe-context').onclick=()=>void copyAiSafeContext();byId('copy-maestri-agent-prompt').onclick=()=>void copyMaestriAgentPrompt();
   setupFullscreenControl();
@@ -3541,8 +3567,10 @@ function addEventListeners(){
     if (current < 0 || !tabs.length) return;
     event.preventDefault();const direction = event.key === 'ArrowRight' ? 1 : -1;const next = tabs[(current + direction + tabs.length) % tabs.length];next.focus();void activateWorkspaceTab(next.dataset.workspaceTabId);
   });
-  const editorColumn=document.querySelector('.editor-column'),trackDraft=event=>{if(event.target.closest('#structured-card'))return;if(['confirm-test-data','test-data-phrase','token-client-secret','token-route','token-client-id-field','token-client-secret-field','token-credential-mode','oauth2-token-url','oauth2-client-id','oauth2-client-secret','oauth2-scope','oauth2-client-auth-method','oauth2-allow-insecure-http','oauth2-save-token-environment','oauth-pkce-authorization-url','oauth-pkce-token-url','oauth-pkce-client-id','oauth-pkce-scope','oauth-pkce-redirect-uri','oauth-pkce-save-access-token','oauth-pkce-save-refresh-token','graphql-schema-type'].includes(event.target.id))return;if(['method','base-url','route','headers','body','body-mode'].includes(event.target.id)||event.target.matches('.query-param-row input, .pre-request-action-row input, .pre-request-action-row select'))clearRequestBodyContractResult();if(['base-url','route','headers','auth-inheritance-mode','auth-type','bearer-token','basic-username','basic-password','api-key-name','api-key-value','api-key-location'].includes(event.target.id)||event.target.matches('.query-param-row input'))clearGraphqlSchema('Endpoint, Auth ou Params alterados; carregue o schema GraphQL novamente.');syncActiveWorkspaceTab(true);};
+  const editorColumn=document.querySelector('.editor-column'),trackDraft=event=>{if(event.target.closest('#structured-card'))return;if(['token-client-secret','token-route','token-client-id-field','token-client-secret-field','token-credential-mode','oauth2-token-url','oauth2-client-id','oauth2-client-secret','oauth2-scope','oauth2-client-auth-method','oauth2-allow-insecure-http','oauth2-save-token-environment','oauth-pkce-authorization-url','oauth-pkce-token-url','oauth-pkce-client-id','oauth-pkce-scope','oauth-pkce-redirect-uri','oauth-pkce-save-access-token','oauth-pkce-save-refresh-token','graphql-schema-type'].includes(event.target.id))return;if(['method','base-url','route','headers','body','body-mode'].includes(event.target.id)||event.target.matches('.query-param-row input, .pre-request-action-row input, .pre-request-action-row select'))clearRequestBodyContractResult();if(['base-url','route','headers','auth-inheritance-mode','auth-type','bearer-token','basic-username','basic-password','api-key-name','api-key-value','api-key-location'].includes(event.target.id)||event.target.matches('.query-param-row input'))clearGraphqlSchema('Endpoint, Auth ou Params alterados; carregue o schema GraphQL novamente.');syncActiveWorkspaceTab(true);};
   editorColumn.addEventListener('input', trackDraft);editorColumn.addEventListener('change', trackDraft);
+  const endpointSurface=document.querySelector('.endpoint-surface');
+  for(const type of ['input','change'])endpointSurface.addEventListener(type,event=>{clearRequestCorrectionForEdit(event.target);trackDraft(event);});
   document.querySelector('.editor-column').addEventListener('click', event => { if (event.target.closest('.query-param-row .button, .response-test-remove, .pre-request-action-remove')) syncActiveWorkspaceTab(true); });  byId('clear-history').onclick=clearHistory;byId('copy-headers').onclick=()=>copyOutput('response-headers','Cabeçalhos');byId('copy-body').onclick=()=>copyOutput('response-body','Body');document.querySelectorAll('[data-response-view]').forEach(button=>button.onclick=()=>setResponseView(button.dataset.responseView));byId('response-search').addEventListener('input',renderResponseBody);byId('response-tree').addEventListener('click',event=>{const button=event.target.closest('[data-copy-json-path]');if(button)copyResponsePath(button.dataset.copyJsonPath);});
   byId('save-response-example').onclick=openResponseExampleForm;
   byId('response-example-save-form').addEventListener('submit',saveResponseExample);
@@ -3554,7 +3582,11 @@ function addEventListeners(){
   byId('add-query-param').onclick=()=>{addQueryParamRow();syncActiveWorkspaceTab(true);};byId('add-response-test').onclick=()=>{addResponseTest();syncActiveWorkspaceTab(true);};byId('validate-request-body').onclick=validateRequestBodyContractFromForm;
   byId('add-pre-request-action').onclick=addPreRequestAction;byId('pre-request-actions-enabled').addEventListener('change',()=>{updatePreRequestActionsUi();refreshRequestInspector();syncActiveWorkspaceTab(true);});
   byId('response-tests-list').addEventListener('input',()=>renderResponseTestResults([]));byId('response-tests-list').addEventListener('change',()=>renderResponseTestResults([]));
-  byId('add-collection').onclick=addCollection;byId('add-collection-heading').onclick=addCollection;byId('collections-empty-create').onclick=addCollection;byId('import-collection').onclick=openImportDialog;byId('browse-import-file').onclick=()=>{byId('import-dialog').close();byId('import-collection-file').click();};byId('close-import-dialog').onclick=()=>byId('import-dialog').close();byId('cancel-import-dialog').onclick=()=>byId('import-dialog').close();byId('command-import-format').addEventListener('change',updateCommandImportUi);byId('create-imported-request').onclick=openImportedCommandDraft;byId('import-collection-file').addEventListener('change',importCollectionFile);byId('generate-curl').onclick=openCurlExportDialog;byId('curl-format').addEventListener('change',updateCurlExportPreview);byId('curl-shell').addEventListener('change',updateCurlExportPreview);byId('curl-include-sensitive').addEventListener('change',()=>void confirmCurlSensitiveMode());byId('copy-curl-command').onclick=copyCurlCommand;byId('close-curl-export').onclick=()=>byId('curl-export-dialog').close();byId('cancel-curl-export').onclick=()=>byId('curl-export-dialog').close();byId('curl-export-dialog').addEventListener('close',()=>{byId('curl-include-sensitive').checked=false;updateCurlExportPreview();});byId('export-collection').onclick=openExportDialog;byId('export-format').addEventListener('change',updateExportFormatUi);byId('export-form').addEventListener('submit',exportCollection);byId('close-export-dialog').onclick=()=>byId('export-dialog').close();byId('cancel-export-dialog').onclick=()=>byId('export-dialog').close();byId('save-collection-request').onclick=openSaveDialog;byId('save-request-form').addEventListener('submit',saveCollectionRequest);byId('close-save-request').onclick=()=>byId('save-request-dialog').close();byId('cancel-save-request').onclick=()=>byId('save-request-dialog').close();
+  byId('add-collection').onclick=addCollection;byId('collections-empty-create').onclick=addCollection;byId('import-collection').onclick=openImportDialog;byId('browse-import-file').onclick=()=>{byId('import-dialog').close();byId('import-collection-file').click();};byId('close-import-dialog').onclick=()=>byId('import-dialog').close();byId('cancel-import-dialog').onclick=()=>byId('import-dialog').close();byId('command-import-format').addEventListener('change',updateCommandImportUi);byId('create-imported-request').onclick=openImportedCommandDraft;byId('import-collection-file').addEventListener('change',importCollectionFile);byId('generate-curl').onclick=openCurlExportDialog;byId('curl-format').addEventListener('change',updateCurlExportPreview);byId('curl-shell').addEventListener('change',updateCurlExportPreview);byId('curl-include-sensitive').addEventListener('change',()=>void confirmCurlSensitiveMode());byId('copy-curl-command').onclick=copyCurlCommand;byId('close-curl-export').onclick=()=>byId('curl-export-dialog').close();byId('cancel-curl-export').onclick=()=>byId('curl-export-dialog').close();byId('curl-export-dialog').addEventListener('close',()=>{byId('curl-include-sensitive').checked=false;updateCurlExportPreview();});byId('export-collection').onclick=openExportDialog;byId('export-format').addEventListener('change',updateExportFormatUi);byId('export-form').addEventListener('submit',exportCollection);byId('close-export-dialog').onclick=()=>byId('export-dialog').close();byId('cancel-export-dialog').onclick=()=>byId('export-dialog').close();byId('save-collection-request').onclick=openSaveDialog;byId('save-request-form').addEventListener('submit',saveCollectionRequest);byId('close-save-request').onclick=()=>byId('save-request-dialog').close();byId('cancel-save-request').onclick=()=>byId('save-request-dialog').close();
+  byId('collection-tools-more').addEventListener('keydown',event=>{
+    if(event.key!=='Escape'||!event.currentTarget.open)return;
+    event.preventDefault();event.currentTarget.open=false;event.currentTarget.querySelector('summary').focus();
+  });
   byId('export-workspace').onclick=exportWorkspaceBackup;byId('export-encrypted-workspace').onclick=exportEncryptedWorkspaceBackup;byId('restore-workspace').onclick=()=>byId('restore-workspace-file').click();byId('restore-workspace-file').addEventListener('change',restoreWorkspaceBackup);
   byId('protect-existing-secrets').onclick=protectExistingSecrets;
   byId('secret-vault-create').onclick=()=>void createSecretVaultFromUi();byId('secret-vault-unlock').onclick=()=>void unlockSecretVaultFromUi();byId('secret-vault-lock').onclick=()=>void lockSecretVaultFromUi();byId('secret-vault-remove').onclick=()=>void removeSecretVault();byId('secret-vault-add').onclick=event=>void addSecretVaultEntry(event);
@@ -3572,11 +3604,11 @@ function addEventListeners(){
   byId('copy-insomnia-script').onclick=async()=>{try{await copyToClipboard(byId('insomnia-script-preview').textContent);}catch{showToast('Falha ao copiar','O navegador bloqueou a área de transferência.','error');}};
   byId('clear-token').onclick=()=>{byId('bearer-token').value='';byId('bearer-token').focus();showToast('Token removido','O campo Bearer foi limpo desta sessão.','info');};
   byId('new-request').onclick=createNewWorkspaceTab;
-  for(const id of ['method','route','body','base-url','headers','allow-insecure-http','confirm-test-data','test-data-phrase']){
-    const change=()=>{if(['method','route','body','base-url','headers'].includes(id)){byId('confirm-test-data').checked=false;clearRequestBodyContractResult();}if(id==='base-url')baseUrlAuto=false;updateGuard();updateTokenButton();if(id==='body'){renderBodyHighlight();updateJsonTools();}};byId(id).addEventListener('input',change);byId(id).addEventListener('change',change);
+  for(const id of ['method','route','body','base-url','headers','allow-insecure-http']){
+    const change=()=>{if(['method','route','body','base-url','headers'].includes(id)){clearRequestBodyContractResult();}if(id==='base-url')baseUrlAuto=false;updateGuard();updateTokenButton();if(id==='body'){renderBodyHighlight();updateJsonTools();}};byId(id).addEventListener('input',change);byId(id).addEventListener('change',change);
   }
   body.addEventListener('scroll',renderBodyHighlight);byId('body-mode').addEventListener('change',clearRequestBodyContractResult);byId('token-client-id').addEventListener('input',updateTokenButton);byId('token-client-secret').addEventListener('input',updateTokenButton);
-  byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('auth-inheritance-mode').addEventListener('change',()=>{const authMode=authModeFromForm();applyAuthFields(authMode==='custom'?{authMode,authType:'none'}:{authMode});syncActiveWorkspaceTab(true);});byId('save-auth-default').onclick=async()=>{await saveAuthDefault();};byId('body-mode').addEventListener('change',updateBodyModeUi);byId('multipart-add-text').onclick=()=>addMultipartField('text');byId('multipart-add-file').onclick=()=>addMultipartField('file');byId('graphql-load-schema').onclick=()=>{loadGraphqlSchema();};byId('graphql-schema-type').addEventListener('change',renderGraphqlSchemaFields);const graphqlQueryField=byId('graphql-query');graphqlQueryField.addEventListener('input',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keyup',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('click',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keydown',handleGraphqlAutocompleteKeydown);byId('format-graphql-variables').onclick=formatGraphqlVariables;for(const id of ['graphql-query','graphql-variables','graphql-operation-name']){byId(id).addEventListener('input',()=>{byId('confirm-test-data').checked=false;updateGuard();});byId(id).addEventListener('change',()=>{byId('confirm-test-data').checked=false;updateGuard();});}byId('clear-cookie-jar').onclick=clearCookieJar;byId('inspect-references').onclick=refreshRequestInspector;byId('request-inspector').addEventListener('toggle',()=>{if(byId('request-inspector').open)refreshRequestInspector();});byId('runner-datasets').addEventListener('input',()=>scheduleRunnerDependencyPreview());
+  byId('auth-type').addEventListener('change',updateAuthTypeUi);byId('api-key-location').addEventListener('change',updateAuthTypeUi);byId('auth-inheritance-mode').addEventListener('change',()=>{const authMode=authModeFromForm();applyAuthFields(authMode==='custom'?{authMode,authType:'none'}:{authMode});syncActiveWorkspaceTab(true);});byId('save-auth-default').onclick=async()=>{await saveAuthDefault();};byId('body-mode').addEventListener('change',updateBodyModeUi);byId('multipart-add-text').onclick=()=>addMultipartField('text');byId('multipart-add-file').onclick=()=>addMultipartField('file');byId('graphql-load-schema').onclick=()=>{loadGraphqlSchema();};byId('graphql-schema-type').addEventListener('change',renderGraphqlSchemaFields);const graphqlQueryField=byId('graphql-query');graphqlQueryField.addEventListener('input',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keyup',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('click',renderGraphqlAutocomplete);graphqlQueryField.addEventListener('keydown',handleGraphqlAutocompleteKeydown);byId('format-graphql-variables').onclick=formatGraphqlVariables;for(const id of ['graphql-query','graphql-variables','graphql-operation-name']){byId(id).addEventListener('input',()=>{updateGuard();});byId(id).addEventListener('change',()=>{updateGuard();});}byId('clear-cookie-jar').onclick=clearCookieJar;byId('inspect-references').onclick=refreshRequestInspector;byId('request-inspector').addEventListener('toggle',()=>{if(byId('request-inspector').open)refreshRequestInspector();});byId('runner-datasets').addEventListener('input',()=>scheduleRunnerDependencyPreview());
   for(const id of ['token-route','token-client-id-field','token-client-secret-field','token-credential-mode']){byId(id).addEventListener('input',updateTokenButton);byId(id).addEventListener('change',()=>void persistTokenRequestConfig());}
     for(const id of ['oauth2-token-url','oauth2-client-id','oauth2-scope'])byId(id).addEventListener('input',updateOAuth2TokenButton);
   byId('refresh-agent-safe-state').onclick=refreshAgentSafeState;for(const id of ['token-helper','oauth2-helper','oauth-pkce-helper'])byId(id).addEventListener('toggle',updateAdvancedToolsIndicator);

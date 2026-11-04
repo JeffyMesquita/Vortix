@@ -2,7 +2,7 @@
   function attach(adapters) {
     const field = id => document.getElementById(id);
     const card = field('structured-card'), prepare = field('structured-prepare'), approve = field('structured-approve'), execute = field('structured-execute'), cancel = field('structured-cancel');
-    const status = field('structured-status'), review = field('structured-review'), writeGuard = field('structured-write-guard');
+    const status = field('structured-status'), review = field('structured-review');
     const diagnosticSummary = field('structured-diagnostic-summary'), diagnosticGo = field('structured-diagnostic-go'), diagnostics = root.VortixDiagnostics;
     const controlElements = {
       'request.save': 'save-collection-request', 'environment.manage': 'manage-environments-direct', 'settings.open': 'manage-environments',
@@ -133,9 +133,7 @@
       else if (diagnosticBlockers.length) { state = 'blocked'; blockers = diagnosticBlockers; }
       else if (readiness.blocker) { state = 'blocked'; blockers = [readiness.blocker]; }
       else if (preparation?.preparationId) {
-        const writeReady = writeGuard.hidden || (field('structured-confirm').checked && field('structured-phrase').value.trim() === 'TESTE');
         if (approved) state = 'approved';
-        else if (!writeReady) { state = 'blocked'; blockers = ['write_confirmation_required']; }
         else state = 'ready_for_review';
       }
       const controls = controlAvailability();
@@ -179,7 +177,6 @@
         diagnosticOrigin = null; diagnosticOriginRevision = null;
         diagnosticBlockers = safeDiagnosticBlockers(code ? [code] : []);
       }
-      field('structured-confirm').checked = false; field('structured-phrase').value = '';
       message(errors[code] || 'Salve e selecione uma request para preparar.');
     }
     function refresh() {
@@ -208,9 +205,8 @@
           else if (readiness.contextMatches && JSON.stringify(adapters.readSources(target)) !== sourcesStamp) reset('preparation_invalidated');
         } catch { reset('preparation_invalidated'); }
       }
-      const writeReady = !writeGuard.hidden ? field('structured-confirm').checked && field('structured-phrase').value.trim() === 'TESTE' : true;
       prepare.disabled = running || adapters.isBusy() || !adapters.getTarget();
-      approve.disabled = !preparation?.preparationId || approved || running || !!executionId || !writeReady || !diagnosticContextMatches;
+      approve.disabled = !preparation?.preparationId || approved || running || !!executionId || !diagnosticContextMatches;
       execute.disabled = !approved || running || !!executionId || adapters.isBusy() || !diagnosticContextMatches;
       cancel.disabled = !preparation?.preparationId || running || !!executionId || !diagnosticContextMatches;
       publishDiagnostic(running, executionSummary, readiness);
@@ -232,7 +228,6 @@
         const preview = materialized.review;
         field('structured-destination').textContent = `${preview.method} · ${preview.destination} · Ambiente: ${preview.environment}`;
         field('structured-effects').textContent = `Confira a rota na request salva. ${preview.testCount} teste(s) configurado(s). Histórico sem credenciais de Auth; body ${preview.saveResponseBody ? 'retido conforme configurações' : 'não retido'}. ${preview.capture ? `Captura configurada será aplicada ao ${preview.captureTarget === 'vault' ? 'cofre' : 'ambiente'} revisado.` : 'Sem captura de variáveis.'}${preparation.warnings?.includes('insecure_http') ? ' Atenção: HTTP sem TLS.' : ''}${preparation.warnings?.includes('api_key_query') ? ' Atenção: API Key na query pode aparecer em logs da API.' : ''}`;
-        writeGuard.hidden = !['POST', 'PUT', 'PATCH', 'DELETE'].includes(preview.method);
         review.hidden = false; card.open = true; message('Preparação pronta para revisão. Nenhuma chamada enviada.');
       } catch { reset('invalid_request'); }
       refresh();
@@ -255,7 +250,7 @@
       execute.disabled = true;
       const result = await controller.execute_prepared({ preparationId: preparation.preparationId });
       if (result.error) reset(result.error);
-      else { executionId = result.executionId; approved = false; review.hidden = true; field('structured-confirm').checked = false; field('structured-phrase').value = ''; materialized = null; sourcesStamp = ''; target = null; }
+      else { executionId = result.executionId; approved = false; review.hidden = true; materialized = null; sourcesStamp = ''; target = null; }
       refresh();
     };
     cancel.onclick = () => { reset('preparation_cancelled'); refresh(); prepare.focus(); };

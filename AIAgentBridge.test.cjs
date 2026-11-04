@@ -705,7 +705,7 @@ test('Vortix loads contract v2 bridge and safe snapshot leaks no user values', a
   assert.equal(snapshot.request.authType, 'bearer');
   assert.equal(snapshot.request.authConfigured, true);
   assert.equal(snapshot.request.authPersistenceEnabled, true);
-  assert.equal(snapshot.request.requiresWriteConfirmation, true);
+  assert.equal(snapshot.request.requiresWriteConfirmation, false);
   assert.equal(Object.hasOwn(snapshot.request, 'sendEnabled'), false);
   assert.equal(Object.hasOwn(snapshot.request, 'writeConfirmed'), false);
   assert.equal(snapshot.response.statusCode, 200);

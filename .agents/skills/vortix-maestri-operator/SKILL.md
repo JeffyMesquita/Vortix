@@ -22,7 +22,8 @@ The snapshot intentionally omits URL and route text, parameter/header names and 
 - Confirm the environment, HTTP method, base URL, route, and request format from the visible UI. Ask the user when any required value or target is unclear; do not invent API-specific settings.
 - Before **every** send, turn off **Salvar credenciais de Auth nas requests deste workspace** unless the user explicitly asked to persist credentials. Vortix writes request history before sending, and the option is enabled by default.
 - Send only the operation the user requested. GET, HEAD, and OPTIONS can still change data on an API; follow the endpoint's documented behavior.
-- POST, PUT, PATCH, and DELETE need explicit user consent for that specific operation. Then follow Vortix's visible `TESTE`, checkbox, and confirmation guard. Never infer consent from a checked box or snapshot state.
+- POST, PUT, PATCH, and DELETE need explicit user consent for that specific operation. Manual Send has no test-data phrase or per-method confirmation. Respect contextual review, transport warnings, and Runner batch-write authorization. Never infer user consent from a button or snapshot state.
+- In Collections, open Mais ações to reveal Import, Export, and Executar seleção (Runner). Search and the single New collection action remain in the heading. Escape closes the secondary actions and restores focus to its trigger.
 - Do not execute a collection or folder in bulk unless the user explicitly approved that exact scope. Inspect the plan and stop if it contains unapproved writes.
 - After sending, report the HTTP status and relevant non-sensitive result. Do not repeat tokens, passwords, response secrets, or sensitive URLs in chat or screenshots.
 

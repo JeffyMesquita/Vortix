@@ -87,7 +87,7 @@ As áreas principais usam `data-vortix-region`: `collections`, `history`, `envir
 
 ## Diagnóstico compacto e leitura progressiva
 
-Na UI reorganizada, abra **Ajuda e exibição** para acessar a ajuda do bridge ou **Tela cheia**. Importar/exportar/Runner ficam em **Ferramentas da coleção**; cURL, HTTP sem TLS e referências ficam em **Ferramentas avançadas**. **Configurações** tem rótulo visível e seções expansíveis. **Execução revisada** permanece no seu próprio painel após o formulário. Abra o grupo correspondente antes de usar controles recolhidos; os IDs e `data-vortix-*` foram preservados. Recolher não desativa configurações ou concede autorização.
+Na UI reorganizada, abra **Ajuda e exibição** para acessar a ajuda do bridge ou **Tela cheia**. No cabeçalho **Coleções**, **Mais ações** (`…`) revela Importar, Exportar e **Executar seleção**; Nova coleção e busca permanecem visíveis. `Escape` fecha esse grupo e retorna o foco ao gatilho. cURL, HTTP sem TLS e referências ficam em **Ferramentas avançadas**. **Configurações** tem rótulo visível e seções expansíveis. **Execução revisada** permanece no seu próprio painel após o formulário. Abra o grupo correspondente antes de usar controles recolhidos; o botão duplicado `add-collection-heading` foi removido, mantendo a ação `collection.new` em `add-collection`. Recolher não desativa configurações ou concede autorização.
 
 O bridge v2 também oferece `window.vortixAgent.diagnose()`, somente leitura. Comece pelo resumo; peça detalhes apenas quando necessários:
 
@@ -109,7 +109,7 @@ Os tetos UTF-8 são 512 bytes no resumo, 2.048 no resultado e 4.096 nos impedime
 
 Para uma request já salva e sem alterações pendentes, o painel **Execução revisada** oferece preparação sem HTTP, aprovação contextual e execução única. Os controles são `execution.prepare`, `execution.review`, `execution.execute` e `execution.cancel` em `data-vortix-action`. A região é `structured-execution`; `execution.status` expõe somente o resumo operacional visível, sem payloads.
 
-Confira ambiente, método, rota salva, destino e efeitos de captura/histórico antes da aprovação. GET também exige aprovação neste fluxo. Escritas mantêm confirmação de dados descartáveis e `TESTE`, específicos daquela preparação. Alterações invalidam a aprovação; ela expira após cinco minutos. Não reative controles desabilitados nem invoque funções internas.
+Confira ambiente, método, rota salva, destino e efeitos de captura/histórico antes da aprovação. GET também exige aprovação neste fluxo. Escritas usam a mesma revisão contextual, sem frase ou declaração de dados descartáveis. Alterações invalidam a aprovação; ela expira após cinco minutos. Não reative controles desabilitados nem invoque funções internas.
 
 O fluxo revisado não persiste credenciais de Auth e não altera a preferência global do envio manual. Capturas configuradas e retenção de body precisam ser revisadas explicitamente. O bridge v2 continua somente leitura; este recorte não oferece MCP ou execução externa. Resultado desconhecido exige conferir a API, nunca repetir automaticamente uma escrita. Recarregar a aba perde os IDs de execução em memória.
 
@@ -126,7 +126,7 @@ Veja o [fluxo completo de execução revisada](structured-execution.md). Use os 
 ## Gravações e dados sensíveis
 
 - POST, PUT, PATCH e DELETE podem alterar dados. Só envie uma dessas chamadas após consentimento explícito do usuário para aquela operação e após conferir URL e dados de teste.
-- Nunca burle o campo `TESTE`, a caixa de confirmação ou a confirmação exibida antes do envio. Se a interface bloquear a operação, pare e explique o que falta.
+- No editor manual, **Enviar** executa a request sem confirmação extra por método. Respeite os avisos de transporte e credenciais, a revisão contextual e a autorização de escritas em lote do Runner. Se a interface bloquear a operação, pare e explique o que falta.
 - Nunca chame endpoints do Vortix ou da API diretamente. Não use `fetch`, console, scripts ou outra rota para enviar requests ou contornar o guard da interface.
 - Antes de enviar qualquer request, desmarque **Salvar credenciais de Auth nas requests deste workspace**; ela vem marcada por padrão, e o histórico é gravado antes da chamada. Só deixe essa opção ativa se o usuário pedir explicitamente a persistência de credenciais.
 - Não leia, acesse nem consulte tokens, senhas, segredos, valores do cofre, IndexedDB ou localStorage. Não os repita em mensagens, screenshots ou histórico manual. Se a request precisar de uma credencial, peça ao usuário para configurá-la no ambiente ou Auth do Vortix.

@@ -20,7 +20,6 @@ Opções:
   --delay <ms>                 Intervalo entre requests (0 a 5000; padrão 0).
   --stop-on-error              Para ao primeiro erro HTTP ou teste falho.
   --allow-writes               Permite POST, PUT, PATCH e DELETE.
-  --confirm-test-data TESTE    Confirma gravações de teste; exige --allow-writes.
   --allow-insecure-http        Permite HTTP remoto quando request também autoriza.
   --help                       Exibe esta ajuda.
 
@@ -46,7 +45,7 @@ function parseMapVar(value) {
 }
 
 function parseArguments(args) {
-  const options = { collectionPath: '', proxy: '', dataPath: '', junitPath: '', mappings: [], delay: 0, allowWrites: false, confirmTestData: '', allowInsecureHttp: false, stopOnError: false, help: false };
+  const options = { collectionPath: '', proxy: '', dataPath: '', junitPath: '', mappings: [], delay: 0, allowWrites: false, allowInsecureHttp: false, stopOnError: false, help: false };
   for (let index = 0; index < args.length; index++) {
     const argument = args[index];
     if (argument === '--help' || argument === '-h') options.help = true;
@@ -60,15 +59,12 @@ function parseArguments(args) {
       if (!/^\d+$/.test(value) || Number(value) > 5000) throw new CliError('--delay precisa ser um inteiro entre 0 e 5000.');
       options.delay = Number(value);
     } else if (argument === '--allow-writes') options.allowWrites = true;
-    else if (argument === '--confirm-test-data') options.confirmTestData = argumentValue(args, index++, argument);
     else if (argument === '--allow-insecure-http') options.allowInsecureHttp = true;
     else if (argument === '--stop-on-error') options.stopOnError = true;
     else throw new CliError('Opção desconhecida. Use --help para consultar as opções.');
   }
   if (options.help) return options;
   if (!options.collectionPath || !options.proxy) throw new CliError('Informe --collection e --proxy.');
-  if (options.allowWrites && options.confirmTestData !== 'TESTE') throw new CliError('Gravações exigem --allow-writes --confirm-test-data TESTE.');
-  if (!options.allowWrites && options.confirmTestData) throw new CliError('--confirm-test-data exige --allow-writes.');
   return options;
 }
 
@@ -160,8 +156,6 @@ function safeApiCall(request, options, environmentId) {
   call.environmentId = environmentId;
   call.saveBearerToken = false;
   call.confirmTokenRequest = false;
-  call.confirmTestData = options.allowWrites;
-  call.testDataPhrase = options.allowWrites ? options.confirmTestData : '';
   return call;
 }
 
@@ -389,8 +383,8 @@ async function main(args = process.argv.slice(2)) {
     if (!entries.length) throw new CliError('A coleção não contém requests.');
     const datasets = await readDataSets(options.dataPath);
     if (entries.length * datasets.length > 500) throw new CliError('A execução excede o limite de 500 requests.');
-    if (entries.some(entry => RunnerLogic.writeMethods.has(String(entry.request.method || 'GET').toUpperCase())) && (!options.allowWrites || options.confirmTestData !== 'TESTE')) {
-      throw new CliError('A coleção inclui gravações. Use --allow-writes --confirm-test-data TESTE para autorizá-las.');
+    if (entries.some(entry => RunnerLogic.writeMethods.has(String(entry.request.method || 'GET').toUpperCase())) && !options.allowWrites) {
+      throw new CliError('A coleção inclui gravações. Use --allow-writes para autorizá-las.');
     }
     environmentId = `vortix-runner-${crypto.randomUUID()}`;
     const cases = planCases(entries, datasets, environment, ciOverrides, options, environmentId);

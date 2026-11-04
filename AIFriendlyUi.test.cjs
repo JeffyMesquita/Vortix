@@ -7,23 +7,32 @@ const vm = require('node:vm');
 const root = __dirname;
 
 function requestGuardHarness(app) {
+  const helperStart = app.indexOf('function clearRequestCorrection(');
+  const helperEnd = app.indexOf('function updateGuard(', helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart, 'request correction helpers should precede the guard');
+  const helpers = app.slice(helperStart, helperEnd);
   const guard = app.slice(app.indexOf('function updateGuard('), app.indexOf('\nfunction escHtml('));
   const perform = app.slice(app.indexOf('async function performApiRequest('), app.indexOf('\nfunction requestFromForm('));
   let text = '', writes = 0;
   const status = { get textContent() { return text; }, set textContent(value) { text = value; writes += 1; } };
+  const sendButton = { disabled: false }, writeGuard = { hidden: true }, correctionGo = { hidden: true };
+  const route = { value: '', isConnected: true, disabled: false };
+  const phrase = { value: '', isConnected: true, disabled: false }, confirmation = { checked: false, isConnected: true, disabled: false };
+  const editor = { contains: target => [route, phrase, confirmation].includes(target) };
+  const document = { querySelector: selector => selector === '.editor-column' ? editor : null };
   const context = {
-    method: { value: 'GET', className: '' }, route: { value: '' }, sendButton: { disabled: false },
-    writeGuard: { hidden: true }, requestSendInProgress: false, confirmation: { valid: false },
+    method: { value: 'GET', className: '' }, route, sendButton,
+    writeGuard, requestSendInProgress: false, confirmation: { valid: false }, document,
     writeMethods: new Set(['POST', 'PUT', 'PATCH', 'DELETE']),
     writeConfirmationValid() { return context.confirmation.valid; },
-    byId: id => id === 'request-send-status' ? status : {},
+    byId: id => ({ 'request-send-status': status, 'request-correction-go': correctionGo, 'test-data-phrase': phrase, 'confirm-test-data': confirmation }[id] ?? {}),
     refreshRequestInspector() {}, clearCurrentResponseExample() {}, requestBodyContractTestResult() { return null; },
     renderRequestBodyContractResult() {}, renderResponseTestResults() {}, showResponse() {},
     showToast() {}, dismissToast() {}, secretVaultValues: null,
     RunnerLogic: { secretValuesUsedByProvenance: () => ({}), redactSecretValues: value => value },
     performance: { now: () => 0 }, redactVaultValues: value => value
   };
-  const handlers = vm.runInNewContext(`${guard}\n${perform}\n({updateGuard,performApiRequest})`, context);
+  const handlers = vm.runInNewContext(`let requestCorrection=null;const requestCorrectionTargets=new WeakMap();let activeWorkspaceTabId='',activeEnvironmentId='';\n${helpers}\n${guard}\n${perform}\n({clearRequestCorrectionForEdit,updateGuard,performApiRequest})`, context);
   return { context, status, handlers, writes: () => writes };
 }
 
@@ -44,12 +53,13 @@ test('send guidance describes the existing guard without exposing request values
     assert.equal(context.sendButton.disabled, true);
     assert.match(status.textContent, /Informe uma rota/);
     context.route.value = '/PRIVATE_ROUTE_SENTINEL?token=SECRET_SENTINEL';
+    handlers.clearRequestCorrectionForEdit(context.route);
     handlers.updateGuard();
     const isWrite = context.writeMethods.has(method);
-    assert.equal(context.sendButton.disabled, isWrite);
-    assert.equal(context.writeGuard.hidden, !isWrite);
-    assert.match(status.textContent, isWrite ? /Confirme.*TESTE/ : /Revise ambiente/);
+    assert.equal(context.sendButton.disabled, false);
+    assert.match(status.textContent, /Revise ambiente/);
     context.confirmation.valid = true;
+    handlers.clearRequestCorrectionForEdit(context.byId('test-data-phrase'));
     handlers.updateGuard();
     assert.equal(context.sendButton.disabled, false);
     assert.match(status.textContent, /Revise ambiente/);
@@ -83,11 +93,12 @@ test('manual sending keeps guidance busy through edits and reapplies the guard a
   assert.equal(context.sendButton.disabled, true);
   assert.match(status.textContent, /Informe uma rota/);
   context.route.value = '/fixture';
+  handlers.clearRequestCorrectionForEdit(context.route);
   context.executeApiRequest = async () => { throw new Error('Fixture connection failed'); };
   await handlers.performApiRequest(request, context.sendButton, false);
   assert.equal(context.requestSendInProgress, false);
-  assert.equal(context.sendButton.disabled, true);
-  assert.match(status.textContent, /Confirme.*TESTE/);
+  assert.equal(context.sendButton.disabled, false);
+  assert.match(status.textContent, /Revise ambiente/);
 });
 
 test('theme selector, application registry and complete desktop palettes stay aligned', async () => {
@@ -154,7 +165,7 @@ test('agent-facing controls have a versioned, named DOM contract', async () => {
   const collectionsRegion = html.match(/<section\b(?=[^>]*class="side-section collections-section")([^>]*)>([\s\S]*?)<\/section>/);
   assert.ok(collectionsRegion, 'collections region should wrap its toolbar and tree');
   assert.equal(attribute(collectionsRegion[1], 'data-vortix-region'), 'collections');
-  for (const id of ['quick-open-button', 'import-collection', 'export-collection', 'run-collection', 'add-collection-heading', 'collections-tree']) {
+  for (const id of ['quick-open-button', 'import-collection', 'export-collection', 'run-collection', 'add-collection', 'collections-tree']) {
     assert.ok(collectionsRegion[0].includes(`id="${id}"`), `collections region should contain #${id}`);
   }
 

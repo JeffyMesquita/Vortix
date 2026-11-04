@@ -46,24 +46,25 @@
       </a>
       <div class="sidebar-tools">
         <button class="new-request-button" id="new-request" data-vortix-action="request.new" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg> Nova requisição</button>
-        <button class="icon-button" id="add-collection" data-vortix-action="collection.new" type="button" aria-label="Nova coleção" title="Nova coleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg></button>
       </div>
 
       <section class="side-section collections-section" aria-labelledby="collections-heading" data-vortix-region="collections">
         <div class="side-section-heading">
           <h2 id="collections-heading">Coleções</h2>
-          <button class="icon-button small-icon quick-open-trigger" id="quick-open-button" data-vortix-action="collection.search" type="button" aria-label="Buscar requisição" title="Buscar requisição (Ctrl+K)">
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
-          </button>
-          <input id="import-collection-file" type="file" accept=".json,application/json" hidden>
+          <div class="collection-heading-actions">
+            <button class="icon-button small-icon quick-open-trigger" id="quick-open-button" data-vortix-action="collection.search" type="button" aria-label="Buscar requisição" title="Buscar requisição (Ctrl+K)">
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
+            </button>
+            <button class="icon-button small-icon" id="add-collection" data-vortix-action="collection.new" type="button" aria-label="Nova coleção" title="Nova coleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg></button>
+          </div>
         </div>
-        <details class="collection-tools-more">
-          <summary>Ferramentas da coleção</summary>
+        <input id="import-collection-file" type="file" accept=".json,application/json" hidden>
+        <details class="collection-tools-more" id="collection-tools-more">
+          <summary aria-label="Mais ações" title="Mais ações"><span class="collection-more-icon" aria-hidden="true">…</span></summary>
           <div class="collection-tools">
             <button class="button secondary compact-button collection-tool-button" id="import-collection" data-vortix-action="collection.import" type="button" aria-label="Importar coleção, OpenAPI JSON, cURL ou HTTPie" title="Importar coleção JSON, OpenAPI JSON ou comando cURL/HTTPie"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"></path></svg><span>Importar</span></button>
             <button class="button secondary compact-button collection-tool-button" id="export-collection" data-vortix-action="collection.export" type="button" aria-label="Exportar coleção selecionada" title="Exportar coleção selecionada"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 0 4 4m-4-4L8 7M5 12v7h14v-7"></path></svg><span>Exportar</span></button>
-            <button class="button secondary compact-button collection-tool-button" id="run-collection" data-vortix-action="runner.open" type="button" aria-label="Executar coleção ou pasta selecionada" title="Runner da seleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8a1 1 0 0 1 1.5-.86l11.2 7.2a1 1 0 0 1 0 1.72l-11.2 7.2a1 1 0 0 1-1.5-.86z"></path></svg><span>Runner</span></button>
-            <button class="button secondary compact-button collection-tool-button" id="add-collection-heading" data-vortix-action="collection.new" type="button" aria-label="Adicionar coleção" title="Adicionar coleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg><span>Nova coleção</span></button>
+            <button class="button secondary compact-button collection-tool-button" id="run-collection" data-vortix-action="runner.open" type="button" aria-label="Executar coleção ou pasta selecionada" title="Executar coleção ou pasta selecionada"><svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8a1 1 0 0 1 1.5-.86l11.2 7.2a1 1 0 0 1 0 1.72l-11.2 7.2a1 1 0 0 1-1.5-.86z"></path></svg><span>Executar seleção</span></button>
           </div>
         </details>
         <div id="collections-tree" class="collections-tree"></div>
@@ -118,13 +119,12 @@
       </div>
 
       <div class="workspace-grid" id="request-workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-0" data-vortix-region="request-workspace">
-        <section class="editor-column" aria-label="Editor da requisição" data-vortix-region="request-editor">
           <section class="endpoint-surface" aria-labelledby="endpoint-heading">
             <div class="surface-head">
               <span class="section-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="6" cy="12" r="2.2"></circle><circle cx="18" cy="12" r="2.2"></circle><path d="M8.2 12h7.6"></path></svg>
               </span>
-              <h2 id="endpoint-heading">Endereço</h2>
+              <h2 id="endpoint-heading">Requisição HTTP</h2>
               <button class="help-trigger" type="button" popovertarget="endpoint-help">Sobre o endereço</button>
             </div>
             <div class="surface-body">
@@ -141,10 +141,21 @@
                   <label for="route">Rota</label>
                   <input id="route" data-vortix-field="request.route" class="route-input" type="text" autocomplete="off" spellcheck="false" aria-label="Rota da API" placeholder="/v1/resource">
                 </div>
+                <button class="button primary send-button" id="send-request" data-vortix-action="request.send" aria-describedby="request-send-status" type="button"><span aria-hidden="true">▶</span> Enviar</button>
               </div>
+          <fieldset class="request-action-area send-strip">
+            <legend class="visually-hidden">Envio</legend>
+            <span class="send-strip-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m4 12 15-7-4 14-3-5-4-1z"></path><path d="m12 14 7-9"></path></svg>
+            </span>
+            <output id="request-send-status" class="hint request-send-status" data-vortix-field="request.send-status" aria-live="polite" aria-atomic="true">Informe uma rota para enviar a requisição.</output>
+            <button class="button secondary request-correction-go" id="request-correction-go" type="button" aria-describedby="request-send-status" hidden>Ir ao campo</button>
+          </fieldset>
+
             </div>
           </section>
 
+        <section class="editor-column" aria-label="Editor da requisição" data-vortix-region="request-editor">
           <section class="data-workspace" aria-labelledby="data-heading">
             <div class="section-head">
               <span class="section-icon muted" aria-hidden="true">
@@ -399,22 +410,6 @@ insomnia.environment.set("token", body.access_token);</code></pre>
           </div>
           </section>
 
-          <fieldset class="request-action-area send-strip">
-            <legend class="visually-hidden">Envio</legend>
-            <fieldset class="write-guard" id="write-guard" hidden>
-              <legend>Proteção para escrita</legend>
-              <p>POST, PUT, PATCH e DELETE podem alterar dados. Use somente ambiente e dados descartáveis de teste.</p>
-              <label for="test-data-phrase">Digite TESTE para habilitar</label>
-              <input id="test-data-phrase" type="text" autocomplete="off" spellcheck="false" placeholder="TESTE">
-              <label class="check-row" for="confirm-test-data"><input id="confirm-test-data" type="checkbox"><span>Confirmo que URL e dados são de teste e podem ser alterados.</span></label>
-              <p class="warning-text">Uma confirmação visual aparecerá antes de cada envio.</p>
-            </fieldset>
-            <span class="send-strip-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m4 12 15-7-4 14-3-5-4-1z"></path><path d="m12 14 7-9"></path></svg>
-            </span>
-            <output id="request-send-status" class="hint request-send-status" data-vortix-field="request.send-status" aria-live="polite" aria-atomic="true">Informe uma rota para enviar a requisição.</output>
-            <button class="button primary send-button" id="send-request" data-vortix-action="request.send" aria-describedby="request-send-status" type="button"><span aria-hidden="true">▶</span> Enviar</button>
-          </fieldset>
 
           <details id="advanced-tools" class="advanced-tools">
             <summary><span>Ferramentas avançadas</span> <span id="advanced-active-indicator" class="advanced-active-indicator" hidden></span></summary>
@@ -450,12 +445,6 @@ insomnia.environment.set("token", body.access_token);</code></pre>
             <div id="structured-review" hidden>
               <strong id="structured-destination"></strong>
               <p id="structured-effects" class="hint"></p>
-              <fieldset id="structured-write-guard" hidden>
-                <legend>Proteção para escrita</legend>
-                <label><input id="structured-confirm" type="checkbox"> Confirmo que URL e dados são descartáveis de teste.</label>
-                <label for="structured-phrase">Digite TESTE para aprovar a escrita</label>
-                <input id="structured-phrase" type="text" autocomplete="off" maxlength="32">
-              </fieldset>
             </div>
             <div class="structured-actions">
               <button id="structured-prepare" class="button secondary" data-vortix-action="execution.prepare" type="button" disabled>Preparar salva</button>
@@ -464,7 +453,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
               <button id="structured-cancel" class="button secondary" data-vortix-action="execution.cancel" type="button" disabled>Cancelar preparação</button>
             </div>
           </details>
-          <div class="editor-foot"><span id="request-note" class="hint">GET, HEAD e OPTIONS consultam a API. POST, PUT, PATCH e DELETE exigem confirmação manual.</span></div>
+          <div class="editor-foot"><span id="request-note" class="hint">Confira o ambiente ativo. Enviar executa a requisição com os dados configurados.</span></div>
         </section>
 
         <section class="response-column" aria-labelledby="response-title" data-vortix-region="request-response">
@@ -736,9 +725,7 @@ insomnia.environment.set("token", body.access_token);</code></pre>
           <fieldset class="runner-write-guard" id="runner-write-guard" hidden>
             <legend>Confirmação para chamadas de gravação</legend>
             <p id="runner-write-description"></p>
-            <label class="check-row" for="runner-confirm-writes"><input id="runner-confirm-writes" type="checkbox"><span>Confirmo que URL e dados são exclusivos para teste.</span></label>
-            <label for="runner-write-phrase">Digite TESTE para habilitar gravações</label>
-            <input id="runner-write-phrase" type="text" autocomplete="off" spellcheck="false" placeholder="TESTE">
+            <label class="check-row" for="runner-confirm-writes"><input id="runner-confirm-writes" type="checkbox"><span>Autorizar POST, PUT, PATCH e DELETE nesta execução.</span></label>
           </fieldset>
         </fieldset>
         <p class="runner-error" id="runner-error" role="alert" hidden></p>
