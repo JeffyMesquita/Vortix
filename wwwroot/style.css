@@ -1027,7 +1027,7 @@ textarea.compact { min-height: 165px; }
 .environment-picker:focus-within { border-radius: 6px; background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .environment-picker:focus-within span { color: var(--accent); }
 .workspace-actions :is(button, select):focus-visible, .sidebar-tools button:focus-visible,
-.collection-heading-actions button:focus-visible, .collection-tools-more > summary:focus-visible,
+.collection-heading-actions button:focus-visible,
 .collection-tools button:focus-visible, .collection-row > .tree-tool:focus-visible,
 .folder-row > .tree-tool:focus-visible, .tree-select:focus-visible {
   outline: 2px solid var(--accent);
@@ -1232,12 +1232,26 @@ textarea.compact { min-height: 165px; }
 .advanced-tools > .request-inspector { margin: 10px 0; }
 .advanced-active-indicator { display: inline-flex; align-items: center; max-width: 100%; border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border)); border-radius: 999px; padding: 2px 8px; color: var(--warning); font-size: 11px; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
 .advanced-active-indicator[hidden] { display: none; }
-.collection-tools-more { position: relative; margin: 0; }
-.collection-tools-more > summary { position: absolute; top: -35px; right: 4px; display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid transparent; border-radius: 6px; padding: 0; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 650; list-style: none; }
-.collection-tools-more > summary::-webkit-details-marker { display: none; }
 .collection-more-icon { font-size: 18px; line-height: 1; }
-.collection-tools-more > summary:hover, .collection-tools-more[open] > summary { background: var(--surface-hover); color: var(--text); }
-.collection-tools-more[open] .collection-tools { display: grid; gap: 4px; margin: 0 4px 6px; border: 1px solid var(--border); border-radius: 8px; padding: 6px; background: var(--panel); }
+.collection-more-trigger:hover, .collections-section:has(> #collection-tools-more:popover-open) .collection-more-trigger { background: var(--surface-hover); color: var(--text); }
+.collection-tools-more {
+  position: fixed;
+  inset: auto;
+  position-area: block-end span-inline-end;
+  position-try-fallbacks: flip-block, flip-inline;
+  inline-size: min(240px, calc(100vw - 24px));
+  max-block-size: min(320px, calc(100dvh - 24px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-block-start: 6px;
+  padding: 6px;
+  color: var(--text);
+  background: var(--panel, var(--surface));
+  box-shadow: 0 12px 32px #0007;
+}
+.collection-tools-more .collection-tools { display: grid; gap: 4px; margin: 0; }
 .collection-tool-button { display: inline-flex; align-items: center; justify-content: flex-start; gap: 6px; width: 100%; min-height: 32px; padding: 5px 8px; font-size: 12px; text-align: left; }
 .collection-tool-button > svg { display: block; width: 14px; height: 14px; flex: 0 0 auto; }
 .sidebar-empty-action { margin-left: 6px; min-height: 24px; padding: 2px 6px; font-size: 12px; }
@@ -1267,22 +1281,33 @@ textarea.compact { min-height: 165px; }
   .advanced-tool-row { align-items: flex-start; }
 }
 
-/* Header disclosure keeps help and display options secondary without hiding them. */
-.workspace-utility { position: relative; }
-.workspace-utility > summary { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; border: 1px solid var(--border); border-radius: 6px; padding: 5px 9px; color: var(--text); background: var(--raised, var(--surface-raised)); cursor: pointer; font-size: 12px; font-weight: 650; list-style: none; white-space: nowrap; }
-.workspace-utility > summary::-webkit-details-marker { display: none; }
-.workspace-utility > summary::after { width: 5px; height: 5px; flex: 0 0 auto; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; content: ""; transform: rotate(45deg); transition: transform 140ms var(--interaction-ease); }
-.workspace-utility[open] > summary::after { transform: rotate(-135deg); }
-.workspace-utility > summary:hover { border-color: color-mix(in srgb, var(--accent) 44%, var(--border)); background: var(--hover, var(--surface-hover)); }
-.workspace-utility-panel { position: absolute; z-index: 6; top: calc(100% + 6px); right: 0; display: grid; gap: 6px; min-width: 220px; border: 1px solid var(--border); border-radius: 8px; padding: 8px; background: var(--surface); box-shadow: 0 12px 32px #0007; }
+/* Header popover keeps help and display options secondary without hiding them. */
+.workspace-utility { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; border: 1px solid var(--border); border-radius: 6px; padding: 5px 9px; color: var(--text); background: var(--raised, var(--surface-raised)); cursor: pointer; font: inherit; font-size: 12px; font-weight: 650; white-space: nowrap; }
+.workspace-utility::after { width: 5px; height: 5px; flex: 0 0 auto; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; content: ""; transform: rotate(45deg); transition: transform 140ms var(--interaction-ease); }
+.workspace-utility:has(+ #workspace-utility-panel:popover-open)::after { transform: rotate(-135deg); }
+.workspace-utility:hover { border-color: color-mix(in srgb, var(--accent) 44%, var(--border)); background: var(--hover, var(--surface-hover)); }
+.workspace-utility-panel {
+  position: fixed;
+  inset: auto;
+  position-area: block-end span-inline-start;
+  position-try-fallbacks: flip-block, flip-inline;
+  inline-size: min(240px, calc(100vw - 24px));
+  max-block-size: min(320px, calc(100dvh - 24px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-block-start: 6px;
+  padding: 8px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px #0007;
+}
+.workspace-utility-panel:popover-open { display: grid; gap: 6px; }
 .workspace-utility-panel .ai-friendly-trigger { justify-content: flex-start; width: 100%; white-space: normal; }
 .workspace-utility-panel .button { width: 100%; }
 .workspace-actions .environment-settings { display: inline-flex; align-items: center; gap: 6px; width: auto; height: 34px; min-height: 34px; padding-inline: 10px; white-space: nowrap; }
 .workspace-actions .environment-settings > svg { width: 16px; height: 16px; flex: 0 0 auto; }
 @media (min-width: 681px) {
-  .workspace-actions .workspace-utility > summary { min-height: 34px; }
-}
-@media (max-width: 680px) {
-  .workspace-utility-panel { right: auto; left: 0; max-width: calc(100vw - 24px); }
+  .workspace-actions .workspace-utility { min-height: 34px; }
 }
 .body-output.empty .response-body-pre { white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const root = __dirname;
 const indexPath = path.join(root, 'wwwroot', 'index.html');
 const appPath = path.join(root, 'wwwroot', 'app.js');
+const stylePath = path.join(root, 'wwwroot', 'style.css');
 
 function indexOf(html, needle, label = needle) {
   const position = html.indexOf(needle);
@@ -29,6 +30,22 @@ function detailsBlock(html, id) {
   assert.fail(`unbalanced details #${id}`);
 }
 
+/** Returns a div and its nested markup by id; fails for missing or unbalanced tags. */
+function divBlock(html, id) {
+  const openPattern = new RegExp(`<div\\b[^>]*\\bid="${id}"[^>]*>`);
+  const open = openPattern.exec(html);
+  assert.ok(open, `missing div #${id}`);
+  let depth = 0;
+  const tagPattern = /<div\b|<\/div>/g;
+  tagPattern.lastIndex = open.index;
+  let match;
+  while ((match = tagPattern.exec(html))) {
+    depth += match[0] === '</div>' ? -1 : 1;
+    if (depth === 0) return html.slice(open.index, match.index + match[0].length);
+  }
+  assert.fail(`unbalanced div #${id}`);
+}
+
 function sectionBlock(html, className) {
   const openPattern = new RegExp(`<section\\b[^>]*class="[^"]*${className}[^"]*"[^>]*>`);
   const open = openPattern.exec(html);
@@ -40,6 +57,10 @@ function sectionBlock(html, className) {
 
 async function readHtml() {
   return fs.readFile(indexPath, 'utf8');
+}
+
+async function readStyle() {
+  return fs.readFile(stylePath, 'utf8');
 }
 
 test('request toolbar places send beside the address before editor tabs', async () => {
@@ -77,7 +98,7 @@ test('response prioritizes body and keeps headers secondary', async () => {
   assert.match(html, /id="response-tests-output"[^>]*hidden/);
 });
 
-test('collections sidebar keeps its title, search, and one primary action before closed secondary actions', async () => {
+test('collection secondary actions use an accessible native auto popover', async () => {
   const html = await readHtml();
   const collections = sectionBlock(html, 'collections-section');
   const headingActions = /<div\b[^>]*class="collection-heading-actions"[^>]*>([\s\S]*?)<\/div>/.exec(collections);
@@ -93,53 +114,70 @@ test('collections sidebar keeps its title, search, and one primary action before
   assert.match(primaryActions[0][0], /\bid="add-collection"/);
   assert.match(primaryActions[0][0], /aria-label="Nova coleção"/);
 
-  const disclosure = /<details\b(?=[^>]*\bid="collection-tools-more")([^>]*)>([\s\S]*?)<\/details>/.exec(collections);
-  assert.ok(disclosure, 'secondary actions disclosure should exist');
-  assert.doesNotMatch(disclosure[1], /(?:^|\s)open(?:\s|=|$)/i, 'secondary actions start closed');
-  assert.match(disclosure[2], /<summary\b[^>]*aria-label="Mais ações"[^>]*>/);
+  const trigger = /<button\b(?=[^>]*\bid="collection-tools-more-trigger")[^>]*>/.exec(headingActions[1]);
+  assert.ok(trigger, 'secondary actions trigger stays in the heading row');
+  assert.match(trigger[0], /aria-label="Mais ações"/);
+  assert.match(trigger[0], /popovertarget="collection-tools-more"/);
+  assert.match(trigger[0], /type="button"/);
+
+  const panel = divBlock(collections, 'collection-tools-more');
+  const panelOpen = /<div\b[^>]*\bid="collection-tools-more"[^>]*>/.exec(panel)[0];
+  assert.match(panelOpen, /popover="auto"/, 'native light dismiss and exclusivity stay enabled');
+  assert.match(panelOpen, /role="group"/);
+  assert.match(panelOpen, /aria-label="Ações da coleção"/);
   for (const [id, action] of [
     ['import-collection', 'collection.import'],
     ['export-collection', 'collection.export'],
     ['run-collection', 'runner.open']
   ]) {
-    const button = new RegExp('<button\\b(?=[^>]*\\bid="' + id + '")[^>]*>[\\s\\S]*?<\\/button>').exec(disclosure[2]);
+    const button = new RegExp('<button\\b(?=[^>]*\\bid="' + id + '")[^>]*>[\\s\\S]*?<\\/button>').exec(panel);
     assert.ok(button, '#' + id + ' stays in the secondary menu');
     assert.ok(button[0].includes('data-vortix-action="' + action + '"'), '#' + id + ' keeps its action');
   }
-  assert.match(disclosure[2], /<span>Executar seleção<\/span>/, 'Runner remains scoped to the selection');
-  assert.doesNotMatch(disclosure[2], /data-vortix-action="collection\.new"/, 'secondary menu does not duplicate the primary action');
-  assert.ok(collections.indexOf('id="collections-tree"') > disclosure.index, 'tree follows the heading actions');
+  assert.match(panel, /<span>Executar seleção<\/span>/, 'Runner remains scoped to the selection');
+  assert.doesNotMatch(panel, /data-vortix-action="collection\.new"/, 'secondary menu does not duplicate the primary action');
+  assert.ok(collections.indexOf('id="collections-tree"') > collections.indexOf('id="collection-tools-more"'), 'tree follows the popover panel');
   assert.match(collections, /id="collections-empty-create"/);
 });
 
-test('collection actions disclosure closes on Escape and restores focus to its summary', async () => {
-  const app = await fs.readFile(appPath, 'utf8');
-  const start = app.indexOf("byId('collection-tools-more').addEventListener('keydown',event=>{");
-  const endMarker = '\n  });';
-  const end = app.indexOf(endMarker, start);
-  assert.ok(start >= 0 && end > start, 'collection actions Escape handler should be present');
+test('workspace help and display actions use a separate accessible native auto popover', async () => {
+  const html = await readHtml();
+  const trigger = /<button\b(?=[^>]*\bid="workspace-utility-trigger")[^>]*>Ajuda e exibição<\/button>/.exec(html);
+  assert.ok(trigger, 'workspace utility trigger remains a button');
+  assert.match(trigger[0], /popovertarget="workspace-utility-panel"/);
 
-  let keydown = null, focused = 0, registeredEvent = '';
-  const summary = { focus() { focused += 1; } };
-  const disclosure = {
-    open: true,
-    addEventListener(type, handler) { registeredEvent = type; keydown = handler; },
-    querySelector(selector) { assert.equal(selector, 'summary'); return summary; }
-  };
-  vm.runInNewContext(app.slice(start, end + endMarker.length), {
-    byId: id => id === 'collection-tools-more' ? disclosure : null
-  });
-  assert.equal(registeredEvent, 'keydown');
-  assert.equal(typeof keydown, 'function');
+  const panel = divBlock(html, 'workspace-utility-panel');
+  const panelOpen = /<div\b[^>]*\bid="workspace-utility-panel"[^>]*>/.exec(panel)[0];
+  assert.match(panelOpen, /popover="auto"/, 'opening it dismisses other auto popovers');
+  assert.match(panelOpen, /role="group"/);
+  assert.match(panelOpen, /aria-label="Ajuda e exibição"/);
+  for (const id of ['ai-friendly-trigger', 'workspace-fullscreen-toggle']) {
+    assert.match(panel, new RegExp('\\bid="' + id + '"'), '#' + id + ' remains inside the popover');
+  }
+});
 
-  let prevented = false;
-  keydown({
-    key: 'Escape', currentTarget: disclosure,
-    preventDefault() { prevented = true; }
-  });
-  assert.equal(prevented, true, 'Escape is consumed while the menu is open');
-  assert.equal(disclosure.open, false, 'Escape closes the menu');
-  assert.equal(focused, 1, 'focus returns to the disclosure summary');
+test('native action popovers anchor to triggers and stay within the viewport', async () => {
+  const css = await readStyle();
+  for (const [selector, alignment] of [
+    ['collection-tools-more', 'block-end span-inline-end'],
+    ['workspace-utility-panel', 'block-end span-inline-start']
+  ]) {
+    const rule = new RegExp('\\.' + selector + '\\s*\\{([\\s\\S]*?)\\}').exec(css);
+    assert.ok(rule, '.' + selector + ' has its own top-layer layout');
+    assert.ok(rule[1].includes('position-area: ' + alignment), '.' + selector + ' stays anchored to its trigger');
+    assert.match(rule[1], /position-try-fallbacks:\s*flip-block,\s*flip-inline/);
+    assert.match(rule[1], /max-(?:block-size|height):\s*min\(/);
+    assert.match(rule[1], /overflow-y:\s*auto/);
+    assert.match(rule[1], /100vw\s*-\s*24px/);
+    assert.doesNotMatch(rule[1], /(?:^|;)\s*display\s*:/, 'closed popovers keep the native display:none');
+  }
+});
+
+test('popover trigger styles follow native open state without explicit aria-expanded attributes', async () => {
+  const css = await readStyle();
+  assert.match(css, /\.collection-more-trigger:hover,\s*\.collections-section:has\(> #collection-tools-more:popover-open\) \.collection-more-trigger\s*\{[^}]*background:\s*var\(--surface-hover\)/);
+  assert.match(css, /\.workspace-utility:has\(\+ #workspace-utility-panel:popover-open\)::after\s*\{\s*transform:\s*rotate\(-135deg\)/);
+  assert.doesNotMatch(css, /\.(?:collection-more-trigger|workspace-utility)[^{}]*\[aria-expanded/);
 });
 
 test('settings group every subject in native details and keep storage internals out of main copy', async () => {

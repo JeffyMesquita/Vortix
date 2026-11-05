@@ -56,17 +56,17 @@
               <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
             </button>
             <button class="icon-button small-icon" id="add-collection" data-vortix-action="collection.new" type="button" aria-label="Nova coleção" title="Nova coleção"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg></button>
+            <button class="icon-button small-icon collection-more-trigger" id="collection-tools-more-trigger" type="button" aria-label="Mais ações" title="Mais ações" popovertarget="collection-tools-more"><span class="collection-more-icon" aria-hidden="true">…</span></button>
           </div>
         </div>
         <input id="import-collection-file" type="file" accept=".json,application/json" hidden>
-        <details class="collection-tools-more" id="collection-tools-more">
-          <summary aria-label="Mais ações" title="Mais ações"><span class="collection-more-icon" aria-hidden="true">…</span></summary>
+        <div class="collection-tools-more" id="collection-tools-more" popover="auto" role="group" aria-label="Ações da coleção">
           <div class="collection-tools">
             <button class="button secondary compact-button collection-tool-button" id="import-collection" data-vortix-action="collection.import" type="button" aria-label="Importar coleção, OpenAPI JSON, cURL ou HTTPie" title="Importar coleção JSON, OpenAPI JSON ou comando cURL/HTTPie"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"></path></svg><span>Importar</span></button>
             <button class="button secondary compact-button collection-tool-button" id="export-collection" data-vortix-action="collection.export" type="button" aria-label="Exportar coleção selecionada" title="Exportar coleção selecionada"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 0 4 4m-4-4L8 7M5 12v7h14v-7"></path></svg><span>Exportar</span></button>
             <button class="button secondary compact-button collection-tool-button" id="run-collection" data-vortix-action="runner.open" type="button" aria-label="Executar coleção ou pasta selecionada" title="Executar coleção ou pasta selecionada"><svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8a1 1 0 0 1 1.5-.86l11.2 7.2a1 1 0 0 1 0 1.72l-11.2 7.2a1 1 0 0 1-1.5-.86z"></path></svg><span>Executar seleção</span></button>
           </div>
-        </details>
+        </div>
         <div id="collections-tree" class="collections-tree"></div>
         <p id="collections-empty" class="sidebar-empty" hidden>Coleções organizam suas requests. <button class="text-button sidebar-empty-action" id="collections-empty-create" type="button">Criar coleção</button></p>
       </section>
@@ -95,15 +95,13 @@
       <header class="workspace-bar">
         <div class="breadcrumb"><span>Workspace</span><span class="breadcrumb-separator">/</span><strong id="request-title">Nova requisição</strong></div>
         <div class="workspace-actions">
-          <details class="workspace-utility">
-            <summary>Ajuda e exibição</summary>
-            <div class="workspace-utility-panel">
-              <button class="ai-friendly-trigger" id="ai-friendly-trigger" data-state="checking" data-vortix-action="agent.help.open" type="button" aria-haspopup="dialog" aria-controls="ai-help-dialog" aria-label="Verificando bridge">
-                <span class="ai-friendly-dot" aria-hidden="true"></span><span id="ai-friendly-trigger-label">Verificando bridge</span>
-              </button>
-              <button class="button secondary compact-button" id="workspace-fullscreen-toggle" data-vortix-action="workspace.fullscreen.toggle" type="button" aria-pressed="false" title="Tela cheia indisponível" disabled>Tela cheia</button>
-            </div>
-          </details>
+          <button class="workspace-utility" id="workspace-utility-trigger" type="button" popovertarget="workspace-utility-panel">Ajuda e exibição</button>
+          <div class="workspace-utility-panel" id="workspace-utility-panel" popover="auto" role="group" aria-label="Ajuda e exibição">
+            <button class="ai-friendly-trigger" id="ai-friendly-trigger" data-state="checking" data-vortix-action="agent.help.open" type="button" aria-haspopup="dialog" aria-controls="ai-help-dialog" aria-label="Verificando bridge">
+              <span class="ai-friendly-dot" aria-hidden="true"></span><span id="ai-friendly-trigger-label">Verificando bridge</span>
+            </button>
+            <button class="button secondary compact-button" id="workspace-fullscreen-toggle" data-vortix-action="workspace.fullscreen.toggle" type="button" aria-pressed="false" title="Tela cheia indisponível" disabled>Tela cheia</button>
+          </div>
           <label class="environment-picker" for="environment-select"><span>AMBIENTE</span><select id="environment-select" data-vortix-action="environment.select" data-vortix-region="environment" aria-label="Ambiente ativo" disabled><option value="" selected disabled>Carregando ambientes…</option></select></label>
           <button class="button secondary manage-environments-direct" id="manage-environments-direct" data-vortix-action="environment.manage" type="button">Gerenciar ambientes</button>
           <button class="button secondary compact-button environment-settings" id="manage-environments" data-vortix-action="settings.open" type="button" title="Configurações" aria-label="Configurações"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"></circle><path d="m19.4 13.5 1.1.8-1.3 2.3-1.3-.5a8 8 0 0 1-1.5.8l-.2 1.5h-2.6l-.2-1.5a8 8 0 0 1-1.5-.8l-1.3.5-1.3-2.3 1.1-.8a8 8 0 0 1 0-1.6l-1.1-.8 1.3-2.3 1.3.5a8 8 0 0 1 1.5-.8l.2-1.5h2.6l.2 1.5a8 8 0 0 1 1.5.8l1.3-.5 1.3 2.3-1.1.8a8 8 0 0 1 0 1.6z"></path></svg><span>Configurações</span></button>
