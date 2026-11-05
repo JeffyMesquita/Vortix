@@ -30,6 +30,7 @@ function detailsBlock(html, id) {
   assert.fail(`unbalanced details #${id}`);
 }
 
+/** Returns a div and its nested markup by id; fails for missing or unbalanced tags. */
 function divBlock(html, id) {
   const openPattern = new RegExp(`<div\\b[^>]*\\bid="${id}"[^>]*>`);
   const open = openPattern.exec(html);
@@ -170,6 +171,13 @@ test('native action popovers anchor to triggers and stay within the viewport', a
     assert.match(rule[1], /100vw\s*-\s*24px/);
     assert.doesNotMatch(rule[1], /(?:^|;)\s*display\s*:/, 'closed popovers keep the native display:none');
   }
+});
+
+test('popover trigger styles follow native open state without explicit aria-expanded attributes', async () => {
+  const css = await readStyle();
+  assert.match(css, /\.collection-more-trigger:hover,\s*\.collections-section:has\(> #collection-tools-more:popover-open\) \.collection-more-trigger\s*\{[^}]*background:\s*var\(--surface-hover\)/);
+  assert.match(css, /\.workspace-utility:has\(\+ #workspace-utility-panel:popover-open\)::after\s*\{\s*transform:\s*rotate\(-135deg\)/);
+  assert.doesNotMatch(css, /\.(?:collection-more-trigger|workspace-utility)[^{}]*\[aria-expanded/);
 });
 
 test('settings group every subject in native details and keep storage internals out of main copy', async () => {

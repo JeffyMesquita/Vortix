@@ -1233,7 +1233,7 @@ textarea.compact { min-height: 165px; }
 .advanced-active-indicator { display: inline-flex; align-items: center; max-width: 100%; border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border)); border-radius: 999px; padding: 2px 8px; color: var(--warning); font-size: 11px; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
 .advanced-active-indicator[hidden] { display: none; }
 .collection-more-icon { font-size: 18px; line-height: 1; }
-.collection-more-trigger:is(:hover, [aria-expanded="true"]) { background: var(--surface-hover); color: var(--text); }
+.collection-more-trigger:hover, .collections-section:has(> #collection-tools-more:popover-open) .collection-more-trigger { background: var(--surface-hover); color: var(--text); }
 .collection-tools-more {
   position: fixed;
   inset: auto;
@@ -1284,7 +1284,7 @@ textarea.compact { min-height: 165px; }
 /* Header popover keeps help and display options secondary without hiding them. */
 .workspace-utility { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; border: 1px solid var(--border); border-radius: 6px; padding: 5px 9px; color: var(--text); background: var(--raised, var(--surface-raised)); cursor: pointer; font: inherit; font-size: 12px; font-weight: 650; white-space: nowrap; }
 .workspace-utility::after { width: 5px; height: 5px; flex: 0 0 auto; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; content: ""; transform: rotate(45deg); transition: transform 140ms var(--interaction-ease); }
-.workspace-utility[aria-expanded="true"]::after { transform: rotate(-135deg); }
+.workspace-utility:has(+ #workspace-utility-panel:popover-open)::after { transform: rotate(-135deg); }
 .workspace-utility:hover { border-color: color-mix(in srgb, var(--accent) 44%, var(--border)); background: var(--hover, var(--surface-hover)); }
 .workspace-utility-panel {
   position: fixed;
